@@ -105,6 +105,16 @@ int nc_pthread_setname_np(pthread_t t, const char *name);
 void nc_win_thread_name(const char *name);  /* the calling thread's */
 #define pthread_setname_np nc_pthread_setname_np
 
+/* POSIX's open: a file open here can be renamed or deleted meanwhile, as on
+ * Linux (the CRT's leaves FILE_SHARE_DELETE out). A title's cache copy
+ * renamed its .tmp file while open, and every rename failed: Panzer Dragoon
+ * Orta then showed its dirty-disc message. Binary, always. */
+int nc_open(const char *path, int flags, ...);
+#define open(...) nc_open(__VA_ARGS__)
+/* POSIX's unlink: the name goes now, even while the file is open */
+int nc_unlink(const char *path);
+#define unlink nc_unlink
+
 /* POSIX's rename: an existing file at to is replaced (the CRT's fails) */
 int nc_rename(const char *from, const char *to);
 #define rename nc_rename

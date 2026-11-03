@@ -318,9 +318,92 @@ void nc_win_thread_name(const char *name)
     thread_describe(GetCurrentThread(), name);
 }
 
+int nc_open(const char *path, int flags, ...)
+{
+    const int acc = flags & (O_RDONLY | O_WRONLY | O_RDWR);
+    const DWORD access = acc == O_WRONLY ? GENERIC_WRITE : acc == O_RDWR ? GENERIC_READ | GENERIC_WRITE : GENERIC_READ;
+    const DWORD disp = flags & O_CREAT ? (flags & O_EXCL ? CREATE_NEW : flags & O_TRUNC ? CREATE_ALWAYS : OPEN_ALWAYS)
+                       : flags & O_TRUNC ? TRUNCATE_EXISTING
+                                         : OPEN_EXISTING;
+    HANDLE h = CreateFileA(path, access, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, NULL, disp,
+                           FILE_ATTRIBUTE_NORMAL, NULL);
+    if (h == INVALID_HANDLE_VALUE) {
+        const DWORD e = GetLastError();
+        errno = e == ERROR_FILE_NOT_FOUND || e == ERROR_PATH_NOT_FOUND || e == ERROR_INVALID_NAME ? ENOENT
+                : e == ERROR_FILE_EXISTS || e == ERROR_ALREADY_EXISTS                             ? EEXIST
+                : e == ERROR_ACCESS_DENIED || e == ERROR_SHARING_VIOLATION                        ? EACCES
+                : e == ERROR_DISK_FULL                                                            ? ENOSPC
+                                                                                                  : EIO;
+        return -1;
+    }
+    const int fd = _open_osfhandle((intptr_t)h, (acc == O_RDONLY ? _O_RDONLY : 0) | (flags & O_APPEND ? _O_APPEND : 0));
+    if (fd < 0) {
+        CloseHandle(h);
+    }
+    return fd;
+}
+
+/* A file or folder opened only to be renamed or deleted, beside its other
+ * handles (all of them share delete: nc_open). */
+static HANDLE open_for_delete(const char *path)
+{
+    return CreateFileA(path, DELETE, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, NULL, OPEN_EXISTING,
+                       FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OPEN_REPARSE_POINT, NULL);
+}
+
+/* Windows 10's POSIX rename (FileRenameInfoEx): the name moves now, over an
+ * existing file even if it is open, as rename(2) does. */
+static bool posix_rename(const char *from, const char *to)
+{
+    WCHAR wto[MAX_PATH * 4];
+    const int n = MultiByteToWideChar(CP_ACP, 0, to, -1, wto, MAX_PATH * 4);
+    HANDLE h = n > 0 ? open_for_delete(from) : INVALID_HANDLE_VALUE;
+    if (h == INVALID_HANDLE_VALUE) {
+        return false;
+    }
+    WCHAR full[MAX_PATH * 4];
+    const DWORD len = GetFullPathNameW(wto, MAX_PATH * 4, full, NULL);
+    bool ok = false;
+    if (len && len < MAX_PATH * 4) {
+        const size_t size = sizeof(FILE_RENAME_INFO) + len * sizeof(WCHAR);
+        FILE_RENAME_INFO *ri = calloc(1, size);
+        if (ri) {
+            ri->Flags = 0x1 | 0x2; /* FILE_RENAME_FLAG_REPLACE_IF_EXISTS | FILE_RENAME_FLAG_POSIX_SEMANTICS */
+            ri->FileNameLength = len * sizeof(WCHAR);
+            memcpy(ri->FileName, full, len * sizeof(WCHAR));
+            ok = SetFileInformationByHandle(h, (FILE_INFO_BY_HANDLE_CLASS)22 /* FileRenameInfoEx */, ri, (DWORD)size);
+            free(ri);
+        }
+    }
+    CloseHandle(h);
+    return ok;
+}
+
+int nc_unlink(const char *path)
+{
+    /* POSIX semantics (FileDispositionInfoEx): the name goes now, even while
+     * the file is open, so a new file can take it */
+    HANDLE h = open_for_delete(path);
+    if (h != INVALID_HANDLE_VALUE) {
+        DWORD flags = 0x1 | 0x2; /* FILE_DISPOSITION_FLAG_DELETE | FILE_DISPOSITION_FLAG_POSIX_SEMANTICS */
+        const bool ok = SetFileInformationByHandle(h, (FILE_INFO_BY_HANDLE_CLASS)21 /* FileDispositionInfoEx */,
+                                                   &flags, sizeof(flags));
+        CloseHandle(h);
+        if (ok) {
+            return 0;
+        }
+    }
+    if (DeleteFileA(path)) {
+        return 0;
+    }
+    const DWORD e = GetLastError();
+    errno = e == ERROR_FILE_NOT_FOUND || e == ERROR_PATH_NOT_FOUND ? ENOENT : EACCES;
+    return -1;
+}
+
 int nc_rename(const char *from, const char *to)
 {
-    if (MoveFileExA(from, to, MOVEFILE_REPLACE_EXISTING | MOVEFILE_COPY_ALLOWED)) {
+    if (posix_rename(from, to) || MoveFileExA(from, to, MOVEFILE_REPLACE_EXISTING | MOVEFILE_COPY_ALLOWED)) {
         return 0;
     }
     const DWORD e = GetLastError();

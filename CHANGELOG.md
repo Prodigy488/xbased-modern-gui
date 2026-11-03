@@ -1,5 +1,16 @@
 # xbased changelog
 
+## 1.0.3 (2026-11)
+
+### Fixes
+- Windows: the "disc is dirty or damaged" message in games that copy disc
+  files to their cache on the hard disk (Panzer Dragoon Orta and others).
+  Such a game writes each file under a temporary name and renames it while
+  it is still open, which Windows refused: the cache stayed broken and the
+  game reported a bad disc. Files are now opened so they can be renamed or
+  deleted while open, as on the Xbox and on Linux. Panzer Dragoon Orta plays
+  its stages.
+
 ## 1.0.2 (2026-11)
 
 ### Fixes
