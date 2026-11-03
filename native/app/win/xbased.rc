@@ -1,0 +1,29 @@
+// xbased.exe's icon and version information.
+#include <winver.h>
+
+1 ICON "xbased.ico"
+
+VS_VERSION_INFO VERSIONINFO
+FILEVERSION 1,0,0,0
+PRODUCTVERSION 1,0,0,0
+FILEOS VOS_NT_WINDOWS32
+FILETYPE VFT_APP
+BEGIN
+    BLOCK "StringFileInfo"
+    BEGIN
+        BLOCK "040904B0"
+        BEGIN
+            VALUE "CompanyName", "xbased"
+            VALUE "FileDescription", "xbased - original Xbox emulator (based on hakuX)"
+            VALUE "FileVersion", "1.0.0"
+            VALUE "InternalName", "xbased"
+            VALUE "OriginalFilename", "xbased.exe"
+            VALUE "ProductName", "xbased"
+            VALUE "ProductVersion", "1.0.0"
+        END
+    END
+    BLOCK "VarFileInfo"
+    BEGIN
+        VALUE "Translation", 0x409, 1200
+    END
+END
