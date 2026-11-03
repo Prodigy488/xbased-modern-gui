@@ -1,5 +1,19 @@
 # xbased changelog
 
+## 1.0.9 (2026-11)
+
+### New
+- Stick range, in Settings › Controls (and in the in-game menu's settings):
+  a screen that shows both sticks live. A green square is the range the
+  games expect (the Xbox controller's); a white outline is the range your
+  stick reaches, as the game gets it, with its reach in percent. Rotate the
+  sticks once around and adjust while watching it:
+  - Range, 50% to 150%: above 100% for a worn stick that doesn't reach its
+    edge, below for games that turn too quickly.
+  - Shape: Square (Xbox), the default, or Round (the stick's own circle).
+  - Dead zone, also here.
+  While the screen is open, the stick doesn't move through the menu.
+
 ## 1.0.8 (2026-11)
 
 ### Fixes

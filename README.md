@@ -47,8 +47,8 @@ the port, the dashboard, the game fixes and every release.
 
 | Platform | File | |
 |---|---|---|
-| **Windows** 10/11 (x64) | `xbased-1.0.8-windows-x64.zip` | Unzip anywhere and run `xbased.exe`. Portable: everything stays in its folder. |
-| **Linux** (x86-64) | `xbased-1.0.8-x86_64.AppImage` | `chmod +x` it and run. Ubuntu 22.04 or newer, or any distribution of the same age. |
+| **Windows** 10/11 (x64) | `xbased-1.0.9-windows-x64.zip` | Unzip anywhere and run `xbased.exe`. Portable: everything stays in its folder. |
+| **Linux** (x86-64) | `xbased-1.0.9-x86_64.AppImage` | `chmod +x` it and run. Ubuntu 22.04 or newer, or any distribution of the same age. |
 
 Get them from **[Releases](https://github.com/crazyriddler/xbased/releases/latest)**.
 
@@ -124,6 +124,10 @@ xbased doesn't include any copyrighted Xbox software.
 ### Controls, online, languages
 - **4 controller ports**: Automatic, any gamepad or the keyboard; remap every
   button, per game too; dead zone and vibration.
+- **Sticks like the Xbox controller's**: a modern stick's circle reaches the
+  Duke's full square, so diagonals register. Stick range and shape are set
+  on a screen that shows both sticks live, the range games expect and the
+  range yours reaches.
 - **Stereo or 5.1 surround**: the games' Dolby Digital mix, six channels
   out (Settings › Audio; stereo by default).
 - **Online**: Insignia (the community's Xbox Live replacement), XLink Kai and

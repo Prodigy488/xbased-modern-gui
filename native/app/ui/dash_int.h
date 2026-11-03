@@ -26,7 +26,7 @@ typedef struct In {
 
 enum Screen {
     SCR_MAIN, SCR_GAMES, SCR_GAME, SCR_GAME_SETTINGS, SCR_MODS, SCR_STATES, SCR_SETTINGS, SCR_CONTROLS,
-    SCR_REMAP, SCR_MEMORY, SCR_MEMORY_TITLE, SCR_ONLINE, SCR_ABOUT, SCR_INGAME, SCR_INGAME_SLOTS, SCR_COUNT
+    SCR_REMAP, SCR_MEMORY, SCR_MEMORY_TITLE, SCR_ONLINE, SCR_ABOUT, SCR_INGAME, SCR_INGAME_SLOTS, SCR_STICKS, SCR_COUNT
 };
 
 typedef struct Dash {
@@ -73,6 +73,8 @@ void dash_ask(const char *question, void (*on_yes)(Dash *));
  * copied. */
 void dash_choose(const char *question, const char *const *choices, int n, void (*on_choice)(Dash *, int));
 void dash_save_cfg(void);
+/* the gamepad used last (its sticks shown), NULL when none */
+SDL_Gamepad *dash_active_pad(void);
 
 /* the lists: a panel of rows, the current screen's selection and scroll */
 typedef struct List {
@@ -107,6 +109,7 @@ float ease(float t);
 void scr_settings(void);
 void scr_controls(void);
 void scr_remap(void);
+void scr_sticks(void);
 void scr_memory(void);
 void scr_memory_title(void);
 void scr_online(void);

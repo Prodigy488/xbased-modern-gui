@@ -18,7 +18,7 @@
 #endif
 
 #ifndef XBASED_VERSION
-#define XBASED_VERSION "1.0.8"
+#define XBASED_VERSION "1.0.9"
 #endif
 
 Dash D;
@@ -27,6 +27,30 @@ static SDL_Texture *g_layer, *g_prev;   /* this screen's foreground, the last on
 static float g_trans = 1;               /* the transition's progress, 0-1 */
 static int g_trans_dir = 1;
 static SDL_Gamepad *g_pads[8];
+static SDL_JoystickID g_last_pad;
+
+SDL_Gamepad *dash_active_pad(void)
+{
+    for (int i = 0; i < 8; i++) {
+        if (g_pads[i] && SDL_GetGamepadID(g_pads[i]) == g_last_pad) {
+            return g_pads[i];
+        }
+    }
+    for (int i = 0; i < 8; i++) {
+        if (g_pads[i]) {
+            return g_pads[i];
+        }
+    }
+    /* in game the controllers were opened before the menu: one of them */
+    int n = 0;
+    SDL_JoystickID *ids = SDL_GetGamepads(&n);
+    SDL_Gamepad *g = n > 0 ? SDL_OpenGamepad(ids[0]) : NULL;
+    SDL_free(ids);
+    if (g) {
+        g_pads[0] = g;
+    }
+    return g;
+}
 
 /* ------------------------------------------------------------ screens */
 
@@ -216,6 +240,7 @@ static void poll_input(void)
         case SDL_EVENT_GAMEPAD_BUTTON_DOWN:
         case SDL_EVENT_GAMEPAD_BUTTON_UP: {
             const bool down = e.type == SDL_EVENT_GAMEPAD_BUTTON_DOWN;
+            g_last_pad = e.gbutton.which;
             in->pad = true;
             if (down) {
                 in->pad_button = e.gbutton.button;
@@ -242,7 +267,11 @@ static void poll_input(void)
             if (fabsf(v) > 0.5f) {
                 in->pad_axis = (e.gaxis.axis + 1) * (v < 0 ? -1 : 1);
             }
-            if (e.gaxis.axis == SDL_GAMEPAD_AXIS_LEFTX || e.gaxis.axis == SDL_GAMEPAD_AXIS_LEFTY) {
+            g_last_pad = e.gaxis.which;
+            in->pad |= dash_top() == SCR_STICKS && fabsf(v) > 0.5f; /* its hints: the gamepad's */
+            /* the sticks' screen: the stick is being looked at, not steering */
+            if (dash_top() != SCR_STICKS &&
+                (e.gaxis.axis == SDL_GAMEPAD_AXIS_LEFTX || e.gaxis.axis == SDL_GAMEPAD_AXIS_LEFTY)) {
                 const int a = e.gaxis.axis == SDL_GAMEPAD_AXIS_LEFTY;
                 const float was = ax[a];
                 ax[a] = v;
@@ -326,6 +355,25 @@ static void auto_poll(void)
             in->rb = true;
         } else if (!strcmp(line, "PAD")) {
             in->pad = true;
+        } else if (!strncmp(line, "STICKS ", 7)) {
+            /* a virtual gamepad's sticks (SDL's values: lx ly rx ry, down
+             * positive), plugged in the first time */
+            static SDL_Joystick *vj;
+            int v[4] = {0};
+            if (sscanf(line + 7, "%d %d %d %d", &v[0], &v[1], &v[2], &v[3]) >= 2) {
+                if (!vj) {
+                    SDL_VirtualJoystickDesc d;
+                    SDL_INIT_INTERFACE(&d);
+                    d.type = SDL_JOYSTICK_TYPE_GAMEPAD;
+                    d.naxes = SDL_GAMEPAD_AXIS_COUNT;
+                    d.nbuttons = SDL_GAMEPAD_BUTTON_COUNT;
+                    d.name = "xbased virtual gamepad";
+                    vj = SDL_OpenJoystick(SDL_AttachVirtualJoystick(&d));
+                }
+                for (int a = 0; vj && a < 4; a++) {
+                    SDL_SetJoystickVirtualAxis(vj, a, (Sint16)(v[a] > 32767 ? 32767 : v[a] < -32768 ? -32768 : v[a]));
+                }
+            }
         } else if (!strncmp(line, "shot ", 5)) {
             const char *dir = getenv("HAKUX_AUTO_DIR");
             snprintf(g_shot_req, sizeof(g_shot_req), "%s/shot_%s.bmp", dir ? dir : ".", line + 5);
@@ -1384,6 +1432,7 @@ int dash_run(SDL_Window *win, const char *exe)
         case SCR_SETTINGS: scr_settings(); break;
         case SCR_CONTROLS: scr_controls(); break;
         case SCR_REMAP: scr_remap(); break;
+        case SCR_STICKS: scr_sticks(); break;
         case SCR_MEMORY: scr_memory(); break;
         case SCR_MEMORY_TITLE: scr_memory_title(); break;
         case SCR_ONLINE: scr_online(); break;
@@ -1630,6 +1679,7 @@ int dash_ingame(SDL_Window *win, const char *key, const char *title, const char 
         case SCR_GAME_SETTINGS: scr_game_settings(); break;
         case SCR_CONTROLS: scr_controls(); break;
         case SCR_REMAP: scr_remap(); break;
+        case SCR_STICKS: scr_sticks(); break;
         case SCR_SETTINGS: scr_settings(); break;
         default: dash_pop(); break;
         }

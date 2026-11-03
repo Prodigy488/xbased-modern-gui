@@ -284,6 +284,11 @@ void im_resolve(ImMap *m, const Config *global, const Config *game)
     }
     const Config *dz = game && cfg_get(game, "deadzone") ? game : global;
     m->deadzone = cfg_int(dz, "deadzone", 10) / 100.0f;
+    const Config *sr = game && cfg_get(game, "stick.range") ? game : global;
+    m->stick_range = cfg_int(sr, "stick.range", 100) / 100.0f;
+    const Config *ss = game && cfg_get(game, "stick.shape") ? game : global;
+    const char *shape = cfg_get(ss, "stick.shape");
+    m->stick_round = shape && !strcmp(shape, "round");
     m->rumble = cfg_bool(global, "rumble", true);
 }
 
@@ -305,25 +310,32 @@ static float pad_value(SDL_Gamepad *g, int pad)
  * 2x's tricks, a direction and a button, took a diagonal for a straight
  * one, or none). So the dead zone is a circle around the centre, not a band
  * along each axis (that cut diagonals further), and the circle is stretched
- * onto the square: full deflection is full on both axes at any angle. Keys
+ * onto the square: full deflection is full on both axes at any angle (round:
+ * kept a circle). The range scales the result, for a stick that doesn't
+ * reach its edge (above 100%) or games too quick to it (below). Keys
  * already give the square's corners and stay as they are. */
-static void stick(float xpos, float xneg, float ypos, float yneg, float dz, int16_t *ox, int16_t *oy)
+void im_stick(float x, float y, float dz, float range, bool round, float *ox, float *oy)
 {
-    const float x = xpos - xneg, y = ypos - yneg;
     const float r = sqrtf(x * x + y * y);
+    *ox = *oy = 0;
     if (r <= dz || r <= 0) {
-        *ox = *oy = 0;
         return;
     }
     float len = (r - dz) / (1 - dz);
-    len = len > 1 ? 1 : len;
+    len = (len > 1 ? 1 : len) * range;
     const float ux = x / r, uy = y / r;
-    const float m = fabsf(ux) > fabsf(uy) ? fabsf(ux) : fabsf(uy);
-    float sx = ux / m * len, sy = uy / m * len;
-    sx = sx > 1 ? 1 : sx < -1 ? -1 : sx;
-    sy = sy > 1 ? 1 : sy < -1 ? -1 : sy;
-    *ox = (int16_t)(sx * 32767);
-    *oy = (int16_t)(sy * 32767);
+    const float m = round ? 1 : fabsf(ux) > fabsf(uy) ? fabsf(ux) : fabsf(uy);
+    const float sx = ux / m * len, sy = uy / m * len;
+    *ox = sx > 1 ? 1 : sx < -1 ? -1 : sx;
+    *oy = sy > 1 ? 1 : sy < -1 ? -1 : sy;
+}
+
+static void stick(const ImMap *m, float xpos, float xneg, float ypos, float yneg, int16_t *ox, int16_t *oy)
+{
+    float x, y;
+    im_stick(xpos - xneg, ypos - yneg, m->deadzone, m->stick_range, m->stick_round, &x, &y);
+    *ox = (int16_t)(x * 32767);
+    *oy = (int16_t)(y * 32767);
 }
 
 void im_read(const ImMap *m, int p, const bool *keys, SDL_Gamepad *pad, ImPad *out)
@@ -350,6 +362,6 @@ void im_read(const ImMap *m, int p, const bool *keys, SDL_Gamepad *pad, ImPad *o
         const float a = v[IM_A + i];
         out->analog[i] = (uint8_t)(a >= 1 ? 255 : a <= 0.1f ? 0 : a * 255);
     }
-    stick(v[IM_LRIGHT], v[IM_LLEFT], v[IM_LUP], v[IM_LDOWN], m->deadzone, &out->lx, &out->ly);
-    stick(v[IM_RRIGHT], v[IM_RLEFT], v[IM_RUP], v[IM_RDOWN], m->deadzone, &out->rx, &out->ry);
+    stick(m, v[IM_LRIGHT], v[IM_LLEFT], v[IM_LUP], v[IM_LDOWN], &out->lx, &out->ly);
+    stick(m, v[IM_RRIGHT], v[IM_RLEFT], v[IM_RUP], v[IM_RDOWN], &out->rx, &out->ry);
 }
