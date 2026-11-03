@@ -1,5 +1,14 @@
 # xbased changelog
 
+## 1.0.2 (2026-11)
+
+### Fixes
+- Games that stopped forever on a loading screen while one of their threads
+  waited for another of the same priority (NFL Fever 2004 before its
+  matches): giving up the CPU now takes a step off a thread's wait boost, as
+  on the Xbox, so the thread it waits for runs. NFL Fever 2004 plays its
+  matches at full speed.
+
 ## 1.0.1 (2026-11)
 
 Fixes for games that stopped with their "disc is dirty or damaged" message,
