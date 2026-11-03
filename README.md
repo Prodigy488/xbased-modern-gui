@@ -16,18 +16,18 @@
 </p>
 
 <p align="center">
-  <a href="#-download">Download</a> ·
-  <a href="#-features">Features</a> ·
-  <a href="#-screenshots">Screenshots</a> ·
-  <a href="#-getting-started">Getting started</a> ·
-  <a href="#-building-from-source">Building</a> ·
-  <a href="#-credits">Credits</a>
+  <a href="#download">Download</a> ·
+  <a href="#features">Features</a> ·
+  <a href="#screenshots">Screenshots</a> ·
+  <a href="#getting-started">Getting started</a> ·
+  <a href="#building-from-source">Building</a> ·
+  <a href="#credits">Credits</a>
 </p>
 
 <!-- trailer -->
 https://github.com/user-attachments/assets/bf62adff-002a-4dc6-9b28-eee775181646
 
-<p align="center"><sub>▶ <a href="https://github.com/crazyriddler/xbased/releases/download/v1.0/xbased-trailer-1080p60.mp4">Watch the trailer in 1080p60</a></sub></p>
+<p align="center"><sub><a href="https://github.com/crazyriddler/xbased/releases/download/v1.0/xbased-trailer-1080p60.mp4">Watch the trailer in 1080p60</a></sub></p>
 <!-- /trailer -->
 
 ---
@@ -38,7 +38,7 @@ Xbox kernel, high-level NV2A renderer on Vulkan and accurate MCPX audio core,
 brought to x86-64 Windows and Linux with a console-style front end of its own.
 No BIOS, MCPX ROM or hard-disk image is needed.
 
-## ⬇ Download
+## Download
 
 | Platform | File | |
 |---|---|---|
@@ -51,13 +51,13 @@ Get them from **[Releases](https://github.com/crazyriddler/xbased/releases/lates
 SSE4.1, and your own game images (ISO / XISO) dumped from discs you own.
 xbased doesn't include any copyrighted Xbox software.
 
-## ✨ Features
+## Features
 
 <table>
 <tr>
 <td width="50%" valign="top">
 
-### 🎮 Like a console
+### Like a console
 - **Console-style dashboard**: an animated green orb, drifting hexagons, 3D
   transitions and navigation sounds.
 - **Gamepad, keyboard or mouse** everywhere; button prompts follow the device
@@ -69,7 +69,7 @@ xbased doesn't include any copyrighted Xbox software.
 </td>
 <td width="50%" valign="top">
 
-### 📚 Your library
+### Your library
 - **Automatic box art** and the discs' own title icons.
 - **A page per game**: play, load a state, settings, patches, controls.
 - **Memory manager**: your games' saves with their icons; export, import and
@@ -81,7 +81,7 @@ xbased doesn't include any copyrighted Xbox software.
 <tr>
 <td valign="top">
 
-### 🖥 Picture
+### Picture
 - **Internal resolution** up to 4x, aspect ratio, widescreen and video modes.
 - **FXAA** and **anisotropic filtering** up to 16x.
 - **Upscaling**: bilinear or Snapdragon GSR.
@@ -91,7 +91,7 @@ xbased doesn't include any copyrighted Xbox software.
 </td>
 <td valign="top">
 
-### 🧩 Patches & mods
+### Patches & mods
 - **Per-game patches**: 60/120 fps, widescreen, fixes and cheats, toggled per
   game.
 - **Frame-rate unlock per game**, where the game allows it.
@@ -104,7 +104,7 @@ xbased doesn't include any copyrighted Xbox software.
 <tr>
 <td valign="top">
 
-### 💾 Save states & in-game menu
+### Save states & in-game menu
 - **10 save-state slots per game**, with pictures.
 - **In-game menu** with F1, or **Back + Start** / the **Guide** button on a
   gamepad: states, settings, controls, restart, back to the dashboard.
@@ -114,7 +114,7 @@ xbased doesn't include any copyrighted Xbox software.
 </td>
 <td valign="top">
 
-### 🕹 Controls, online, languages
+### Controls, online, languages
 - **4 controller ports**: Automatic, any gamepad or the keyboard; remap every
   button, per game too; dead zone and vibration.
 - **Online**: Insignia (the community's Xbox Live replacement), XLink Kai and
@@ -126,7 +126,7 @@ xbased doesn't include any copyrighted Xbox software.
 </tr>
 </table>
 
-## 📸 Screenshots
+## Screenshots
 
 <table>
 <tr>
@@ -157,7 +157,7 @@ xbased doesn't include any copyrighted Xbox software.
 
 <p align="center"><img src="docs/media/ultrawide.jpg" alt="Ultrawide" width="100%"><br><sub>Any screen: the dashboard at 21:9</sub></p>
 
-## 🚀 Getting started
+## Getting started
 
 1. Download xbased from [Releases](https://github.com/crazyriddler/xbased/releases/latest):
    unzip it anywhere (Windows) or run the AppImage (Linux).
@@ -185,7 +185,7 @@ Windows, in `~/.local/share/xbased/` on Linux.
 forward (hold), F2 pause, F12 screenshot, F11 full screen. On a gamepad,
 Back + Start or the Guide button opens the menu.
 
-## 🛠 Building from source
+## Building from source
 
 xbased builds with clang and CMake. The third-party sources are fetched at
 pinned versions by `tools/fetch_deps.sh` into a `deps` folder beside the
@@ -260,7 +260,7 @@ one is built on Ubuntu 22.04, so it runs there and on newer distributions).
 More options (link-time optimization, the dependencies' location) are in
 [BUILDING.md](BUILDING.md).
 
-## 🙏 Credits
+## Credits
 
 - **[hakuX](https://github.com/rfandango/hakuX)** by **rfandango**: the
   emulator core xbased is built on (kernel, NV2A renderer, MCPX audio). Its own
@@ -270,7 +270,7 @@ More options (link-time optimization, the dependencies' location) are in
 - SDL3, Zydis, libslirp, xxHash, volk, Vulkan Memory Allocator, glslang,
   SPIRV-Reflect and the other components listed in [LICENSE](LICENSE).
 
-## 📄 License
+## License
 
 xbased, like hakuX, is free software under the GNU General Public License,
 version 3 or later ([COPYING](COPYING)). The third-party components keep their
