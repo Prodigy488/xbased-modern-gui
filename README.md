@@ -25,11 +25,8 @@
 </p>
 
 <!-- trailer -->
-<p align="center">
-  <a href="https://github.com/crazyriddler/xbased/releases/download/v1.0/xbased-trailer-1080p60.mp4">
-    <img src="docs/media/trailer-preview.webp" alt="xbased trailer" width="820">
-  </a>
-</p>
+https://github.com/user-attachments/assets/bf62adff-002a-4dc6-9b28-eee775181646
+
 <p align="center"><sub>▶ <a href="https://github.com/crazyriddler/xbased/releases/download/v1.0/xbased-trailer-1080p60.mp4">Watch the trailer in 1080p60</a></sub></p>
 <!-- /trailer -->
 
