@@ -27,7 +27,7 @@
 <!-- trailer -->
 <p align="center">
   <a href="https://github.com/crazyriddler/xbased/releases/download/v1.0/xbased-trailer-1080p60.mp4">
-    <img src="docs/media/trailer.jpg" alt="Watch the trailer" width="820">
+    <img src="docs/media/trailer-preview.webp" alt="xbased trailer" width="820">
   </a>
 </p>
 <p align="center"><sub>▶ <a href="https://github.com/crazyriddler/xbased/releases/download/v1.0/xbased-trailer-1080p60.mp4">Watch the trailer in 1080p60</a></sub></p>

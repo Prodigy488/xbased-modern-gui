@@ -10,11 +10,16 @@ The first release of xbased, the PC edition of
   return addresses predicted, interrupts delivered at block boundaries.
 - The Xbox kernel's thread priority boosts, so games that lean on them
   (NightFire and others) keep their frame rate.
-- Frame-rate unlock that reaches hundreds of frames per second where the game
-  allows it, and that sleeps instead of spinning when capped (low power on
-  laptops and handhelds).
+- Frame-rate unlock, per game, that reaches hundreds of frames per second
+  where the game allows it, and that sleeps instead of spinning when capped
+  (low power on laptops and handhelds).
 - Per-game patches as mods (higher frame rates for a set of games so far),
-  toggled per game; more can be added.
+  toggled per game. IPS patches shared online work too: drop them into
+  `mods/<TITLE ID>/` (MODS.md).
+- Anisotropic filtering up to 16x, alongside FXAA, internal resolution and
+  upscaling.
+- Games start in the console's language, or in English when the disc doesn't
+  have that language's files.
 - Save states with thumbnails, 10 slots per game.
 
 ### Front end
@@ -26,7 +31,8 @@ The first release of xbased, the PC edition of
   delete.
 - In-game menu (F1, or Back + Start on a gamepad): resume, states, settings,
   controls, restart, quit.
-- Borderless full screen by default, like a console.
+- Borderless full screen by default, like a console; Exit from the dashboard,
+  with a confirmation, so it closes from a gamepad.
 - Controls: any key, button or axis per input, 4 players, per-game mappings,
   configurable shortcuts; prompts follow the device in use.
 - CRT filters (scanlines, TV, arcade), frame counter, volume and
