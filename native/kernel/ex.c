@@ -401,6 +401,16 @@ static uint8_t *eeprom(NcKernel *k)
         if (g_language) {
             nc_wr32(g_eeprom + 0x90, (uint32_t)g_language);
         }
+        /* A disc without the console's language plays in English, as a
+         * console set to it would have the title choose. Its files in
+         * English under the language's name (io.c's fallback) weren't
+         * enough: Fable checked its Spanish folder, found none, and went
+         * on with half of a language loaded until it crashed. */
+        const uint32_t lang = nc_rd32(g_eeprom + 0x90);
+        if (lang >= 2 && nc_io_disc_lacks_language(k->disc, (int)lang)) {
+            nc_wr32(g_eeprom + 0x90, 1);
+            nc_log("hakuX-native", "ex: the disc hasn't the console's language (%u): English", lang);
+        }
         /* And the time zone, the phone's: its offset from UTC now as the
          * bias (UTC = local time + bias, minutes), without daylight saving
          * rules of its own (no names, dates or standard / daylight biases). */

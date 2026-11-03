@@ -1,5 +1,21 @@
 # xbased changelog
 
+## 1.0.4 (2026-11)
+
+### Fixes
+- Fable: it stopped on a black screen as it booted. Its own memory pager
+  leaves each page fault with an IRETD, which the core didn't run. Fable now
+  plays.
+- Games on a console set to a language their disc doesn't have (Spanish on
+  Fable, The Thing, Call of Duty: Finest Hour...): they start in English, as a
+  console would have them do. Swapping in the English files under the other
+  language's name wasn't enough: Fable saw that language's folder missing,
+  loaded half of it and crashed.
+- The Thing: it stopped at boot. The kernel now has I/O completion ports
+  (CreateIoCompletionPort, GetQueuedCompletionStatus,
+  PostQueuedCompletionStatus), with packets from reads and writes of the
+  files tied to them. The Thing plays.
+
 ## 1.0.3 (2026-11)
 
 ### Fixes

@@ -23,6 +23,7 @@ enum {
     OBJ_NOTIFICATION_EVENT = 0,
     OBJ_SYNCHRONIZATION_EVENT = 1,
     OBJ_MUTANT = 2,
+    OBJ_QUEUE = 4,
     OBJ_SEMAPHORE = 5,
     OBJ_THREAD = 6,
     OBJ_NOTIFICATION_TIMER = 8,
@@ -428,8 +429,14 @@ static int satisfied(NcKernel *k, const NcThread *t, const NcWait *w)
     return -1;
 }
 
+static void port_take(NcKernel *k, const NcThread *t, uint32_t port);
+
 static void take(NcKernel *k, const NcThread *t, const NcWait *w, int idx)
 {
+    if (!w->wait_all && *(const uint8_t *)nc_vm_host(k->vm, w->objects[idx]) == OBJ_QUEUE) {
+        port_take(k, t, w->objects[idx]);
+        return;
+    }
     if (w->wait_all) {
         for (unsigned i = 0; i < w->count; i++) {
             acquire(k, w->objects[i], t);
@@ -892,6 +899,142 @@ static uint64_t NtReleaseMutant(NcKernel *k, NcFrame *f, const uint32_t *a)
 /* --------------------------------------------------------------- waits */
 
 /* KeWaitForSingleObject(Object, WaitReason, WaitMode, Alertable, Timeout) */
+/* ------------------------------------------------------ I/O completion */
+
+/* An I/O completion port: a KQUEUE's dispatcher header, its signal state the
+ * packets queued, the packets themselves here. XAPI's
+ * GetQueuedCompletionStatus takes one with NtRemoveIoCompletion; reads and
+ * writes of a file associated with the port queue them as they complete
+ * (io.c), PostQueuedCompletionStatus with NtSetIoCompletion. The Thing
+ * creates one as it boots, and stopped there. */
+#define PORT_PACKETS 512
+typedef struct PortPacket {
+    uint32_t key, ctx, status, info;
+} PortPacket;
+typedef struct Port {
+    uint32_t obj;
+    unsigned head, n;
+    PortPacket p[PORT_PACKETS];
+} Port;
+static Port *g_ports[64];
+static unsigned g_nports;
+/* A thread's NtRemoveIoCompletion: where its packet goes (KeyContext,
+ * ApcContext, IoStatusBlock). Not in the thread's state: a savestate taken
+ * while a thread waits on a port wakes it with nothing written. */
+static uint32_t g_port_out[NC_MAX_THREADS][3];
+
+static Port *port_of(uint32_t obj)
+{
+    for (unsigned i = 0; i < g_nports; i++) {
+        if (g_ports[i]->obj == obj) {
+            return g_ports[i];
+        }
+    }
+    return NULL;
+}
+
+void nc_ke_port_queue(NcKernel *k, uint32_t obj, uint32_t key, uint32_t ctx, uint32_t status, uint32_t info)
+{
+    Port *p = port_of(obj);
+    if (!p || p->n == PORT_PACKETS) {
+        static unsigned s_warned;
+        if (s_warned++ < 8) {
+            nc_log("hakuX-native", "ke: completion port %08x %s: packet dropped", obj, p ? "full" : "unknown");
+        }
+        return;
+    }
+    p->p[(p->head + p->n++) % PORT_PACKETS] = (PortPacket){key, ctx, status, info};
+    set_signal_state(k, obj, (int32_t)p->n);
+    signaled(k, SIGNAL_INCREMENT);
+}
+
+/* A wait on the port satisfied: its first packet to the thread. */
+static void port_take(NcKernel *k, const NcThread *t, uint32_t obj)
+{
+    Port *p = port_of(obj);
+    if (!p || !p->n) {
+        return;
+    }
+    const PortPacket pk = p->p[p->head];
+    p->head = (p->head + 1) % PORT_PACKETS;
+    p->n--;
+    set_signal_state(k, obj, (int32_t)p->n);
+    const uint32_t *out = g_port_out[t - k->threads];
+    if (out[0]) {
+        nc_vm_wr32(k->vm, out[0], pk.key);
+    }
+    if (out[1]) {
+        nc_vm_wr32(k->vm, out[1], pk.ctx);
+    }
+    if (out[2]) {
+        nc_vm_wr32(k->vm, out[2], pk.status);
+        nc_vm_wr32(k->vm, out[2] + 4, pk.info);
+    }
+}
+
+static uint32_t port_handle(NcKernel *k, uint32_t handle)
+{
+    enum NcObType type;
+    const uint32_t obj = nc_ob_lookup(k, handle, &type);
+    return obj && type == NC_OB_IOCOMPLETION ? obj : 0;
+}
+
+/* NtCreateIoCompletion(IoCompletionHandle, DesiredAccess, ObjectAttributes, Count) */
+static uint64_t NtCreateIoCompletion(NcKernel *k, NcFrame *f, const uint32_t *a)
+{
+    if (g_nports == sizeof(g_ports) / sizeof(g_ports[0])) {
+        return NC_STATUS_INSUFFICIENT_RESOURCES;
+    }
+    Port *p = calloc(1, sizeof(*p));
+    const uint32_t obj = p ? nc_ob_create(k, NC_OB_IOCOMPLETION, 0x28) : 0;
+    if (!obj) {
+        free(p);
+        return NC_STATUS_INSUFFICIENT_RESOURCES;
+    }
+    init_header(k, obj, OBJ_QUEUE, 10, 0);
+    p->obj = obj;
+    g_ports[g_nports++] = p;
+    nc_vm_wr32(k->vm, a[0], nc_ob_handle(k, obj, NC_OB_IOCOMPLETION));
+    return NC_STATUS_SUCCESS;
+}
+
+/* NtRemoveIoCompletion(IoCompletionHandle, KeyContext, ApcContext, IoStatusBlock, Timeout) */
+static uint64_t NtRemoveIoCompletion(NcKernel *k, NcFrame *f, const uint32_t *a)
+{
+    uint32_t obj = port_handle(k, a[0]);
+    if (!obj || !k->current) {
+        return NC_STATUS_INVALID_HANDLE;
+    }
+    uint32_t *out = g_port_out[k->current - k->threads];
+    out[0] = a[1];
+    out[1] = a[2];
+    out[2] = a[3];
+    return wait(k, &obj, 1, false, a[4], 0, false);
+}
+
+/* NtSetIoCompletion(IoCompletionHandle, KeyContext, ApcContext, IoStatus, IoStatusInformation) */
+static uint64_t NtSetIoCompletion(NcKernel *k, NcFrame *f, const uint32_t *a)
+{
+    const uint32_t obj = port_handle(k, a[0]);
+    if (!obj) {
+        return NC_STATUS_INVALID_HANDLE;
+    }
+    nc_ke_port_queue(k, obj, a[1], a[2], a[3], a[4]);
+    return NC_STATUS_SUCCESS;
+}
+
+/* NtQueryIoCompletion(IoCompletionHandle, IoCompletionInformation): the depth */
+static uint64_t NtQueryIoCompletion(NcKernel *k, NcFrame *f, const uint32_t *a)
+{
+    const uint32_t obj = port_handle(k, a[0]);
+    const Port *p = obj ? port_of(obj) : NULL;
+    if (!p) {
+        return NC_STATUS_INVALID_HANDLE;
+    }
+    nc_vm_wr32(k->vm, a[1], p->n);
+    return NC_STATUS_SUCCESS;
+}
+
 static uint64_t KeWaitForSingleObject(NcKernel *k, NcFrame *f, const uint32_t *a)
 {
     return wait(k, &a[0], 1, false, a[4], 0, a[3] & 0xff);
@@ -1465,6 +1608,10 @@ void nc_ke_register(NcKernel *k)
     nc_kernel_impl(k, "KeReleaseMutant", KeReleaseMutant);
     nc_kernel_impl(k, "NtCreateMutant", NtCreateMutant);
     nc_kernel_impl(k, "NtReleaseMutant", NtReleaseMutant);
+    nc_kernel_impl(k, "NtCreateIoCompletion", NtCreateIoCompletion);
+    nc_kernel_impl(k, "NtRemoveIoCompletion", NtRemoveIoCompletion);
+    nc_kernel_impl(k, "NtSetIoCompletion", NtSetIoCompletion);
+    nc_kernel_impl(k, "NtQueryIoCompletion", NtQueryIoCompletion);
 
     nc_kernel_impl(k, "KeWaitForSingleObject", KeWaitForSingleObject);
     nc_kernel_impl(k, "KeWaitForMultipleObjects", KeWaitForMultipleObjects);

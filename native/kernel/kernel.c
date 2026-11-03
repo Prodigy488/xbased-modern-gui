@@ -502,7 +502,7 @@ bool nc_kernel_init(NcKernel *k, NcVm *vm)
         [NC_OB_SEMAPHORE] = "ExSemaphoreObjectType", [NC_OB_MUTANT] = "ExMutantObjectType",
         [NC_OB_TIMER] = "ExTimerObjectType",         [NC_OB_FILE] = "IoFileObjectType",
         [NC_OB_DEVICE] = "IoDeviceObjectType",       [NC_OB_SYMLINK] = "ObSymbolicLinkObjectType",
-        [NC_OB_DIRECTORY] = "ObDirectoryObjectType",
+        [NC_OB_DIRECTORY] = "ObDirectoryObjectType", [NC_OB_IOCOMPLETION] = "IoCompletionObjectType",
     };
     for (unsigned i = 0; i < NC_OB_TYPES; i++) {
         const NcKExport *e = export_named(type_names[i]);
@@ -1653,6 +1653,18 @@ static bool sysop(void *opaque, NcFrame *f, enum NcSysOp op, unsigned size)
                 nc_paging_flush(k); /* a CR3 reload: the TLB flush after PDE edits */
             }
             nc_frame_set_eip(f, eip + 3);
+            break;
+        }
+        /* IRETD to the same ring: EIP, CS, EFLAGS off the stack. Fable's
+         * page fault handler leaves the fault's context this way (an IRETD
+         * to its next instruction, with the faulting code's flags), then
+         * maps the page and returns to the faulting instruction itself. */
+        if (insn[0] == 0xCF) {
+            const uint32_t esp = nc_frame_gpr(f, NC_ESP);
+            const uint32_t to = nc_vm_rd32(k->vm, esp), fl = nc_vm_rd32(k->vm, esp + 8);
+            nc_frame_set_gpr(f, NC_ESP, esp + 12);
+            nc_frame_set_eflags(f, fl);
+            nc_frame_set_eip(f, to);
             break;
         }
         nc_kernel_request_stop(k, f, "system op %d at %08x (%02x %02x %02x)", (int)op, eip, insn[0], insn[1],

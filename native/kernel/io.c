@@ -157,6 +157,12 @@ static NcFile g_files[MAX_FILES];
 static struct FsCache {
     uint64_t lo, hi;
 } g_fs_cache[MAX_FILES];
+/* Each open file's I/O completion port (FileCompletionInformation): its
+ * object and key, where its reads and writes queue a packet as they
+ * complete; not kept in states. */
+static struct FilePort {
+    uint32_t port, key;
+} g_file_port[MAX_FILES];
 typedef struct NcLink {
     char name[64];
     char target[256];
@@ -408,6 +414,7 @@ static NcFile *file_new(void)
         if (!g_files[i].used) {
             memset(&g_files[i], 0, sizeof(g_files[i]));
             g_fs_cache[i] = (struct FsCache){0};
+            g_file_port[i] = (struct FilePort){0};
             g_files[i].used = true;
             g_files[i].fd = -1;
             return &g_files[i];
@@ -591,6 +598,17 @@ static void io_status(NcKernel *k, uint32_t iosb, uint32_t status, uint32_t info
     }
 }
 
+/* The port an I/O call's completion goes to, or NULL: as NT's
+ * IopCompleteRequest, an overlapped one on a file associated with a port,
+ * with no APC routine and an ApcContext (XAPI passes the OVERLAPPED there,
+ * NULL for an event handle with its low bit set). */
+static const struct FilePort *file_port(NcKernel *k, const uint32_t *a)
+{
+    const NcFile *nf = a[2] || !a[3] ? NULL : file_of(k, a[0]);
+    const struct FilePort *fp = nf ? &g_file_port[nf - g_files] : NULL;
+    return fp && fp->port && nf->async ? fp : NULL;
+}
+
 /* An I/O call finished: a[] is (FileHandle, Event, ApcRoutine, ApcContext,
  * IoStatusBlock, ...), as NtReadFile and its siblings take it. The event is
  * set; the APC routine runs as ApcRoutine(ApcContext, IoStatusBlock, 0) when
@@ -615,6 +633,10 @@ static void complete(NcKernel *k, const uint32_t *a)
     if (a[2] && k->current) {
         const NcApc apc = {.normal = a[2], .ctx = a[3], .a1 = a[4], .a2 = 0};
         nc_apc_queue(k, k->current, &apc);
+    }
+    const struct FilePort *fp = file_port(k, a);
+    if (fp && a[4]) {
+        nc_ke_port_queue(k, fp->port, fp->key, a[3], nc_vm_rd32(k->vm, a[4]), nc_vm_rd32(k->vm, a[4] + 4));
     }
 }
 
@@ -709,6 +731,7 @@ typedef struct DiscJob {
     uint32_t va, n;
     uint32_t dev_us;         /* the drive's time for it (console timing), 0: none */
     uint32_t iosb, event, apc, apc_ctx;
+    uint32_t port, port_key; /* its completion port's packet (file_port), port 0: none */
     NcThread *thread;
     uint32_t thread_id;      /* its id then: the slot may hold another thread by the end */
     bool sync;               /* a synchronous handle's: the thread waits for it (nc_ke_block) */
@@ -829,6 +852,11 @@ static bool disc_read_later(NcKernel *k, const NcFile *nf, const uint32_t *a, co
                  .dev_us = dev_us, .iosb = a[4], .event = event, .apc = a[2], .apc_ctx = a[3],
                  .thread = k->current, .thread_id = k->current ? k->current->id : 0, .sync = sync};
     snprintf(j.path, sizeof(j.path), "%s", nf->path);
+    const struct FilePort *fp = file_port(k, a);
+    if (fp) {
+        j.port = fp->port;
+        j.port_key = fp->key;
+    }
     size_t segs = 0;
     for (unsigned r = 0; r < nrun; r++) {
         segs += run[r].len / NC_PAGE + 2;
@@ -923,6 +951,9 @@ static void disc_read_done(NcKernel *k, const DiscJob *j)
         j->thread->state != NC_T_TERMINATED) {
         const NcApc apc = {.normal = j->apc, .ctx = j->apc_ctx, .a1 = j->iosb, .a2 = 0};
         nc_apc_queue(k, j->thread, &apc);
+    }
+    if (j->port) {
+        nc_ke_port_queue(k, j->port, j->port_key, j->apc_ctx, st, n);
     }
 }
 
@@ -1078,6 +1109,89 @@ static bool lang_fallback(const NcDisc *disc, const char *rel, char *out, size_t
         start = end + 1;
     }
     return false;
+}
+
+/* Folder names for XC_LANGUAGE's values (1 English ... 9 Portuguese). */
+static const char *const k_lang_dirs[10][4] = {
+    {NULL},
+    {"english", "eng", "en", NULL},
+    {"japanese", "jpn", "jap", "ja"},
+    {"german", "ger", "deu", "de"},
+    {"french", "fre", "fra", "fr"},
+    {"spanish", "spa", "esp", "es"},
+    {"italian", "ita", "it", NULL},
+    {"korean", "kor", "ko", NULL},
+    {"chinese", "chi", "zh", NULL},
+    {"portuguese", "por", "pt", NULL},
+};
+
+static bool lang_named(const uint8_t *e, int lang)
+{
+    for (int i = 0; i < 4 && k_lang_dirs[lang][i]; i++) {
+        const size_t n = strlen(k_lang_dirs[lang][i]);
+        if (e[13] == n && !strncasecmp((const char *)e + 14, k_lang_dirs[lang][i], n)) {
+            return true;
+        }
+    }
+    return false;
+}
+
+typedef struct LangScan {
+    int lang;
+    bool english, other;
+    NcDiscFile sub[16]; /* folders to look in next */
+    unsigned nsub;
+} LangScan;
+
+static bool lang_scan_entry(void *ctx, const uint8_t *e)
+{
+    LangScan *s = ctx;
+    if (!(e[12] & 0x10)) {
+        return false;
+    }
+    s->english |= lang_named(e, 1);
+    s->other |= lang_named(e, s->lang);
+    if (s->nsub < 16) {
+        s->sub[s->nsub++] = (NcDiscFile){nc_rd32(e + 4), nc_rd32(e + 8), e[12]};
+    }
+    return false;
+}
+
+bool nc_io_disc_lacks_language(const NcDisc *disc, int lang)
+{
+    if (lang < 2 || lang > 9 || !disc || disc->fd < 0) {
+        return false;
+    }
+    /* The disc's first three levels of folders, breadth first, up to 64. */
+    NcDiscFile queue[64];
+    unsigned depth[64], head = 0, tail = 0;
+    queue[tail] = (NcDiscFile){disc->root_sector, disc->root_size, 0x10};
+    depth[tail++] = 0;
+    bool lacks = false;
+    while (head < tail) {
+        const NcDiscFile d = queue[head];
+        const unsigned dd = depth[head++];
+        if (!d.size || d.size > 0x40000) {
+            continue;
+        }
+        uint8_t *buf = malloc(d.size);
+        if (!buf || !nc_disc_read_orig(disc, &d, 0, buf, d.size)) {
+            free(buf);
+            continue;
+        }
+        LangScan s = {lang, false, false, {{0}}, 0};
+        nc_disc_dir_each(buf, d.size, lang_scan_entry, &s);
+        free(buf);
+        if (s.english && s.other) {
+            return false;
+        }
+        lacks |= s.english;
+        for (unsigned i = 0; i < s.nsub && dd < 2 && tail < 64; i++) {
+            queue[tail] = s.sub[i];
+            depth[tail++] = dd + 1;
+        }
+    }
+    return lacks;
 }
 
 static uint32_t do_open(NcKernel *k, uint32_t access, uint32_t attrs, uint32_t disposition, uint32_t options,
@@ -1965,6 +2079,16 @@ static uint64_t NtSetInformationFile(NcKernel *k, NcFrame *f, const uint32_t *a)
             if (v > was) {
                 regrow(nf, was, v);
             }
+        }
+        break;
+    }
+    case 30: { /* FileCompletionInformation: Port, Key (CreateIoCompletionPort) */
+        enum NcObType type;
+        const uint32_t port = nc_ob_lookup(k, nc_rd32(in), &type);
+        if (!port || type != NC_OB_IOCOMPLETION) {
+            st = NC_STATUS_INVALID_HANDLE;
+        } else {
+            g_file_port[nf - g_files] = (struct FilePort){port, nc_rd32(in + 4)};
         }
         break;
     }
