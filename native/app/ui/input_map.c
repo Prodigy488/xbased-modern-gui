@@ -299,16 +299,31 @@ static float pad_value(SDL_Gamepad *g, int pad)
     return (pad & 1) ? (v < 0 ? -v : 0) : (v > 0 ? v : 0);
 }
 
-static int16_t stick(float pos, float neg, float dz)
+/* A stick as the Duke gave it. Today's sticks move in a circle: pushed fully
+ * diagonal they read about 0.7 on each axis, where the Duke's read nearly
+ * full on both, and its games were tuned to that (Tony Hawk's Pro Skater
+ * 2x's tricks, a direction and a button, took a diagonal for a straight
+ * one, or none). So the dead zone is a circle around the centre, not a band
+ * along each axis (that cut diagonals further), and the circle is stretched
+ * onto the square: full deflection is full on both axes at any angle. Keys
+ * already give the square's corners and stay as they are. */
+static void stick(float xpos, float xneg, float ypos, float yneg, float dz, int16_t *ox, int16_t *oy)
 {
-    float v = pos - neg;
-    const float a = fabsf(v);
-    if (a < dz) {
-        return 0;
+    const float x = xpos - xneg, y = ypos - yneg;
+    const float r = sqrtf(x * x + y * y);
+    if (r <= dz || r <= 0) {
+        *ox = *oy = 0;
+        return;
     }
-    v = (v < 0 ? -1 : 1) * (a - dz) / (1 - dz);
-    v = v > 1 ? 1 : v < -1 ? -1 : v;
-    return (int16_t)(v * 32767);
+    float len = (r - dz) / (1 - dz);
+    len = len > 1 ? 1 : len;
+    const float ux = x / r, uy = y / r;
+    const float m = fabsf(ux) > fabsf(uy) ? fabsf(ux) : fabsf(uy);
+    float sx = ux / m * len, sy = uy / m * len;
+    sx = sx > 1 ? 1 : sx < -1 ? -1 : sx;
+    sy = sy > 1 ? 1 : sy < -1 ? -1 : sy;
+    *ox = (int16_t)(sx * 32767);
+    *oy = (int16_t)(sy * 32767);
 }
 
 void im_read(const ImMap *m, int p, const bool *keys, SDL_Gamepad *pad, ImPad *out)
@@ -335,8 +350,6 @@ void im_read(const ImMap *m, int p, const bool *keys, SDL_Gamepad *pad, ImPad *o
         const float a = v[IM_A + i];
         out->analog[i] = (uint8_t)(a >= 1 ? 255 : a <= 0.1f ? 0 : a * 255);
     }
-    out->lx = stick(v[IM_LRIGHT], v[IM_LLEFT], m->deadzone);
-    out->ly = stick(v[IM_LUP], v[IM_LDOWN], m->deadzone);
-    out->rx = stick(v[IM_RRIGHT], v[IM_RLEFT], m->deadzone);
-    out->ry = stick(v[IM_RUP], v[IM_RDOWN], m->deadzone);
+    stick(v[IM_LRIGHT], v[IM_LLEFT], v[IM_LUP], v[IM_LDOWN], m->deadzone, &out->lx, &out->ly);
+    stick(v[IM_RRIGHT], v[IM_RLEFT], v[IM_RUP], v[IM_RDOWN], m->deadzone, &out->rx, &out->ry);
 }

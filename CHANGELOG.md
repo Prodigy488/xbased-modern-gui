@@ -1,5 +1,20 @@
 # xbased changelog
 
+## 1.0.8 (2026-11)
+
+### Fixes
+- After a game closed, the dashboard's settings showed their defaults until
+  xbased restarted, and a setting changed then wasn't saved. Reloading the
+  settings file (a game may change it) lost its path on the way. The games
+  themselves kept the right settings all along.
+- Analog stick diagonals (Tony Hawk's Pro Skater 2x's tricks, a direction
+  and a button, and other games of the time): a modern stick pushed fully
+  diagonal reached only two thirds of each axis, where the Xbox controller
+  reached nearly all of it, so games read a straight direction, or none. The
+  stick now responds like the Xbox controller's: full deflection is full on
+  both axes at any angle, and the dead zone is a circle around the centre
+  instead of a band along each axis.
+
 ## 1.0.7 (2026-11)
 
 ### New

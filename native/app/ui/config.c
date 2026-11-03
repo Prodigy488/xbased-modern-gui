@@ -23,8 +23,14 @@ static void trim(char *s)
 
 void cfg_load(Config *c, const char *path)
 {
+    /* path may be c's own (a reload: cfg_load(c, c->path)): kept before
+     * c is cleared. Cleared first, it read as "", the dashboard showed the
+     * defaults after each game, and saved its settings nowhere. */
+    char p[sizeof(c->path)];
+    snprintf(p, sizeof(p), "%s", path);
     memset(c, 0, sizeof(*c));
-    snprintf(c->path, sizeof(c->path), "%s", path);
+    snprintf(c->path, sizeof(c->path), "%s", p);
+    path = c->path;
     FILE *f = fopen(path, "rb");
     if (!f) {
         return;
