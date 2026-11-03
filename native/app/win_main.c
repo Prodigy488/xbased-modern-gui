@@ -9,7 +9,7 @@
  * With no disc image, a file dialog asks for one. Options are the Android
  * app's arguments: the core's (native/core/options.h: scale=, loadstate=,
  * video=, lang=, net=, mods=, uncap, ...), the window's (aspect=auto|4:3|
- * 16:9|stretch, fxaa=0|1, upscale=bilinear|sgsr), and
+ * 16:9|stretch, fxaa=0|1, upscale=bilinear|fsr), and
  *   hdd=DIR      the hard disk folder (default: hdd beside the executable)
  *   mod=ID       a mod of the game's on (its folder in mods\<TITLE ID>.<version>
  *                beside the executable; mod=* all of them), cheat=NAME a cheat
@@ -584,7 +584,7 @@ static void ingame_menu(SDL_Window *win, bool *paused, bool minimized)
             nc_present_set_fxaa(atoi(v) != 0);
         }
         if ((v = cfg_get(c, "upscale"))) {
-            nc_present_set_upscale(!strcmp(v, "sgsr") ? NC_UPSCALE_SGSR : NC_UPSCALE_BILINEAR);
+            nc_present_set_upscale(nc_upscale_from_name(v));
         }
         if ((v = cfg_get(c, "crt"))) {
             hle_present_set_crt(atoi(v));
@@ -693,7 +693,7 @@ static const char *pick_disc(void)
 }
 
 #ifndef XBASED_VERSION
-#define XBASED_VERSION "1.0.10"
+#define XBASED_VERSION "1.0.11"
 #endif
 #ifdef _WIN32
 #define NC_PLATFORM_NAME "Windows"
@@ -806,7 +806,7 @@ int main(int argc, char *argv[])
         } else if (!strncmp(a, "fxaa=", 5)) {
             nc_present_set_fxaa(atoi(a + 5) != 0);
         } else if (!strncmp(a, "upscale=", 8)) {
-            nc_present_set_upscale(!strcmp(a + 8, "sgsr") ? NC_UPSCALE_SGSR : NC_UPSCALE_BILINEAR);
+            nc_present_set_upscale(nc_upscale_from_name(a + 8));
         } else if (!strncmp(a, "crt=", 4)) {
             hle_present_set_crt(atoi(a + 4));
         } else if (!strncmp(a, "volume=", 7)) {

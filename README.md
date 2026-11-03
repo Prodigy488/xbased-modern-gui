@@ -47,8 +47,8 @@ the port, the dashboard, the game fixes and every release.
 
 | Platform | File | |
 |---|---|---|
-| **Windows** 10/11 (x64) | `xbased-1.0.10-windows-x64.zip` | Unzip anywhere and run `xbased.exe`. Portable: everything stays in its folder. |
-| **Linux** (x86-64) | `xbased-1.0.10-x86_64.AppImage` | `chmod +x` it and run. Ubuntu 22.04 or newer, or any distribution of the same age. |
+| **Windows** 10/11 (x64) | `xbased-1.0.11-windows-x64.zip` | Unzip anywhere and run `xbased.exe`. Portable: everything stays in its folder. |
+| **Linux** (x86-64) | `xbased-1.0.11-x86_64.AppImage` | `chmod +x` it and run. Ubuntu 22.04 or newer, or any distribution of the same age. |
 
 Get them from **[Releases](https://github.com/crazyriddler/xbased/releases/latest)**.
 
@@ -91,7 +91,7 @@ xbased doesn't include any copyrighted Xbox software.
 ### Picture
 - **Internal resolution** up to 8x, aspect ratio, widescreen and video modes.
 - **FXAA** and **anisotropic filtering** up to 16x.
-- **Upscaling**: bilinear or Snapdragon GSR.
+- **Upscaling**: bilinear or AMD FSR 1.
 - **CRT filters**: soft scanlines, a classic TV, an arcade monitor.
 - Every setting **global or per game**.
 

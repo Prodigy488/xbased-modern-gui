@@ -42,6 +42,7 @@
 #define STATUS_OBJECT_NAME_COLLISION  0xC0000035u
 #define STATUS_OBJECT_PATH_NOT_FOUND  0xC000003Au
 #define STATUS_DELETE_PENDING         0xC0000056u
+#define STATUS_SHARING_VIOLATION      0xC0000043u
 #define STATUS_MEDIA_WRITE_PROTECTED  0xC00000A2u
 #define STATUS_NO_MEDIA_IN_DEVICE     0xC0000013u
 #define STATUS_FILE_IS_A_DIRECTORY    0xC00000BAu
@@ -93,6 +94,11 @@ typedef struct NcFile {
      * one a dead process left behind is swept at the next overwrite. */
     char old_path[320];  /* "" = none */
     uint64_t old_size;
+    /* Share access, as IoCheckShareAccess keeps it (F_HOST files): the
+     * reading, writing and deleting this handle was granted (SHARE_*), and
+     * which of them it lets other handles have (its ShareAccess). 0 granted:
+     * it takes no part (attributes only). */
+    uint8_t share_granted, share_allowed;
     bool wrote;          /* written through this handle: synced when it closes */
     /* A directory's enumeration works on a snapshot taken when it starts:
      * XDeleteSaveGame deletes each file as the listing returns it, and a live
@@ -128,6 +134,32 @@ typedef struct NcFile {
 #define ACCESS_WRITES (0x00000002u /* FILE_WRITE_DATA */ | 0x00000004u /* FILE_APPEND_DATA */ | \
                        0x40000000u /* GENERIC_WRITE */ | 0x10000000u /* GENERIC_ALL */ |       \
                        0x02000000u /* MAXIMUM_ALLOWED */)
+
+/* The share bits (FILE_SHARE_READ, _WRITE, _DELETE) a DesiredAccess counts
+ * for, as IoCheckShareAccess has them: reading or executing the data,
+ * writing or appending it, deleting the file. */
+#define SHARE_READ   1u
+#define SHARE_WRITE  2u
+#define SHARE_DELETE 4u
+
+static uint8_t share_granted(uint32_t access)
+{
+    uint8_t g = 0;
+    if (access & (0x00000001u /* FILE_READ_DATA */ | 0x00000020u /* FILE_EXECUTE */ | 0x80000000u /* GENERIC_READ */ |
+                  0x20000000u /* GENERIC_EXECUTE */)) {
+        g |= SHARE_READ;
+    }
+    if (access & (0x00000002u /* FILE_WRITE_DATA */ | 0x00000004u /* FILE_APPEND_DATA */ | 0x40000000u /* GENERIC_WRITE */)) {
+        g |= SHARE_WRITE;
+    }
+    if (access & 0x00010000u /* DELETE */) {
+        g |= SHARE_DELETE;
+    }
+    if (access & (0x10000000u /* GENERIC_ALL */ | 0x02000000u /* MAXIMUM_ALLOWED: all of it granted */)) {
+        g |= SHARE_READ | SHARE_WRITE | SHARE_DELETE;
+    }
+    return g;
+}
 
 /* Open files at once: the handle table's size. Fatal Frame opens most of its
  * disc's 1821 files as it boots and keeps them open; at 1024 the rest failed
@@ -418,6 +450,28 @@ static NcFile *file_new(void)
             g_files[i].used = true;
             g_files[i].fd = -1;
             return &g_files[i];
+        }
+    }
+    return NULL;
+}
+
+/* An open handle on the host file whose share access the new one's
+ * (granted, allowed) conflicts with, or NULL: either wants what the other
+ * doesn't share (IoCheckShareAccess). Mission: Impossible - Operation Surma
+ * copies its levels to the Z: cache in the background, each copy's file
+ * held open unshared until it is complete, and reads a level from the cache
+ * only when it can open it: from the disc while its copy goes on. Opened
+ * regardless, the copy's empty file was the level, a dirty-disc screen. */
+static NcFile *share_conflict(const char *host, uint8_t granted, uint8_t allowed)
+{
+    if (!granted) {
+        return NULL;
+    }
+    for (int i = 0; i < MAX_FILES; i++) {
+        NcFile *o = &g_files[i];
+        if (o->used && o->kind == F_HOST && !o->is_dir && o->share_granted && !strcmp(o->host, host) &&
+            ((granted & ~o->share_allowed) || (o->share_granted & ~allowed))) {
+            return o;
         }
     }
     return NULL;
@@ -1194,8 +1248,8 @@ bool nc_io_disc_lacks_language(const NcDisc *disc, int lang)
     return lacks;
 }
 
-static uint32_t do_open(NcKernel *k, uint32_t access, uint32_t attrs, uint32_t disposition, uint32_t options,
-                        uint32_t *handle, uint32_t *info)
+static uint32_t do_open(NcKernel *k, uint32_t access, uint32_t share, uint32_t attrs, uint32_t disposition,
+                        uint32_t options, uint32_t *handle, uint32_t *info)
 {
     char name[512], path[512];
     ansi(k, nc_vm_rd32(k->vm, attrs + 4), name, sizeof(name));
@@ -1293,6 +1347,12 @@ static uint32_t do_open(NcKernel *k, uint32_t access, uint32_t attrs, uint32_t d
         if (exists && disposition == FILE_CREATE) {
             return STATUS_OBJECT_NAME_COLLISION;
         }
+        if (exists && !is_dir && share_conflict(host, share_granted(access), (uint8_t)(share & 7))) {
+            if (g_trace_io) {
+                nc_log("hakuX-native-io", "open %s: sharing violation", path);
+            }
+            return STATUS_SHARING_VIOLATION;
+        }
         if (!exists && (disposition == FILE_OPEN || disposition == FILE_OVERWRITE)) {
             if (g_trace_io) {
                 nc_log("hakuX-native-io", "open %s: not found", path);
@@ -1359,6 +1419,10 @@ static uint32_t do_open(NcKernel *k, uint32_t access, uint32_t attrs, uint32_t d
         snprintf(nf->old_path, sizeof(nf->old_path), "%s", old_path);
         nf->old_size = old_size;
         snprintf(nf->host, sizeof(nf->host), "%s", host);
+        if (!is_dir) {
+            nf->share_granted = share_granted(access);
+            nf->share_allowed = (uint8_t)(share & 7);
+        }
     }
     snprintf(nf->path, sizeof(nf->path), "%s", path);
     nf->async = !(options & FILE_SYNCHRONOUS_IO);
@@ -1376,7 +1440,7 @@ static uint32_t do_open(NcKernel *k, uint32_t access, uint32_t attrs, uint32_t d
 static uint64_t NtCreateFile(NcKernel *k, NcFrame *f, const uint32_t *a)
 {
     uint32_t h = 0, info = 0;
-    uint32_t st = do_open(k, a[1], a[2], a[7], a[8], &h, &info);
+    uint32_t st = do_open(k, a[1], a[6], a[2], a[7], a[8], &h, &info);
     io_status(k, a[3], st, info);
     if (st == NC_STATUS_SUCCESS) {
         nc_vm_wr32(k->vm, a[0], h);
@@ -1388,7 +1452,7 @@ static uint64_t NtCreateFile(NcKernel *k, NcFrame *f, const uint32_t *a)
 static uint64_t NtOpenFile(NcKernel *k, NcFrame *f, const uint32_t *a)
 {
     uint32_t h = 0, info = 0;
-    uint32_t st = do_open(k, a[1], a[2], FILE_OPEN, a[5], &h, &info);
+    uint32_t st = do_open(k, a[1], a[4], a[2], FILE_OPEN, a[5], &h, &info);
     io_status(k, a[3], st, info);
     if (st == NC_STATUS_SUCCESS) {
         nc_vm_wr32(k->vm, a[0], h);
@@ -2509,7 +2573,7 @@ static uint64_t NtQueryDirectoryFile(NcKernel *k, NcFrame *f, const uint32_t *a)
 static uint64_t NtQueryFullAttributesFile(NcKernel *k, NcFrame *f, const uint32_t *a)
 {
     uint32_t h = 0, info = 0;
-    uint32_t st = do_open(k, 0, a[0], FILE_OPEN, 0, &h, &info);
+    uint32_t st = do_open(k, 0, 7, a[0], FILE_OPEN, 0, &h, &info);
     if (st != NC_STATUS_SUCCESS) {
         return st;
     }

@@ -34,9 +34,9 @@ above:
 - native/kernel/xboxkrnl.exe.def comes from nxdk: CC0-1.0.
 - The window presenter's shaders (hw/xbox/hle/vk/swapchain.c): its FXAA is
   FXAA 3.11 Quality (Timothy Lottes) as PCSX2's fxaa.fx tunes it, GNU
-  General Public License, version 3 or later; its SGSR is Qualcomm's
-  Snapdragon Game Super Resolution 1, BSD 3-Clause
-  (licenses/snapdragon-gsr.license.txt).
+  General Public License, version 3 or later; its upscaler is AMD
+  FidelityFX Super Resolution 1 (EASU and RCAS), MIT
+  (licenses/amd-fsr1.license.txt).
 - The libraries the app bundles (FEX, SDL3, adrenotools, glslang, volk,
   Vulkan Memory Allocator, SPIRV-Reflect, nv2a_vsh_cpu, and FEX's own
   dependencies): their licenses are in licenses/.

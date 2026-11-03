@@ -1,5 +1,22 @@
 # xbased changelog
 
+## 1.0.11 (2026-11)
+
+### Fixes
+- Mission: Impossible - Operation Surma: a new game stopped on the "disc is
+  dirty or damaged" screen. The game copies its levels to the hard disk's
+  cache in the background, keeping each copy's file open and unshared until
+  it is complete, and loads a level from the cache only when it can open it
+  (from the disc meanwhile). Files on the hard disk now keep the share
+  access their handles were opened with, as the Xbox's do: an open of a
+  copy still in progress is refused, and the level loads from the disc.
+
+### Picture
+- Upscaling with AMD FidelityFX Super Resolution 1 (its EASU edge
+  reconstruction and RCAS sharpening) in place of Snapdragon GSR: Settings ›
+  Video › Upscaling › AMD FSR 1. A setting that chose GSR (global or a
+  game's) now chooses FSR; bilinear stays bilinear.
+
 ## 1.0.10 (2026-11)
 
 ### New
