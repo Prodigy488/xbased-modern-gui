@@ -7,6 +7,9 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#ifdef _WIN32
+#include <windows.h>
+#endif
 
 static void trim(char *s)
 {
@@ -227,4 +230,72 @@ const char *cfg_data_dir(void)
     }
 #endif
     return dir;
+}
+
+bool cfg_run(const char *const *args)
+{
+#ifdef _WIN32
+    /* SDL's processes open a console window for a console program (curl
+     * and tar flashed one at each start), and its windowless "background"
+     * ones give no exit code: CreateProcess with CREATE_NO_WINDOW. The
+     * command line quoted as the C runtime reads it back. */
+    char cmd[8192];
+    size_t n = 0;
+    for (int i = 0; args[i] && n < sizeof(cmd) - 4; i++) {
+        if (i) {
+            cmd[n++] = ' ';
+        }
+        cmd[n++] = '"';
+        for (const char *a = args[i]; *a && n < sizeof(cmd) - 4; a++) {
+            size_t bs = 0;
+            while (a[bs] == '\\') {
+                bs++;
+            }
+            if (a[bs] == '"' || a[bs] == 0) {
+                /* backslashes before a quote, or the closing one, doubled */
+                for (size_t k = 0; k < bs * 2 && n < sizeof(cmd) - 4; k++) {
+                    cmd[n++] = '\\';
+                }
+                a += bs;
+                if (!*a) {
+                    break;
+                }
+                cmd[n++] = '\\';
+                cmd[n++] = '"';
+            } else {
+                for (size_t k = 0; k < bs && n < sizeof(cmd) - 4; k++) {
+                    cmd[n++] = '\\';
+                }
+                a += bs;
+                cmd[n++] = *a;
+            }
+        }
+        cmd[n++] = '"';
+    }
+    cmd[n] = 0;
+    wchar_t wcmd[8192];
+    if (!MultiByteToWideChar(CP_UTF8, 0, cmd, -1, wcmd, 8192)) {
+        return false;
+    }
+    STARTUPINFOW si = {.cb = sizeof(si)};
+    PROCESS_INFORMATION pi;
+    if (!CreateProcessW(NULL, wcmd, NULL, NULL, FALSE, CREATE_NO_WINDOW, NULL, NULL, &si, &pi)) {
+        return false;
+    }
+    CloseHandle(pi.hThread);
+    WaitForSingleObject(pi.hProcess, INFINITE);
+    DWORD code = 1;
+    GetExitCodeProcess(pi.hProcess, &code);
+    CloseHandle(pi.hProcess);
+    return code == 0;
+#else
+    SDL_Process *p = SDL_CreateProcess(args, false);
+    if (!p) {
+        return false;
+    }
+    int code = -1;
+    SDL_WaitProcess(p, true, &code);
+    SDL_DestroyProcess(p);
+    return code == 0;
+#endif
 }

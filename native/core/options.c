@@ -73,6 +73,8 @@ bool nc_option(NcOptions *o, const char *arg)
         nc_kernel_set_audio(surround);
         nc_audio_set_channels(surround ? 6 : 2);
         nc_log("hakuX-app", "audio %s", surround ? "5.1 (Dolby Digital)" : "stereo");
+    } else if ((v = value(arg, "pal60="))) {
+        nc_kernel_set_pal60(atoi(v) != 0);      /* PAL titles at 60 Hz (default) or 50 */
     } else if ((v = value(arg, "lang="))) {
         nc_kernel_set_language(atoi(v));
         nc_log("hakuX-app", "console language %s", v);

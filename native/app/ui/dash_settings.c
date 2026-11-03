@@ -34,6 +34,14 @@ static void rows_video(List *l)
     opt_choice(l, S_CRT, "crt", cv, cn, 4, "0");
 }
 
+/* PAL games at 60 Hz, as a PAL console with PAL-60 on runs them, or 50 Hz */
+static void rows_pal(List *l)
+{
+    static const char *const pv[] = {"1", "0"};
+    static const char *const pn[] = {"60 Hz", "50 Hz"};
+    opt_choice(l, S_PAL_GAMES, "pal60", pv, pn, 2, "1");
+}
+
 static void rows_console(List *l)
 {
     static const char *lv[] = {"auto", "1", "2", "3", "4", "5", "6", "7", "8", "9"};
@@ -140,6 +148,7 @@ void scr_settings(void)
         opt_videoflag(&l, S_P480, 0x80000);
         opt_videoflag(&l, S_P720, 0x20000);
         opt_videoflag(&l, S_I1080, 0x40000);
+        rows_pal(&l);
         static const char *pv[] = {"hdtv", "standard", "svideo", "scart", "vga"};
         static const char *pn[] = {"HDTV (component)", "Standard (composite)", "S-Video", "SCART (RGB)", "VGA"};
         opt_choice(&l, S_AVPACK, "avpack", pv, pn, 5, "hdtv");
@@ -280,6 +289,7 @@ void scr_game_settings(void)
                         "Português"};
     opt_choice(&l, S_CONSOLE_LANG, "lang", lv, ln, 10, "auto");
     opt_videoflag(&l, S_WIDESCREEN, 0x10000);
+    rows_pal(&l);
     opt_bool(&l, S_ASYNC_SHADERS, "asyncpipe", true, false);
     if (list_row(&l, T(S_RESET_GAME), NULL, NULL)) {
         dash_ask(T(S_RESET_GAME), reset_game);

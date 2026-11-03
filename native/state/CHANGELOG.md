@@ -58,3 +58,8 @@ One entry per section version (tools/native/statelock.py).
 
 - NcThread.boost, no_boost: NT's wait boost (a thread a signal woke runs at priority + the signal's increment, up to 15, a step less each quantum that ends) and KeSetDisableBoostThread's flag (v2 states: 0, no boost, boosts on)
 - upgraded: v1..v2 states load
+
+## FILE v4 (2026-11-03, after 8cb7c31c13)
+
+- NcFile.host, old_path: kept by their place in the hdd folder (Partition1/..., .overwrite/...), so a state loads from a copy of the folder elsewhere or on another system (v1..v3 states: the absolute path of the folder they were made in, taken from its PartitionN or .overwrite on)
+- upgraded: v1..v3 states load

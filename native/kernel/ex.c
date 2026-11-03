@@ -147,6 +147,12 @@ void nc_kernel_set_language(int language)
 
 /* The app's audio (nc_kernel_set_audio): stereo unless 5.1 was chosen. */
 static bool g_audio_surround;
+static bool g_pal60 = true;
+
+void nc_kernel_set_pal60(bool on)
+{
+    g_pal60 = on;
+}
 
 void nc_kernel_set_audio(bool surround)
 {
@@ -405,6 +411,13 @@ static uint8_t *eeprom(NcKernel *k)
         /* So do the video settings: the app's (widescreen, 480p...). */
         if (g_video_flags >= 0) {
             nc_wr32(g_eeprom + 0x94, (uint32_t)g_video_flags);
+        }
+        /* PAL titles at 60 Hz, as a PAL console with PAL-60 on runs them
+         * (the app's default; 50 Hz the other choice): the flag the console's
+         * dashboard sets, which the titles read to offer or take 60 Hz. */
+        if (pal) {
+            const uint32_t v = nc_rd32(g_eeprom + 0x94);
+            nc_wr32(g_eeprom + 0x94, g_pal60 ? v | NC_VIDEO_PAL60 : v & ~NC_VIDEO_PAL60);
         }
         if (g_language) {
             nc_wr32(g_eeprom + 0x90, (uint32_t)g_language);

@@ -1,5 +1,32 @@
 # xbased changelog
 
+## 1.0.10 (2026-11)
+
+### New
+- PAL games at 60 Hz by default, as a PAL console with its PAL-60 setting
+  on runs them (Panzer Dragoon Orta, 50 fps before, plays at 60). Settings ›
+  System › PAL games sets 50 Hz instead, for all games or one (its
+  settings). A game without a 60 Hz mode stays at 50, as on the console.
+
+### Fixes
+- Driv3r: Tanner drawn with flat, skin-coloured legs and a bald head,
+  where he has jeans and hair. The game's characters add
+  an environment cube map through a texture stage whose coordinates their
+  vertex program leaves unwritten; a PC GPU's look-up along no direction
+  returned a bright texel, and the game's tint turned it into skin tone over
+  the whole body. That look-up now gives black, and Tanner looks as he
+  does on the console.
+- Save states no longer depend on where xbased's folder is: they kept the
+  full path of each file the game had open, so a state stopped loading once
+  the folder moved (or reopened the old folder's files), and a Windows
+  state didn't load on Linux. They now keep each file's place in the hard
+  disk folder; states from earlier versions load too.
+- Windows: no console windows flash as xbased starts (the update check and
+  the box-art downloads ran curl in one each).
+- The mouse pointer hides itself: hidden when xbased opens and during play,
+  it shows when the mouse moves, and hides again after a few still seconds
+  or when a key or a gamepad is used.
+
 ## 1.0.9 (2026-11)
 
 ### New

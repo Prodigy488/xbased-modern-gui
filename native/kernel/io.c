@@ -2984,6 +2984,63 @@ const char *nc_io_state_drain(NcKernel *k, uint64_t timeout_ns)
     return NULL;
 }
 
+/* A state keeps the host files (NcFile.host, old_path) by their place in
+ * the hdd folder ("Partition1/CACHE/LocalCache00.bin", ".overwrite/12-3"),
+ * so it loads from a copy of the folder elsewhere, or on another system;
+ * FILE v1..v3 states hold the absolute path of the folder they were made in. */
+static bool is_sep(char c)
+{
+    return c == '/' || c == '\\';
+}
+
+/* The part of an absolute host path under its hdd folder: from the folder's
+ * own child (PartitionN, .overwrite) on, or NULL. */
+static const char *hdd_child(const char *p)
+{
+    for (const char *s = p; *s; s++) {
+        if (!is_sep(*s)) {
+            continue;
+        }
+        const char *c = s + 1;
+        if ((!strncmp(c, "Partition", 9) && isdigit((unsigned char)c[9]) && (!c[10] || is_sep(c[10]))) ||
+            (!strncmp(c, ".overwrite", 10) && is_sep(c[10]))) {
+            return c;
+        }
+    }
+    return NULL;
+}
+
+static void host_to_state(const char *host, char *out, size_t cap)
+{
+    const size_t n = strlen(g_hdd_root);
+    const char *rel = !strncmp(host, g_hdd_root, n) && is_sep(host[n]) ? host + n + 1 : hdd_child(host);
+    memset(out, 0, cap);                /* no trace of the folder past the name */
+    snprintf(out, cap, "%s", rel ? rel : host);
+}
+
+/* The host path of a state's file in this run's hdd folder; false if it
+ * doesn't fit. */
+static bool host_from_state(char *p, size_t cap)
+{
+    const bool abs = is_sep(p[0]) || (isalpha((unsigned char)p[0]) && p[1] == ':');
+    const char *rel = abs ? hdd_child(p) : p;
+    if (!p[0] || !rel) {
+        return true;                    /* kept as it is */
+    }
+    char out[600];
+    const int n = snprintf(out, sizeof(out), "%s/%s", g_hdd_root, rel);
+    if (n < 0 || (size_t)n >= cap) {
+        return false;
+    }
+    for (char *c = out + strlen(g_hdd_root) + 1; *c; c++) {
+        if (*c == '\\') {
+            *c = '/';
+        }
+    }
+    memcpy(p, out, (size_t)n + 1);
+    return true;
+}
+
 bool nc_file_state_save(NcBuf *b)
 {
     NcFileState st = {0};
@@ -2997,8 +3054,11 @@ bool nc_file_state_save(NcBuf *b)
         if (!nf->used) {
             continue;
         }
+        NcFile out = *nf;
+        host_to_state(nf->host, out.host, sizeof(out.host));
+        host_to_state(nf->old_path, out.old_path, sizeof(out.old_path));
         nc_buf_u32(b, i);
-        nc_rec_put(b, &nc_rec_NcFile, nf);
+        nc_rec_put(b, &nc_rec_NcFile, &out);
         nc_recs_put(b, &nc_rec_DirEntry, nf->listing, sizeof(DirEntry), nf->listing ? nf->nlisting : 0);
     }
     return true;
@@ -3046,8 +3106,28 @@ bool nc_file_state_load(NcRd *r, unsigned v)
             nc_recs_get(r, &nc_rec_DirEntry, nf->listing, sizeof(DirEntry), nf->nlisting, v);
         }
         nf->fd = -1;
+        if (!host_from_state(nf->host, sizeof(nf->host)) || !host_from_state(nf->old_path, sizeof(nf->old_path))) {
+            nc_state_fail("the hdd folder's path is too long for %s", nf->path);
+            ok = false;
+            break;
+        }
         if (nf->kind == F_HOST && !nf->is_dir) {
             nf->fd = open(nf->host, O_RDWR | O_CLOEXEC);
+            int err = errno;
+            const char *rel;
+            char host[512];
+            if (nf->fd < 0 && err == ENOENT && device_of(nf->path, &rel) == nf->partition && *rel &&
+                host_path(nf->partition, rel, host, sizeof(host)) == 1 && strcmp(host, nf->host)) {
+                /* the game's own path, its names matched as the drive has them
+                 * (a state from Windows on Linux, whose names are case-sensitive) */
+                nf->fd = open(host, O_RDWR | O_CLOEXEC);
+                if (nf->fd >= 0) {
+                    snprintf(nf->host, sizeof(nf->host), "%s", host);
+                } else {
+                    err = errno;
+                }
+            }
+            errno = err;
             if (nf->fd < 0 && errno == ENOENT && nf->partition >= 3 && v < 2) {
                 /* not on the drive as saved (CACHE, restored first): deleted
                  * with this handle open, in a state from before deletes waited
@@ -3085,7 +3165,8 @@ bool nc_file_state_load(NcRd *r, unsigned v)
             }
         }
         if (nc_state_trace()) {
-            nc_log("hakuX-native-state", "file %u: %s at %llu", i, nf->path, (unsigned long long)nf->pos);
+            nc_log("hakuX-native-state", "file %u: %s%s%s%s at %llu", i, nf->path, nf->host[0] ? " (" : "",
+                   nf->host, nf->host[0] ? ")" : "", (unsigned long long)nf->pos);
         }
     }
     return ok && !r->fail;

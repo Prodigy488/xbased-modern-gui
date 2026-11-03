@@ -408,6 +408,9 @@ void nc_kernel_set_language(int language);
 /* ex.c: the console's audio setting (XC_AUDIO_FLAGS): stereo, or Dolby
  * Digital on (the games mix six channels). Before the title starts. */
 void nc_kernel_set_audio(bool surround);
+/* ex.c: PAL titles at 60 Hz (the console's PAL-60 setting, NC_VIDEO_PAL60
+ * in the video flags; the default) or at 50 Hz. Before the title starts. */
+void nc_kernel_set_pal60(bool on);
 
 /* The console's clock and time zone, before the title starts. ke.c: its
  * time at boot is the phone's (CLOCK_REALTIME) moved by offset_ms, the

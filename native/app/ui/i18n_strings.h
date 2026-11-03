@@ -93,6 +93,7 @@ X(S_NONE, "None", "Ninguno", "Aucun", "Keins", "Nessuno", "Nenhum", "Нет", "B
 X(S_REMAP, "Remap buttons", "Reasignar botones", "Réassigner les boutons", "Tasten belegen", "Rimappa pulsanti", "Remapear botões", "Переназначить кнопки", "Przypisz przyciski", "ボタン割り当て", "重新映射按键", "버튼 재할당")
 X(S_PRESS_INPUT, "Press a button or key for", "Pulsa un botón o tecla para", "Appuyez sur un bouton ou une touche pour", "Drücke eine Taste für", "Premi un tasto per", "Pressione um botão ou tecla para", "Нажмите кнопку или клавишу для", "Naciśnij przycisk lub klawisz dla", "割り当てるボタンかキーを押す:", "请按下按钮或按键：", "버튼이나 키를 누르세요:")
 X(S_DEADZONE, "Stick dead zone", "Zona muerta del stick", "Zone morte du stick", "Stick-Totzone", "Zona morta levetta", "Zona morta do analógico", "Мёртвая зона стика", "Martwa strefa gałki", "スティックのデッドゾーン", "摇杆死区", "스틱 데드존")
+X(S_PAL_GAMES, "PAL games", "Juegos PAL", "Jeux PAL", "PAL-Spiele", "Giochi PAL", "Jogos PAL", "Игры PAL", "Gry PAL", "PAL ゲーム", "PAL 游戏", "PAL 게임")
 X(S_STICK_RANGE, "Stick range", "Rango del stick", "Amplitude du stick", "Stick-Bereich", "Escursione levetta", "Alcance do analógico", "Диапазон стика", "Zakres gałki", "スティックの範囲", "摇杆范围", "스틱 범위")
 X(S_STICK_SHAPE, "Stick shape", "Forma del stick", "Forme du stick", "Stick-Form", "Forma levetta", "Forma do analógico", "Форма стика", "Kształt gałki", "スティックの形", "摇杆形状", "스틱 모양")
 X(S_SHAPE_SQUARE, "Square (Xbox)", "Cuadrada (Xbox)", "Carrée (Xbox)", "Quadratisch (Xbox)", "Quadrata (Xbox)", "Quadrada (Xbox)", "Квадрат (Xbox)", "Kwadrat (Xbox)", "四角 (Xbox)", "方形 (Xbox)", "사각형 (Xbox)")

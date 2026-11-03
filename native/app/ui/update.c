@@ -43,14 +43,7 @@ static struct {
 
 static bool run(const char *const *args)
 {
-    SDL_Process *p = SDL_CreateProcess(args, false);
-    if (!p) {
-        return false;
-    }
-    int code = -1;
-    SDL_WaitProcess(p, true, &code);
-    SDL_DestroyProcess(p);
-    return code == 0;
+    return cfg_run(args);
 }
 
 static bool curl(const char *url, const char *to, const char *max_time)

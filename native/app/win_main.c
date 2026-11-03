@@ -555,6 +555,7 @@ static void ingame_menu(SDL_Window *win, bool *paused, bool minimized)
     int slot = 0;
     const char *title = strrchr(g_disc, '\\');
     const int act = dash_ingame(win, g_key, title ? title + 1 : g_disc, pic, &slot);
+    SDL_HideCursor();   /* the game doesn't use the mouse; the menu may have shown it */
     remove(pic);
     nc_auto_resync();
     /* the presenter back on the window before anything is shown or saved */
@@ -692,7 +693,7 @@ static const char *pick_disc(void)
 }
 
 #ifndef XBASED_VERSION
-#define XBASED_VERSION "1.0.9"
+#define XBASED_VERSION "1.0.10"
 #endif
 #ifdef _WIN32
 #define NC_PLATFORM_NAME "Windows"
@@ -839,6 +840,7 @@ int main(int argc, char *argv[])
         fatal_box("xbased", SDL_GetError());
         return 1;
     }
+    SDL_HideCursor();   /* the game doesn't use the mouse */
     SDL_PropertiesID props = SDL_GetWindowProperties(win);
     g_nw.hwnd = SDL_GetPointerProperty(props, SDL_PROP_WINDOW_WIN32_HWND_POINTER, NULL);
     g_nw.hinstance = SDL_GetPointerProperty(props, SDL_PROP_WINDOW_WIN32_INSTANCE_POINTER, NULL);

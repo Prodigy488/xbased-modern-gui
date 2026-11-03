@@ -18,7 +18,7 @@
 #endif
 
 #ifndef XBASED_VERSION
-#define XBASED_VERSION "1.0.9"
+#define XBASED_VERSION "1.0.10"
 #endif
 
 Dash D;
@@ -150,6 +150,21 @@ static void press(int dir)
     D.in.any = true;
 }
 
+static double g_cursor_at;  /* when the pointer showed; 0 hidden */
+
+static void cursor(bool show)
+{
+    if (show) {
+        if (g_cursor_at <= 0) {
+            SDL_ShowCursor();
+        }
+        g_cursor_at = ui_time();
+    } else if (g_cursor_at > 0) {
+        SDL_HideCursor();
+        g_cursor_at = 0;
+    }
+}
+
 static void poll_input(void)
 {
     static float ax[2];
@@ -158,11 +173,6 @@ static void poll_input(void)
     memset(in, 0, sizeof(*in));
     in->pad = pad;
     in->pad_button = -1;
-    float mx, my;
-    SDL_GetMouseState(&mx, &my);
-    float dpi = SDL_GetWindowPixelDensity(g_win);
-    in->mx = mx * dpi / ui_scale();
-    in->my = my * dpi / ui_scale();
     SDL_Event e;
     while (SDL_PollEvent(&e)) {
         switch (e.type) {
@@ -171,6 +181,7 @@ static void poll_input(void)
             break;
         case SDL_EVENT_KEY_DOWN: {
             in->pad = false;
+            cursor(false);
             in->key = e.key.key;
             in->any = true;
             const SDL_Keycode k = e.key.key;
@@ -203,11 +214,16 @@ static void poll_input(void)
             in->text = e.text.text;
             break;
         case SDL_EVENT_MOUSE_MOTION:
-            in->moved = true;
-            in->pad = false;
+            /* a real move, not the window appearing under the pointer */
+            if (fabsf(e.motion.xrel) + fabsf(e.motion.yrel) >= 2) {
+                in->moved = true;
+                in->pad = false;
+                cursor(true);
+            }
             break;
         case SDL_EVENT_MOUSE_BUTTON_DOWN:
             in->pad = false;
+            cursor(true);
             in->any = true;
             if (e.button.button == SDL_BUTTON_LEFT) {
                 in->click = true;
@@ -220,6 +236,7 @@ static void poll_input(void)
             break;
         case SDL_EVENT_MOUSE_WHEEL:
             in->wheel += e.wheel.y;
+            cursor(true);
             break;
         case SDL_EVENT_GAMEPAD_ADDED:
             for (int i = 0; i < 8; i++) {
@@ -242,6 +259,7 @@ static void poll_input(void)
             const bool down = e.type == SDL_EVENT_GAMEPAD_BUTTON_DOWN;
             g_last_pad = e.gbutton.which;
             in->pad = true;
+            cursor(false);
             if (down) {
                 in->pad_button = e.gbutton.button;
                 in->any = true;
@@ -290,6 +308,21 @@ static void poll_input(void)
         default:
             break;
         }
+    }
+    /* the pointer: hidden until the mouse moves, hidden again by the
+     * keyboard or a gamepad or after a few still seconds; nothing points
+     * while it's hidden */
+    if (g_cursor_at > 0 && ui_time() - g_cursor_at > 3) {
+        cursor(false);
+    }
+    float mx, my;
+    SDL_GetMouseState(&mx, &my);
+    float dpi = SDL_GetWindowPixelDensity(g_win);
+    in->mx = g_cursor_at > 0 ? mx * dpi / ui_scale() : -1;
+    in->my = g_cursor_at > 0 ? my * dpi / ui_scale() : -1;
+    if (g_cursor_at <= 0) {
+        in->moved = in->click = in->rclick = false;
+        in->wheel = 0;
     }
     if (g_rep_dir && ui_time() >= g_rep_at) {
         press(g_rep_dir);
@@ -1339,6 +1372,8 @@ int dash_run(SDL_Window *win, const char *exe)
 {
     memset(&D, 0, sizeof(D));
     g_win = win;
+    SDL_HideCursor();   /* it shows when the mouse moves (poll_input) */
+    g_cursor_at = 0;
     snprintf(D.exe, sizeof(D.exe), "%s", exe);
     char p[1200];
     snprintf(p, sizeof(p), "%sxbased.ini", cfg_data_dir());
@@ -1622,6 +1657,8 @@ int dash_ingame(SDL_Window *win, const char *key, const char *title, const char 
 {
     memset(&D, 0, sizeof(D));
     g_win = win;
+    SDL_HideCursor();   /* it shows when the mouse moves (poll_input) */
+    g_cursor_at = 0;
     char p[1200];
     snprintf(p, sizeof(p), "%sxbased.ini", cfg_data_dir());
     cfg_load(&D.global, p);
