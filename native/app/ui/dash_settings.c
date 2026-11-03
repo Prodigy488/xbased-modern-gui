@@ -14,9 +14,10 @@
 
 static void rows_video(List *l)
 {
-    static const char *const sv[] = {"1", "2", "3", "4"};
-    static const char *const sn[] = {"1x  (640x480)", "2x  (1280x960)", "3x  (1920x1440)", "4x  (2560x1920)"};
-    opt_choice(l, S_RENDER_SCALE, "scale", sv, sn, 4, "1");
+    static const char *const sv[] = {"1", "2", "3", "4", "5", "6", "7", "8"};
+    static const char *const sn[] = {"1x  (640x480)",   "2x  (1280x960)",  "3x  (1920x1440)", "4x  (2560x1920)",
+                                     "5x  (3200x2400)", "6x  (3840x2880)", "7x  (4480x3360)", "8x  (5120x3840)"};
+    opt_choice(l, S_RENDER_SCALE, "scale", sv, sn, 8, "1");
     static const char *av[] = {"auto", "4:3", "16:9", "stretch"};
     const char *an[] = {T(S_AUTO), "4:3", "16:9", T(S_STRETCH)};
     opt_choice(l, S_ASPECT, "aspect", av, an, 4, "auto");

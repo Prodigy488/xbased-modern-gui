@@ -1,5 +1,13 @@
 # xbased changelog
 
+## 1.0.6 (2026-11)
+
+### Picture
+- Internal resolution up to 8x (5120x3840 for a 640x480 game), from 4x:
+  5x and 6x for 4K screens, 7x and 8x as supersampling. A target too big for
+  the GPU's largest image at the chosen scale renders at the largest one that
+  fits. Fable plays at its full 30 fps at 8x.
+
 ## 1.0.5 (2026-11)
 
 ### Credits
