@@ -5,7 +5,7 @@
 <p align="center">
   <b>The original Xbox, on your PC.</b><br>
   A free and open-source Xbox emulator for Windows and Linux, with a console-style dashboard.<br>
-  crazyriddler's Windows and Linux edition of <a href="https://github.com/rfandango/hakuX">hakuX</a> by rfandango.
+  <b>By crazyriddler</b>: the Windows and Linux edition of <a href="https://github.com/rfandango/hakuX">hakuX</a> by rfandango.
 </p>
 
 <p align="center">
@@ -40,12 +40,15 @@ accurate MCPX audio core, brought to x86-64 Windows and Linux with a
 console-style front end of its own.
 No BIOS, MCPX ROM or hard-disk image is needed.
 
+xbased is created and maintained by **[crazyriddler](https://github.com/crazyriddler)**:
+the port, the dashboard, the game fixes and every release.
+
 ## Download
 
 | Platform | File | |
 |---|---|---|
-| **Windows** 10/11 (x64) | `xbased-1.0.6-windows-x64.zip` | Unzip anywhere and run `xbased.exe`. Portable: everything stays in its folder. |
-| **Linux** (x86-64) | `xbased-1.0.6-x86_64.AppImage` | `chmod +x` it and run. Ubuntu 22.04 or newer, or any distribution of the same age. |
+| **Windows** 10/11 (x64) | `xbased-1.0.7-windows-x64.zip` | Unzip anywhere and run `xbased.exe`. Portable: everything stays in its folder. |
+| **Linux** (x86-64) | `xbased-1.0.7-x86_64.AppImage` | `chmod +x` it and run. Ubuntu 22.04 or newer, or any distribution of the same age. |
 
 Get them from **[Releases](https://github.com/crazyriddler/xbased/releases/latest)**.
 
@@ -67,6 +70,8 @@ xbased doesn't include any copyrighted Xbox software.
 - **Borderless full screen by default**, any resolution, ultrawide or portrait,
   any DPI.
 - **Exit from the gamepad**, with a confirmation.
+- **Automatic updates**: a new release is offered as xbased starts and
+  installs itself (Settings › Interface turns the check off and on).
 
 </td>
 <td width="50%" valign="top">
@@ -119,6 +124,8 @@ xbased doesn't include any copyrighted Xbox software.
 ### Controls, online, languages
 - **4 controller ports**: Automatic, any gamepad or the keyboard; remap every
   button, per game too; dead zone and vibration.
+- **Stereo or 5.1 surround**: the games' Dolby Digital mix, six channels
+  out (Settings › Audio; stereo by default).
 - **Online**: Insignia (the community's Xbox Live replacement), XLink Kai and
   System Link on your network.
 - **11 languages**, your system's by default. Games start in your language,
@@ -264,12 +271,15 @@ More options (link-time optimization, the dependencies' location) are in
 
 ## Credits
 
+- **xbased** by **[crazyriddler](https://github.com/crazyriddler)**, its creator
+  and maintainer: the port of hakuX to x86-64 Windows and Linux, the
+  console-style dashboard and front end, the game fixes (Fable, The Thing,
+  BloodRayne 2, NFL Fever 2004, Panzer Dragoon Orta and more), internal
+  resolution up to 8x, 5.1 audio, the automatic updates and every release
+  ([CHANGELOG.md](CHANGELOG.md)).
 - **[hakuX](https://github.com/rfandango/hakuX)** by **rfandango**: the
   emulator core xbased is built on (kernel, NV2A renderer, MCPX audio). Its own
   README and changelog are in [docs/hakuX](docs/hakuX/).
-- **xbased**, the Windows and Linux edition of hakuX, by **crazyriddler**:
-  the port to x86-64, the console-style front end and the fixes listed in
-  [CHANGELOG.md](CHANGELOG.md).
 - Box art from the [libretro-thumbnails](https://github.com/libretro-thumbnails)
   project. Interface font: Play (SIL Open Font License).
 - SDL3, Zydis, libslirp, xxHash, volk, Vulkan Memory Allocator, glslang,

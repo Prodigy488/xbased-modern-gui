@@ -40,9 +40,13 @@ typedef struct Dash {
     int tab;                    /* the settings' tab */
     int player;                 /* the controls' player (0-3) */
     bool editing_game;          /* lists edit the game's file over the global one */
-    /* a question (yes/no), its callback */
+    /* a question (yes/no), its callback; or one with choices (dash_choose) */
     const char *ask;
     void (*on_yes)(struct Dash *);
+    const char *choices[3];
+    int nchoices;                               /* 0: yes/no */
+    void (*on_choice)(struct Dash *, int);      /* the choice, -1 backed out */
+    char ask_buf[256];
     char toast[256];
     double toast_until;
     char exe[1024];
@@ -65,6 +69,9 @@ void dash_pop(void);
 enum Screen dash_top(void);
 void dash_toast(const char *msg);
 void dash_ask(const char *question, void (*on_yes)(Dash *));
+/* A question with 2 or 3 answers, the first one selected; the question is
+ * copied. */
+void dash_choose(const char *question, const char *const *choices, int n, void (*on_choice)(Dash *, int));
 void dash_save_cfg(void);
 
 /* the lists: a panel of rows, the current screen's selection and scroll */

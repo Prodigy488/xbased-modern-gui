@@ -13,6 +13,8 @@
 #include <stdlib.h>
 #include <string.h>
 
+void nc_audio_set_channels(int n);  /* dev/apu/out.c */
+
 void nc_options_init(NcOptions *o)
 {
     *o = (NcOptions){ .async_pipe = true, .prebuild = true, .video = -1, .av_pack = NC_AV_PACK_HDTV };
@@ -64,6 +66,13 @@ bool nc_option(NcOptions *o, const char *arg)
                      : !strcmp(v, "scart")  ? NC_AV_PACK_SCART
                      : !strcmp(v, "vga")    ? NC_AV_PACK_VGA
                                             : NC_AV_PACK_HDTV;
+    } else if ((v = value(arg, "audio="))) {
+        /* stereo, or 5.1: the console set to Dolby Digital and the games'
+         * six channels out (dev/apu/out.c) */
+        const bool surround = !strcmp(v, "5.1");
+        nc_kernel_set_audio(surround);
+        nc_audio_set_channels(surround ? 6 : 2);
+        nc_log("hakuX-app", "audio %s", surround ? "5.1 (Dolby Digital)" : "stereo");
     } else if ((v = value(arg, "lang="))) {
         nc_kernel_set_language(atoi(v));
         nc_log("hakuX-app", "console language %s", v);

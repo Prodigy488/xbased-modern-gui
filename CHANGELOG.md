@@ -1,5 +1,21 @@
 # xbased changelog
 
+## 1.0.7 (2026-11)
+
+### New
+- Updates: as the dashboard starts, xbased looks for a newer release on
+  GitHub and offers it: Update, Not now, or Don't ask again. Update downloads
+  it and installs it over this copy (the Windows folder, or the Linux
+  AppImage), then starts it; settings, saves, states and the hard disk stay
+  as they are. Settings › Interface › Check for updates at startup turns the
+  check back on (or off). A copy that can't replace itself opens the
+  release's page instead.
+- Audio output, in Settings › Audio: Stereo (the default) or 5.1 surround.
+  In 5.1 the console reports Dolby Digital, the games mix for six speakers,
+  and xbased plays the six channels (front, center, subwoofer, rear); on
+  stereo speakers the system mixes them down. Stereo is now set whatever an
+  older console image (EEPROM) had kept.
+
 ## 1.0.6 (2026-11)
 
 ### Picture

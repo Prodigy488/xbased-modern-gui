@@ -405,6 +405,9 @@ void nc_kernel_set_video(int64_t flags, int av_pack);
  * 7 Korean, 8 Chinese (traditional), 9 Portuguese. Before the title starts;
  * any other value keeps the stored one. */
 void nc_kernel_set_language(int language);
+/* ex.c: the console's audio setting (XC_AUDIO_FLAGS): stereo, or Dolby
+ * Digital on (the games mix six channels). Before the title starts. */
+void nc_kernel_set_audio(bool surround);
 
 /* The console's clock and time zone, before the title starts. ke.c: its
  * time at boot is the phone's (CLOCK_REALTIME) moved by offset_ms, the

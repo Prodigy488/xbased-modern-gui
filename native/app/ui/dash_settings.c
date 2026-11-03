@@ -119,11 +119,17 @@ void scr_settings(void)
         opt_bool(&l, S_FULLSCREEN, "fullscreen", true, true);
         opt_bool(&l, S_SHOW_FPS, "showfps", false, false);
         break;
-    case 1:
+    case 1: {
+        /* the console's audio setting and the speakers it plays on: stereo,
+         * or 5.1 (the Xbox's Dolby Digital: the games' six channels) */
+        static const char *av[] = {"stereo", "5.1"};
+        const char *an[] = {T(S_STEREO), T(S_SURROUND51)};
+        opt_choice(&l, S_AUDIO_OUTPUT, "audio", av, an, 2, "stereo");
         opt_int(&l, S_VOLUME, "volume", 0, 100, 5, 100, "%");
         opt_bool(&l, S_MUTE_BG, "mutebg", true, false);
         opt_bool(&l, S_UI_SOUNDS, "ui.sounds", true, false);
         break;
+    }
     case 2: {
         static const char *lv[] = {"auto", "1", "2", "3", "4", "5", "6", "7", "8", "9"};
         const char *ln[] = {T(S_AUTO), "English", "日本語", "Deutsch", "Français", "Español", "Italiano", "한국어", "中文",
@@ -161,6 +167,7 @@ void scr_settings(void)
         opt_bool(&l, S_COVERS_ONLINE, "covers", true, false);
         opt_bool(&l, S_ANIMATED_BG, "ui.anim", true, false);
         opt_bool(&l, S_UI_SOUNDS, "ui.sounds", true, false);
+        opt_bool(&l, S_CHECK_UPDATES, "update.check", true, false);
         const char *dirs[16];
         const int nd = cfg_all(&D.global, "gamedir", dirs, 16);
         for (int i = 0; i < nd; i++) {

@@ -17,6 +17,7 @@ set(NC_APP_SOURCES
   "${CMAKE_CURRENT_SOURCE_DIR}/app/ui/dash.c"
   "${CMAKE_CURRENT_SOURCE_DIR}/app/ui/dash_settings.c"
   "${CMAKE_CURRENT_SOURCE_DIR}/app/ui/dash_memory.c"
+  "${CMAKE_CURRENT_SOURCE_DIR}/app/ui/update.c"
 )
 if(WIN32)
   enable_language(RC)
