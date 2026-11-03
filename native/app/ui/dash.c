@@ -17,7 +17,7 @@
 #endif
 
 #ifndef XBASED_VERSION
-#define XBASED_VERSION "1.0.4"
+#define XBASED_VERSION "1.0.5"
 #endif
 
 Dash D;
@@ -1135,8 +1135,9 @@ static void scr_about(void)
     snprintf(v, sizeof(v), "%s %s", T(S_VERSION), XBASED_VERSION);
     ui_text(W / 2, H * 0.52f, "xbased", 54, UI_FONT_BOLD, UI_GREEN_HI, UI_ALIGN_CENTER);
     ui_text(W / 2, H * 0.62f, v, 22, UI_FONT_REGULAR, UI_WHITE, UI_ALIGN_CENTER);
-    ui_text(W / 2, H * 0.67f, T(S_BASED_ON), 20, UI_FONT_REGULAR, UI_GREY, UI_ALIGN_CENTER);
-    ui_text(W / 2, H * 0.72f, "Fonts: Play (SIL OFL). Box art: libretro-thumbnails.", 18, UI_FONT_REGULAR, UI_GREY,
+    ui_text_fit(W / 2, H * 0.67f, T(S_BASED_ON), 20, UI_FONT_REGULAR, UI_GREY, UI_ALIGN_CENTER, W - 80);
+    ui_text(W / 2, H * 0.715f, "github.com/crazyriddler/xbased", 20, UI_FONT_REGULAR, UI_GREY, UI_ALIGN_CENTER);
+    ui_text(W / 2, H * 0.77f, "Fonts: Play (SIL OFL). Box art: libretro-thumbnails.", 18, UI_FONT_REGULAR, UI_GREY,
             UI_ALIGN_CENTER);
     if (D.in.back || D.in.ok) {
         dash_pop();

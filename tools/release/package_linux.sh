@@ -7,7 +7,7 @@ set -euo pipefail
 REPO=$(cd "$(dirname "$0")/../.." && pwd)
 BUILD=${1:-$REPO/../build/linux}
 OUT=${2:-$REPO/../dist}
-VERSION=${3:-1.0.4}
+VERSION=${3:-1.0.5}
 APPDIR=$OUT/xbased.AppDir
 mkdir -p "$OUT"
 rm -rf "$APPDIR"
@@ -29,7 +29,7 @@ cat > "$APPDIR/usr/share/applications/xbased.desktop" <<EOF
 Type=Application
 Name=xbased
 GenericName=Xbox Emulator
-Comment=Original Xbox emulator (based on hakuX)
+Comment=Original Xbox emulator: crazyriddler's Windows and Linux edition of hakuX by rfandango
 Exec=xbased %f
 Icon=xbased
 Terminal=false

@@ -1,5 +1,13 @@
 # xbased changelog
 
+## 1.0.5 (2026-11)
+
+### Credits
+- xbased is crazyriddler's Windows and Linux edition of hakuX by rfandango,
+  and now says so everywhere: the About screen (in every language, with
+  github.com/crazyriddler/xbased), the README, the program's version
+  information on Windows and its desktop entry on Linux.
+
 ## 1.0.4 (2026-11)
 
 ### Fixes
@@ -61,8 +69,8 @@ or closed at start.
 
 ## 1.0 (2026-11)
 
-The first release of xbased, the PC edition of
-[hakuX](https://github.com/rfandango/hakuX) for Windows and Linux.
+The first release of xbased, crazyriddler's Windows and Linux edition of
+[hakuX](https://github.com/rfandango/hakuX) by rfandango.
 
 ### Emulation
 - hakuX's core on x86-64: the guest's code translated to native x86-64, its

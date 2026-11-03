@@ -4,7 +4,8 @@
 
 <p align="center">
   <b>The original Xbox, on your PC.</b><br>
-  A free and open-source Xbox emulator for Windows and Linux, with a console-style dashboard.
+  A free and open-source Xbox emulator for Windows and Linux, with a console-style dashboard.<br>
+  crazyriddler's Windows and Linux edition of <a href="https://github.com/rfandango/hakuX">hakuX</a> by rfandango.
 </p>
 
 <p align="center">
@@ -32,18 +33,19 @@ https://github.com/user-attachments/assets/bf62adff-002a-4dc6-9b28-eee775181646
 
 ---
 
-**xbased** runs original Xbox games on a PC. It is the PC edition of
-[hakuX](https://github.com/rfandango/hakuX) by rfandango: the same reimplemented
-Xbox kernel, high-level NV2A renderer on Vulkan and accurate MCPX audio core,
-brought to x86-64 Windows and Linux with a console-style front end of its own.
+**xbased** runs original Xbox games on a PC. It is **crazyriddler's Windows and
+Linux edition of [hakuX](https://github.com/rfandango/hakuX) by rfandango**:
+the same reimplemented Xbox kernel, high-level NV2A renderer on Vulkan and
+accurate MCPX audio core, brought to x86-64 Windows and Linux with a
+console-style front end of its own.
 No BIOS, MCPX ROM or hard-disk image is needed.
 
 ## Download
 
 | Platform | File | |
 |---|---|---|
-| **Windows** 10/11 (x64) | `xbased-1.0.4-windows-x64.zip` | Unzip anywhere and run `xbased.exe`. Portable: everything stays in its folder. |
-| **Linux** (x86-64) | `xbased-1.0.4-x86_64.AppImage` | `chmod +x` it and run. Ubuntu 22.04 or newer, or any distribution of the same age. |
+| **Windows** 10/11 (x64) | `xbased-1.0.5-windows-x64.zip` | Unzip anywhere and run `xbased.exe`. Portable: everything stays in its folder. |
+| **Linux** (x86-64) | `xbased-1.0.5-x86_64.AppImage` | `chmod +x` it and run. Ubuntu 22.04 or newer, or any distribution of the same age. |
 
 Get them from **[Releases](https://github.com/crazyriddler/xbased/releases/latest)**.
 
@@ -265,6 +267,9 @@ More options (link-time optimization, the dependencies' location) are in
 - **[hakuX](https://github.com/rfandango/hakuX)** by **rfandango**: the
   emulator core xbased is built on (kernel, NV2A renderer, MCPX audio). Its own
   README and changelog are in [docs/hakuX](docs/hakuX/).
+- **xbased**, the Windows and Linux edition of hakuX, by **crazyriddler**:
+  the port to x86-64, the console-style front end and the fixes listed in
+  [CHANGELOG.md](CHANGELOG.md).
 - Box art from the [libretro-thumbnails](https://github.com/libretro-thumbnails)
   project. Interface font: Play (SIL Open Font License).
 - SDL3, Zydis, libslirp, xxHash, volk, Vulkan Memory Allocator, glslang,
