@@ -1481,6 +1481,38 @@ static bool runs_resident(NcKernel *k, const IoRun *run, unsigned nrun)
     return true;
 }
 
+/* A run read again through a host buffer and the RAM view (vm->phys), as the
+ * reader thread writes: the guest's view of a page may still refuse a system
+ * call's write (ReadFile fails with ERROR_NOACCESS where a store would only
+ * fault), and the title saw its disc error. */
+static bool read_run_again(NcKernel *k, const NcFile *nf, uint64_t o, uint32_t va, uint32_t len)
+{
+    uint8_t *tmp = malloc(len);
+    bool ok = tmp && (nf->kind == F_DISC ? nc_disc_read_file(k->disc, &nf->disc, o, tmp, len)
+                                         : pread(nf->fd, tmp, len, (off_t)o) == (ssize_t)len);
+    for (uint32_t done = 0; ok && done < len;) {
+        const uint32_t a = va + done, room = NC_PAGE - (a & (NC_PAGE - 1));
+        const uint32_t chunk = len - done < room ? len - done : room;
+        const uint32_t pa = nc_vm_phys(k->vm, a);
+        if (pa != UINT32_MAX && (uint64_t)pa + chunk <= k->vm->ram_size) {
+            const uint64_t gpu = nc_vm_dma.fence ? nc_vm_dma.fence(pa, chunk) : 0;
+            if (gpu && nc_vm_dma.wait) {
+                nc_vm_dma.wait(gpu);
+            }
+            memcpy(k->vm->phys + pa, tmp + done, chunk);
+            if (nc_vm_dma.wrote) {
+                nc_vm_dma.wrote(pa, chunk);
+            }
+        } else {
+            nc_vm_will_write(a, chunk);
+            memcpy(nc_vm_host(k->vm, a), tmp + done, chunk);
+        }
+        done += chunk;
+    }
+    free(tmp);
+    return ok;
+}
+
 /* NtReadFile's work for a buffer of runs (len bytes in all): a[] as
  * NtReadFile takes it, its Buffer and Length aside. */
 static uint64_t read_runs(NcKernel *k, const uint32_t *a, IoRun *run, unsigned nrun, uint32_t len)
@@ -1560,6 +1592,9 @@ static uint64_t read_runs(NcKernel *k, const uint32_t *a, IoRun *run, unsigned n
             nc_vm_will_write(run[i].va, run[i].len); /* pread into a protected page fails rather than faults */
             ok = nf->kind == F_DISC ? nc_disc_read_file(k->disc, &nf->disc, o, h, run[i].len)
                                     : pread(nf->fd, h, run[i].len, (off_t)o) == (ssize_t)run[i].len;
+            if (!ok) {
+                ok = read_run_again(k, nf, o, run[i].va, run[i].len);
+            }
             o += run[i].len;
         }
         if (!ok) {
@@ -2171,33 +2206,28 @@ typedef struct DirEntry {
     bool dir;
 } DirEntry;
 
-/* In order over a disc directory's tree, its depth bounded by the entries
- * its table holds (xdvdfs.c dir_search: a tree an image tool left a list). */
-static void disc_dir_walk(const uint8_t *dir, uint32_t size, uint32_t off, DirEntry *out, unsigned *n, unsigned cap,
-                          unsigned depth)
+/* A disc directory's entries (nc_disc_dir_each: its tree in order, then what
+ * the tree doesn't reach) */
+typedef struct DiscList {
+    DirEntry *out;
+    unsigned *n, cap;
+} DiscList;
+
+static bool disc_list_entry(void *ctx, const uint8_t *e)
 {
-    if (off + 14 > size || depth > size / 14 || *n >= cap) {
-        return;
-    }
-    const uint8_t *e = dir + off;
-    const uint16_t left = nc_rd16(e), right = nc_rd16(e + 2);
-    if (left == 0xFFFF && right == 0xFFFF && e[12] == 0xFF) {
-        return;
-    }
-    if (left && left != 0xFFFF) { /* 0: no subtree */
-        disc_dir_walk(dir, size, left * 4u, out, n, cap, depth + 1);
+    DiscList *l = ctx;
+    if (*l->n >= l->cap) {
+        return true;
     }
     const uint8_t nlen = e[13];
-    if (*n < cap && off + 14 + nlen <= size && nlen < sizeof(out->name)) {
-        DirEntry *d = &out[(*n)++];
+    if (nlen < sizeof(l->out->name)) {
+        DirEntry *d = &l->out[(*l->n)++];
         memcpy(d->name, e + 14, nlen);
         d->name[nlen] = 0;
         d->size = nc_rd32(e + 8);
         d->dir = e[12] & 0x10;
     }
-    if (right && right != 0xFFFF) {
-        disc_dir_walk(dir, size, right * 4u, out, n, cap, depth + 1);
-    }
+    return false;
 }
 
 /* A mod's file or folder in a disc folder's listing (nc_disc_overlay_list):
@@ -2232,7 +2262,8 @@ static unsigned list_dir(NcKernel *k, const NcFile *nf, DirEntry *out, unsigned 
         if (nf->disc.size && nf->disc.sector < NC_DISC_OVERLAY) {
             uint8_t *dir = malloc(nf->disc.size);
             if (dir && nc_disc_read(k->disc, &nf->disc, 0, dir, nf->disc.size)) {
-                disc_dir_walk(dir, nf->disc.size, 0, out, &n, cap, 0);
+                DiscList l = {out, &n, cap};
+                nc_disc_dir_each(dir, nf->disc.size, disc_list_entry, &l);
             }
             free(dir);
         }

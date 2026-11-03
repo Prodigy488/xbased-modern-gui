@@ -1,5 +1,28 @@
 # xbased changelog
 
+## 1.0.1 (2026-11)
+
+Fixes for games that stopped with their "disc is dirty or damaged" message,
+or closed at start.
+
+### Fixes
+- Windows: xbased in a folder whose path has an accent, an ñ or letters of
+  another alphabet (`C:\Users\José\...`) put its virtual hard disk in another
+  folder, or nowhere. Games that write their cache then stopped with the
+  dirty-disc message, or closed. xbased now uses UTF-8 paths throughout.
+- Windows: when xbased's folder can't be written (Program Files, a read-only
+  copy, Windows' controlled folder access on Desktop or Documents), its data
+  goes to `%LOCALAPPDATA%\xbased` instead of failing.
+- Disc images trimmed too far by an image tool: reads past the image's end
+  return zeros, as on the disc, instead of the dirty-disc message.
+- Disc images whose directory tree an image tool left damaged: every file is
+  still found.
+- A disc read that fails is tried again, through a path the emulated
+  console's memory protection can't refuse.
+- Memory: an allocation too big to fit gives back what it took. Games that
+  ask for all the memory they can get (BloodRayne 2) closed at start; they
+  run now.
+
 ## 1.0 (2026-11)
 
 The first release of xbased, the PC edition of

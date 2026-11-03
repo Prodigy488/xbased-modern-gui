@@ -11,10 +11,12 @@
 #include "native/core/xdvdfs.h"
 
 #include <ctype.h>
+#include <errno.h>
 #include <fcntl.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <sys/stat.h>
+#include <time.h>
 #include <unistd.h>
 
 static const char k_magic[] = "MICROSOFT*XBOX*MEDIA";
@@ -33,6 +35,44 @@ static bool pread_all(int fd, void *buf, size_t len, uint64_t off)
         p += n;
         len -= (size_t)n;
         off += (uint64_t)n;
+    }
+    return true;
+}
+
+/* The image's bytes. A read that fails is tried again (a drive spinning up,
+ * a scanner holding the file): a failed read is the title's disc error. Past
+ * the image's end come zeros, as the disc has there: an image tool trimming
+ * an XISO may cut it inside its last file's last sector, or before data a
+ * title reads anyway. */
+static bool image_read(int fd, void *buf, size_t len, uint64_t off)
+{
+    uint8_t *p = buf;
+    for (unsigned tries = 0; len;) {
+        const ssize_t n = pread(fd, p, len, (off_t)off);
+        if (n > 0) {
+            p += n;
+            len -= (size_t)n;
+            off += (uint64_t)n;
+            tries = 0;
+            continue;
+        }
+        if (n == 0) {
+            static bool told;
+            if (!told) {
+                told = true;
+                nc_log("hakuX-native", "disc: a read past the image's end at +0x%llx (a trimmed image): zeros",
+                       (unsigned long long)off);
+            }
+            memset(p, 0, len);
+            return true;
+        }
+        if (++tries > 4) {
+            nc_log("hakuX-native", "disc: reading %zu bytes at +0x%llx failed: %s", len, (unsigned long long)off,
+                   strerror(errno));
+            return false;
+        }
+        const struct timespec ts = {0, 20000000};
+        nanosleep(&ts, NULL);
     }
     return true;
 }
@@ -81,33 +121,100 @@ static bool name_eq(const uint8_t *a, size_t alen, const char *b, size_t blen)
     return true;
 }
 
-/* Depth-first over the whole tree: robust against any ordering differences.
- * The depth is bounded by the entries the table can hold (14 bytes each at
- * least), not a fixed count: an image tool may leave a directory's tree a
- * list (Conker: Live & Reloaded's Audio, 78 entries 77 deep, as some
- * rebuilt XISOs have it), and its last files were not found
- * (sfx_frontend_X.xwb: the game's disc error before its menu). A loop in a
- * damaged table ends there too. */
-static bool dir_search(const uint8_t *dir, uint32_t size, uint32_t off, const char *name,
-                       size_t namelen, NcDiscFile *out, unsigned depth)
+static bool entry_ok(const uint8_t *dir, uint32_t size, uint32_t off)
 {
-    if (off + 14 > size || depth > size / 14) {
+    if (off + 14 > size) {
         return false;
     }
     const uint8_t *e = dir + off;
-    uint16_t left = nc_rd16(e), right = nc_rd16(e + 2);
-    if (left == 0xFFFF && right == 0xFFFF && e[12] == 0xFF) {
+    if (nc_rd16(e) == 0xFFFF && nc_rd16(e + 2) == 0xFFFF) {
         return false; /* padding */
     }
-    uint8_t nlen = e[13];
-    if (off + 14 + nlen <= size && name_eq(e + 14, nlen, name, namelen)) {
-        out->sector = nc_rd32(e + 4);
-        out->size = nc_rd32(e + 8);
-        out->attr = e[12];
-        return true;
+    return e[13] && off + 14u + e[13] <= size;
+}
+
+/* Every entry of a directory table: its tree in order (what a listing shows
+ * first), then the entries a pass over the table finds that the tree doesn't
+ * reach. The tree's depth is bounded by the entries the table can hold, not a
+ * fixed count (an image tool may leave the tree a list: Conker: Live &
+ * Reloaded's Audio, 78 entries 77 deep), with no recursion; a loop in a
+ * damaged table ends where it meets an entry already seen. The pass reads the
+ * entries as they are laid out, each sector's from its start until its
+ * padding, so a table whose links an image tool got wrong still shows every
+ * file: a file the search missed was the title's disc error. Stops when fn
+ * returns true, and returns that. */
+bool nc_disc_dir_each(const uint8_t *dir, uint32_t size, bool (*fn)(void *ctx, const uint8_t *entry), void *ctx)
+{
+    if (size < 14) {
+        return false;
     }
-    return (left && left != 0xFFFF && dir_search(dir, size, left * 4u, name, namelen, out, depth + 1)) ||
-           (right && right != 0xFFFF && dir_search(dir, size, right * 4u, name, namelen, out, depth + 1));
+    const uint32_t slots = size / 4 + 1;
+    uint8_t *seen = calloc((slots + 7) / 8, 1);
+    uint32_t *stack = malloc(sizeof(*stack) * (size / 14 + 2));
+    bool hit = false;
+    if (!seen || !stack) {
+        free(seen);
+        free(stack);
+        return false;
+    }
+#define SEEN(o) (seen[(o) / 4 / 8] & (1u << ((o) / 4 % 8)))
+#define MARK(o) (seen[(o) / 4 / 8] |= (uint8_t)(1u << ((o) / 4 % 8)))
+    /* in order: down the left links, then the entry, then its right subtree */
+    unsigned sp = 0;
+    uint32_t cur = 0;
+    bool more = entry_ok(dir, size, 0);
+    while (!hit && (more || sp)) {
+        while (more && !SEEN(cur)) {
+            MARK(cur);
+            stack[sp++] = cur;
+            const uint16_t left = nc_rd16(dir + cur);
+            more = left && left != 0xFFFF && entry_ok(dir, size, left * 4u);
+            cur = left * 4u;
+        }
+        if (!sp) {
+            break;
+        }
+        const uint32_t off = stack[--sp];
+        hit = fn(ctx, dir + off);
+        const uint16_t right = nc_rd16(dir + off + 2);
+        more = right && right != 0xFFFF && entry_ok(dir, size, right * 4u);
+        cur = right * 4u;
+    }
+    /* the table as laid out */
+    for (uint32_t off = 0; !hit && off + 14 <= size;) {
+        if (NC_XDVDFS_SECTOR - off % NC_XDVDFS_SECTOR < 14 || !entry_ok(dir, size, off)) {
+            off = (off / NC_XDVDFS_SECTOR + 1) * NC_XDVDFS_SECTOR;
+            continue;
+        }
+        if (!SEEN(off)) {
+            MARK(off);
+            hit = fn(ctx, dir + off);
+        }
+        off += (14u + dir[off + 13] + 3u) & ~3u;
+    }
+#undef SEEN
+#undef MARK
+    free(seen);
+    free(stack);
+    return hit;
+}
+
+typedef struct {
+    const char *name;
+    size_t len;
+    NcDiscFile *out;
+} DirFind;
+
+static bool find_entry(void *ctx, const uint8_t *e)
+{
+    DirFind *f = ctx;
+    if (!name_eq(e + 14, e[13], f->name, f->len)) {
+        return false;
+    }
+    f->out->sector = nc_rd32(e + 4);
+    f->out->size = nc_rd32(e + 8);
+    f->out->attr = e[12];
+    return true;
 }
 
 /* the disc's own files */
@@ -133,9 +240,9 @@ static bool disc_find(const NcDisc *d, const char *path, NcDiscFile *out)
         if (!dir) {
             return false;
         }
-        bool ok = pread_all(d->fd, dir, cur.size,
-                            d->part_off + (uint64_t)cur.sector * NC_XDVDFS_SECTOR) &&
-                  dir_search(dir, cur.size, 0, p, (size_t)(end - p), &cur, 0);
+        DirFind f = {p, (size_t)(end - p), &cur};
+        bool ok = image_read(d->fd, dir, cur.size, d->part_off + (uint64_t)cur.sector * NC_XDVDFS_SECTOR) &&
+                  nc_disc_dir_each(dir, cur.size, find_entry, &f);
         free(dir);
         if (!ok) {
             return false;
@@ -408,7 +515,7 @@ bool nc_disc_find_orig(const NcDisc *d, const char *path, NcDiscFile *out)
 bool nc_disc_read_orig(const NcDisc *d, const NcDiscFile *f, uint64_t off, void *buf, size_t len)
 {
     return f->sector < NC_DISC_OVERLAY && off + len <= f->size &&
-           pread_all(d->fd, buf, len, d->part_off + (uint64_t)f->sector * NC_XDVDFS_SECTOR + off);
+           image_read(d->fd, buf, len, d->part_off + (uint64_t)f->sector * NC_XDVDFS_SECTOR + off);
 }
 
 bool nc_disc_read_file(const NcDisc *d, const NcDiscFile *f, uint64_t off, void *buf, size_t len)
@@ -418,7 +525,7 @@ bool nc_disc_read_file(const NcDisc *d, const NcDiscFile *f, uint64_t off, void 
     }
     return f->sector >= NC_DISC_OVERLAY
                ? ov_read(d, f, off, buf, len)
-               : pread_all(d->fd, buf, len, d->part_off + (uint64_t)f->sector * NC_XDVDFS_SECTOR + off);
+               : image_read(d->fd, buf, len, d->part_off + (uint64_t)f->sector * NC_XDVDFS_SECTOR + off);
 }
 
 bool nc_disc_read(const NcDisc *d, const NcDiscFile *f, uint64_t off, void *buf, size_t len)

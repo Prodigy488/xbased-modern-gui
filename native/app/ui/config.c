@@ -192,8 +192,25 @@ const char *cfg_data_dir(void)
     char probe[1100];
     snprintf(probe, sizeof(probe), "%sportable.txt", exe);
 #ifdef _WIN32
-    snprintf(dir, sizeof(dir), "%s", exe);
-    (void)probe;
+    /* Portable: the exe's folder, if it can be written. Program Files, a
+     * read-only copy or Windows' controlled folder access (Desktop,
+     * Documents) let nothing be created there: the hdd, a game's cache and
+     * saves failed, and games showed their disc error. Then the user's own
+     * application data folder. */
+    snprintf(probe, sizeof(probe), "%s.xbased-write-test", exe);
+    SDL_IOStream *t = SDL_IOFromFile(probe, "wb");
+    const bool writable = t && SDL_WriteIO(t, "x", 1) == 1;
+    if (t) {
+        SDL_CloseIO(t);
+        SDL_RemovePath(probe);
+    }
+    if (writable) {
+        snprintf(dir, sizeof(dir), "%s", exe);
+    } else {
+        char *p = SDL_GetPrefPath("", "xbased");
+        snprintf(dir, sizeof(dir), "%s", p ? p : exe);
+        SDL_free(p);
+    }
 #else
     if (SDL_GetPathInfo(probe, NULL)) {
         snprintf(dir, sizeof(dir), "%s", exe);
