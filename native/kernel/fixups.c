@@ -229,8 +229,68 @@ static bool xmv_wait_on(void)
     return strcmp(v, "0") != 0;
 }
 
+/* D3DDevice_SetTimerCallback(time, callback, context) refuses a time the
+ * TSC has passed (D3DERR_TIME_IN_PAST) and schedules nothing:
+ *
+ *     rdtsc ; add edi(eax), 40 ; adc ...      ; now + 40 ticks
+ *     cmp esi, ecx ; ja ok ; jb past ; cmp ecx, edi ; ja ok
+ *   past:
+ *     mov cl, bl ; call [KfLowerIrql] ; pop edi ; pop esi ; pop ebp
+ *     mov eax, 8876082Ah ; pop ebx ; ret 16
+ *   ok:
+ *     sub ecx, eax ; sbb esi, edx ; mov edi, ecx ; mov eax, [esp+32] ...
+ *
+ * A title's periodic callback that schedules its next time from the last
+ * (Def Jam: Fight for NY's 60 Hz input timer, its main loop's only update
+ * source) stops for good when one call runs a period late: the console's
+ * DPC is never that late, the emulation can be (the guest's CPU held up by
+ * the host while its time runs on). Its game then never updated again: the
+ * intro's movie never ended. The refusal becomes a delay of 0 ticks: the
+ * callback comes at once and the title catches up. Patched as the code
+ * loads; debug.hakux.d3dtimer=0 leaves it as it is. */
+static const uint8_t k_timer_past[] = {0x0F, 0x31, 0x8B, 0xF8, 0x83, 0xC7, 0x28, 0x8B, 0xCA, 0x13, 0xCE,
+                                       0x8B, 0x74, 0x24, 0x18, 0x3B, 0xF1, 0x8B, 0x4C, 0x24, 0x14,
+                                       0x77, 0x1A, 0x72, 0x04, 0x3B, 0xCF, 0x77, 0x14,
+                                       0x8A, 0xCB, 0xFF, 0x15};
+static const uint8_t k_timer_past_tail[] = {0x5F, 0x5E, 0x5D, 0xB8, 0x2A, 0x08, 0x76, 0x88, 0x5B, 0xC2, 0x10, 0x00,
+                                            0x2B, 0xC8, 0x1B, 0xF2, 0x8B, 0xF9, 0x8B, 0x44, 0x24, 0x20};
+#define TIMER_PAST     0x1D  /* past: mov cl, bl */
+#define TIMER_TAIL     0x25  /* after the call [KfLowerIrql] */
+#define TIMER_PUSH     0x37  /* ok's mov eax, [esp+32]: the arguments pushed */
+
+static bool d3d_timer_on(void)
+{
+    char v[PROP_VALUE_MAX] = "";
+    hle_prop_get("debug.hakux.d3dtimer", v);
+    return strcmp(v, "0") != 0;
+}
+
+/* past: xor edi, edi ; xor esi, esi ; jmp ok's push (0 ticks from now) */
+static unsigned timer_fixups(NcKernel *k, uint32_t va, uint32_t len, const char *name)
+{
+    if (!d3d_timer_on()) {
+        return 0;
+    }
+    unsigned patched = 0;
+    uint8_t *base = nc_vm_host(k->vm, va), *end = base + len, *p = base;
+    while ((p = memmem(p, (size_t)(end - p), k_timer_past, sizeof(k_timer_past))) != NULL) {
+        if (end - p >= TIMER_TAIL + (long)sizeof(k_timer_past_tail) &&
+            !memcmp(p + TIMER_TAIL, k_timer_past_tail, sizeof(k_timer_past_tail))) {
+            uint8_t *site = p + TIMER_PAST;
+            site[0] = 0x31, site[1] = 0xFF;                     /* xor edi, edi */
+            site[2] = 0x31, site[3] = 0xF6;                     /* xor esi, esi */
+            site[4] = 0xEB, site[5] = TIMER_PUSH - (TIMER_PAST + 6); /* jmp ok's push */
+            patched++;
+            nc_log("hakuX-native", "fixups: D3D timer callback at %08x (%s) comes at once when its time "
+                   "has passed", va + (uint32_t)(p - base), name);
+        }
+        p += sizeof(k_timer_past);
+    }
+    return patched;
+}
+
 /* The XMV stream waits in [va, va + len): how many were patched. */
-static unsigned section_fixups(NcKernel *k, uint32_t va, uint32_t len, const char *name)
+static unsigned xmv_fixups(NcKernel *k, uint32_t va, uint32_t len, const char *name)
 {
     if (!xmv_wait_on()) {
         return 0;                       /* debug.hakux.xmvwait=0: XMV as it is (A/B) */
@@ -255,6 +315,12 @@ static unsigned section_fixups(NcKernel *k, uint32_t va, uint32_t len, const cha
         p += sizeof(k_xmv_wait);
     }
     return patched;
+}
+
+/* The library code patched as it loads, in [va, va + len): how many sites. */
+static unsigned section_fixups(NcKernel *k, uint32_t va, uint32_t len, const char *name)
+{
+    return xmv_fixups(k, va, len, name) + timer_fixups(k, va, len, name);
 }
 
 void nc_kernel_section_fixups(NcKernel *k, uint32_t va, uint32_t len, const char *name)

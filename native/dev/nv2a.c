@@ -309,9 +309,10 @@ static struct {
     pthread_mutex_t mu;
     pthread_cond_t cv;
     pthread_once_t once;
-    bool rearm;                     /* ALARM_0 written (or a savestate's): due again */
+    bool rearm;                     /* ALARM_0 written (or a savestate's): due again; set at first,
+                                     * the thread maybe looking before alarm_set */
     uint64_t due;                   /* guest ns; 0: none */
-} g_alarm = {PTHREAD_MUTEX_INITIALIZER, PTHREAD_COND_INITIALIZER, PTHREAD_ONCE_INIT, false, 0};
+} g_alarm = {PTHREAD_MUTEX_INITIALIZER, PTHREAD_COND_INITIALIZER, PTHREAD_ONCE_INIT, true, 0};
 
 /* When the time's low word, at now, next reaches alarm */
 static uint64_t alarm_due(uint32_t alarm, uint64_t now)

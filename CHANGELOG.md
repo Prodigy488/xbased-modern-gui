@@ -1,5 +1,18 @@
 # xbased changelog
 
+## 1.0.14 (2026-11)
+
+### Fixes
+- Def Jam: Fight for NY: froze at the intro movie (black screen or a still
+  frame, the game never reaching its title). Its 60 Hz input timer
+  schedules each tick from the last through D3D's SetTimerCallback, which
+  refuses a time already passed; one tick a frame late (the emulation held
+  up a moment) and the timer stopped for good, and with it the game's
+  updates. Such a tick now comes at once and the game catches up: it
+  reaches the menus and plays.
+- PTIMER's alarm: at a title's first alarm, its thread could start before
+  the alarm was set and raise a stray alarm interrupt flag.
+
 ## 1.0.13 (2026-11)
 
 ### Fixes
