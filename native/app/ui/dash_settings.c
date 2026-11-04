@@ -529,16 +529,33 @@ void scr_mods(void)
     List l;
     list_begin(&l, 74, 150, W - 148, H - 330, 58);
     const ModItem *shown = NULL;
-    /* the frame rate: the console's pace lifted, this game's choice */
+    /* the frame rate, this game's choice: the console's pace (Original), or
+     * lifted ("uncap") up to 60 or 120 frames a second ("fpscap") or
+     * without a limit */
     const char *help = NULL;
     {
-        const bool on = cfg_bool(&D.game, "uncap", false);
+        static const enum UiStr k_names[4] = { S_FR_CAPPED, S_FR_60, S_FR_120, S_FR_UNCAPPED };
+        static const char *const k_caps[4] = { NULL, "60", "120", NULL };
+        const char *cap = cfg_get(&D.game, "fpscap");
+        const int cur = !cfg_bool(&D.game, "uncap", false) ? 0
+                        : cap && atoi(cap) == 60 ? 1 : cap && atoi(cap) == 120 ? 2 : 3;
         int delta = 0;
-        if (list_row(&l, T(S_FRAMERATE), on ? T(S_FR_UNCAPPED) : T(S_FR_CAPPED), &delta) || delta) {
-            if (on) {
+        if (list_row(&l, T(S_FRAMERATE), T(k_names[cur]), &delta)) {
+            delta = 1;
+        } else if (D.in.repeat) {
+            delta = 0;                      /* a step a press */
+        }
+        if (delta) {
+            const int to = (cur + (delta > 0 ? 1 : 3)) % 4;
+            if (to == 0) {
                 cfg_unset(&D.game, "uncap");
             } else {
                 cfg_set(&D.game, "uncap", "1");
+            }
+            if (k_caps[to]) {
+                cfg_set(&D.game, "fpscap", k_caps[to]);
+            } else {
+                cfg_unset(&D.game, "fpscap");
             }
         }
         if (list_selected(&l)) {

@@ -18,7 +18,7 @@
 #endif
 
 #ifndef XBASED_VERSION
-#define XBASED_VERSION "1.0.19"
+#define XBASED_VERSION "1.0.20"
 #endif
 
 Dash D;

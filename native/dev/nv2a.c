@@ -703,19 +703,28 @@ static uint64_t next_vblank(uint64_t prev)
 
 /* Uncapped (the app's setting: HAKUX_HLE_UNCAP; debug.hakux.uncap 1 / 0
  * on demand), read by the vblank thread now and then. */
+static uint64_t g_cap_ns;           /* uncapped: a frame at most this often (0: no limit) */
+
 static bool uncapped(void)
 {
-    static int on = -1;
+    static int on = -1, cap = -1;
     static unsigned polls;
     if (on < 0) {
         on = getenv("HAKUX_HLE_UNCAP") != NULL;
+        const char *e = getenv("HAKUX_HLE_FPSCAP");
+        cap = e ? atoi(e) : 0;
     }
     if (polls++ % 32 == 0) {
         char v[PROP_VALUE_MAX] = "";
         if (hle_prop_get("debug.hakux.uncap", v) > 0) {
             on = atoi(v) != 0;
         }
+        /* fast forward lifts the limit while held (0), then sets it back */
+        if (hle_prop_get("debug.hakux.fpscap", v) > 0) {
+            cap = atoi(v);
+        }
     }
+    g_cap_ns = cap > 0 ? 1000000000ull / (uint64_t)cap : 0;
     return on;
 }
 
@@ -760,13 +769,32 @@ static void flip_waits(void)
 static uint64_t wait_vblank(uint64_t next, uint64_t last)
 {
     if (g_pbmode && uncapped()) {
+        /* A frame limit (Up to 60, Up to 120): a frame's first early vblank
+         * no sooner than the limit's period after the last frame's. A frame
+         * is a stall; its further early vblanks (a presentation interval of
+         * 2 flips on the second) as they come. */
+        static uint32_t s_stall;
+        static uint64_t s_frame_t;
         for (uint64_t t = now_ns(); t < next; t = now_ns()) {
 #ifdef NC_DESKTOP
             const uint32_t seen = __atomic_load_n(&g_flip_waits, __ATOMIC_ACQUIRE);
 #endif
+            const uint32_t stall = hle_pb_flip_stalls();
+            const bool paced = !g_cap_ns || stall == s_stall || t - s_frame_t >= g_cap_ns;
             if (t - last >= EARLY_GAP_NS && hle_pb_flip_waiting() &&
                 !(ld(NV_PCRTC_INTR_0) & PCRTC_VBLANK)) {
-                return t;
+                if (paced) {
+                    if (stall != s_stall) {
+                        s_stall = stall;
+                        s_frame_t = t;
+                    }
+                    return t;
+                }
+                /* the frame waits for the limit: till then, or the vblank due */
+                const uint64_t until = next < s_frame_t + g_cap_ns ? next : s_frame_t + g_cap_ns;
+                const struct timespec ts = {(time_t)(until / 1000000000ull), (long)(until % 1000000000ull)};
+                clock_nanosleep(CLOCK_MONOTONIC, TIMER_ABSTIME, &ts, NULL);
+                continue;
             }
 #ifdef NC_DESKTOP
             /* waiting for a stall (not for the guest's handler to take the
@@ -780,6 +808,11 @@ static uint64_t wait_vblank(uint64_t next, uint64_t last)
             const uint64_t until = next < t + EARLY_POLL_NS ? next : t + EARLY_POLL_NS;
             const struct timespec ts = {(time_t)(until / 1000000000ull), (long)(until % 1000000000ull)};
             clock_nanosleep(CLOCK_MONOTONIC, TIMER_ABSTIME, &ts, NULL);
+        }
+        /* the vblank due takes a waiting frame on: the limit counts from it */
+        if (hle_pb_flip_waiting() && hle_pb_flip_stalls() != s_stall) {
+            s_stall = hle_pb_flip_stalls();
+            s_frame_t = next;
         }
         return next;
     }

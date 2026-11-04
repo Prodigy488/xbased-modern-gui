@@ -558,6 +558,7 @@ static void load_state(int slot)
 }
 
 static bool g_uncap;    /* the run's frame rate setting (fast forward goes back to it) */
+static int g_fps_cap;   /* ... its limit, uncapped (0: none) */
 static float g_volume = 1.0f;
 static bool g_mute_bg = true;   /* silent while the window isn't the active one */
 
@@ -740,7 +741,7 @@ static const char *pick_disc(void)
 }
 
 #ifndef XBASED_VERSION
-#define XBASED_VERSION "1.0.19"
+#define XBASED_VERSION "1.0.20"
 #endif
 #ifdef _WIN32
 #define NC_PLATFORM_NAME "Windows"
@@ -868,6 +869,7 @@ int main(int argc, char *argv[])
     nc_win_mods_prepare(g_exe_dir, g_disc_fd, g_args, g_nargs);
     nc_options_apply(&opt);
     g_uncap = opt.uncap;
+    g_fps_cap = opt.fps_cap;
     nc_present_set_widescreen(opt.video >= 0 && (opt.video & NC_VIDEO_WIDESCREEN));
     nc_log("hakuX-app", "native core: disc %s, hdd %s%s", g_disc, hdd, opt.uncap ? ", frame rate uncapped" : "");
 
@@ -940,6 +942,7 @@ int main(int argc, char *argv[])
                     load_state(ev.key.mod & SDL_KMOD_SHIFT ? 2 : 1);
                 } else if (ev.key.key == g_map.hotkey[IM_HK_TURBO]) {
                     nc_win_prop_set("debug.hakux.uncap", "1");  /* frames as fast as they come, while held */
+                    nc_win_prop_set("debug.hakux.fpscap", "0");
                 } else if (ev.key.key == g_map.hotkey[IM_HK_SHOT]) {
                     screenshot();
                 } else if (ev.key.key == g_map.hotkey[IM_HK_MENU]) {
@@ -949,6 +952,9 @@ int main(int argc, char *argv[])
             case SDL_EVENT_KEY_UP:
                 if (ev.key.key == g_map.hotkey[IM_HK_TURBO]) {
                     nc_win_prop_set("debug.hakux.uncap", g_uncap ? "1" : "0");
+                    char cap[16];
+                    snprintf(cap, sizeof(cap), "%d", g_fps_cap);
+                    nc_win_prop_set("debug.hakux.fpscap", cap);
                 }
                 break;
             case SDL_EVENT_GAMEPAD_BUTTON_DOWN: {

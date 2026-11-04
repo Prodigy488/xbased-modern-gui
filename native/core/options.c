@@ -10,6 +10,7 @@
 #include "native/net/net.h"
 #include "native/state/save.h"
 
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -37,6 +38,8 @@ bool nc_option(NcOptions *o, const char *arg)
         nc_core_set_relaunch(true);
     } else if (!strcmp(arg, "dash")) {
         nc_core_set_dashboard(true);            /* no disc: the disc argument is "none" */
+    } else if ((v = value(arg, "fpscap="))) {
+        o->fps_cap = atoi(v) > 0 ? atoi(v) : 0;
     } else if ((v = value(arg, "loadstate="))) {
         nc_core_set_loadstate(v);
         nc_log("hakuX-app", "savestate %s", v);
@@ -100,6 +103,14 @@ void nc_options_apply(const NcOptions *o)
         setenv("HAKUX_HLE_UNCAP", "1", 1);
     } else {
         unsetenv("HAKUX_HLE_UNCAP");
+    }
+    if (o->uncap && o->fps_cap > 0) {
+        char n[16];
+        snprintf(n, sizeof(n), "%d", o->fps_cap);
+        setenv("HAKUX_HLE_FPSCAP", n, 1);
+        nc_log("hakuX-app", "frame rate uncapped, at most %d fps", o->fps_cap);
+    } else {
+        unsetenv("HAKUX_HLE_FPSCAP");
     }
     nc_hle_set_pipeline_options(o->async_pipe, o->prebuild);
     nc_log("hakuX-app", "shaders: asynchronous compilation %s, cached ones built before the game %s",

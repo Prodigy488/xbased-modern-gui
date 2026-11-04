@@ -1,5 +1,15 @@
 # xbased changelog
 
+## 1.0.20 (2026-11)
+
+### New
+- Frame rate, per game (the game's Mods and patches): Original (the
+  console's pace), Up to 60 fps, Up to 120 fps or Unlocked. The limits let
+  a game draw faster than the console did but no faster than the chosen
+  rate. Anything other than Original can break a game (its speed, physics
+  or cutscenes), and the option's help says so. Fast forward lifts the
+  limit while held. A game set to the old Unlocked stays Unlocked.
+
 ## 1.0.19 (2026-11)
 
 ### Fixes

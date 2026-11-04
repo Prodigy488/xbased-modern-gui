@@ -214,6 +214,14 @@ bool hle_pb_flip_waiting(void)
     return __atomic_load_n(&g_pb.flip_wait, __ATOMIC_ACQUIRE);
 }
 
+/* FLIP_STALLs that waited: one a frame finished ahead of its flip */
+static uint32_t g_flip_stalls;
+
+uint32_t hle_pb_flip_stalls(void)
+{
+    return __atomic_load_n(&g_flip_stalls, __ATOMIC_ACQUIRE);
+}
+
 static void (*g_flip_wait_cb)(void);
 
 void hle_pb_on_flip_wait(void (*cb)(void))
@@ -323,6 +331,7 @@ static int kelvin(uint32_t m, uint32_t v)
     case NV097_FLIP_STALL:
         if (!flip_done()) {
             hle_host_gpu_trace(HLE_GTR_FLIP_STALL, surf_get(SURF_READ) << 4 | surf_get(SURF_WRITE));
+            __atomic_add_fetch(&g_flip_stalls, 1, __ATOMIC_RELEASE);
             __atomic_store_n(&g_pb.flip_wait, true, __ATOMIC_RELEASE);
             g_pb.flip_wait_ns = hle_now_ns();
             g_pb.flip_mark = hle_host_gpu_trace_mark();
