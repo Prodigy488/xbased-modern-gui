@@ -1,5 +1,16 @@
 # xbased changelog
 
+## 1.0.21 (2026-11)
+
+### Fixes
+- The King of Fighters: Maximum Impact (Maniax): a black screen at boot.
+  The game closes each file by waiting on it until it is signalled, a
+  file it read nothing from too. A file object's event was signalled only
+  once an I/O of its own completed, so a file opened and closed unread
+  was waited on forever. As on the console (the open's request completes
+  on that event), a file is now signalled from its open: the game boots,
+  plays its movies and reaches its menus and fights.
+
 ## 1.0.20 (2026-11)
 
 ### New

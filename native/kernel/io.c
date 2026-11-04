@@ -499,7 +499,12 @@ static uint32_t file_handle(NcKernel *k, NcFile *nf)
     }
     *(uint16_t *)nc_vm_host(k->vm, obj) = 5; /* IO_TYPE_FILE */
     nc_ke_init_event(k, obj + FO_LOCK, 1, false);
-    nc_ke_init_event(k, obj + NC_FO_EVENT, 0, false);
+    /* signalled: the create's request completes on it, as NT's (IopParseDevice
+     * makes it the create IRP's event), so a file is signalled from its open
+     * until an I/O of its own starts. KOF Maximum Impact Maniax closes each
+     * file waiting on it with no timeout till it is, a file it read nothing
+     * from too: never signalled, it hung on a black screen at boot. */
+    nc_ke_init_event(k, obj + NC_FO_EVENT, 0, true);
     nc_vm_wr32(k->vm, obj + FO_INDEX, (uint32_t)(nf - g_files));
     const uint32_t fcb = obj + FO_FCB;
     nc_vm_wr32(k->vm, obj + FO_FSCONTEXT, fcb);
