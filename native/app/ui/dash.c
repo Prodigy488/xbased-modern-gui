@@ -18,7 +18,7 @@
 #endif
 
 #ifndef XBASED_VERSION
-#define XBASED_VERSION "1.0.16"
+#define XBASED_VERSION "1.0.17"
 #endif
 
 Dash D;
@@ -927,6 +927,14 @@ void launch_game(LibGame *g, const char *extra)
     }
     snd_play(SND_LAUNCH);
     SDL_Delay(400);
+#ifdef _WIN32
+    {   /* the game gives this window the foreground as it quits (win_main.c give_foreground) */
+        char hv[32];
+        void *h = SDL_GetPointerProperty(SDL_GetWindowProperties(g_win), SDL_PROP_WINDOW_WIN32_HWND_POINTER, NULL);
+        snprintf(hv, sizeof(hv), "%llx", (unsigned long long)(uintptr_t)h);
+        SDL_SetEnvironmentVariable(SDL_GetEnvironment(), "XBASED_DASH_HWND", hv, true);
+    }
+#endif
     g_child = SDL_CreateProcess(args, false);
     if (!g_child) {
         dash_toast(SDL_GetError());

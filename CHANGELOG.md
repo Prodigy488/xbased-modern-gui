@@ -1,5 +1,19 @@
 # xbased changelog
 
+## 1.0.17 (2026-11)
+
+### Fixes
+- AMD graphics: Grand Theft Auto San Andreas' and Vice City's characters
+  stretched into spikes. Their vertices are 9 bytes, 16-bit values at odd
+  offsets, and AMD's vertex fetch reads a value only at an offset its size
+  divides (NVIDIA's reads them anywhere). Such vertices are now copied with
+  each value aligned, as they already were for Mali-G57.
+- Windows: back from a game to the dashboard (the in-game menu's quit, or
+  a game closing itself), the dashboard could still be left without the
+  gamepad and keyboard until touched or clicked (an ROG Xbox Ally X). The
+  game now brings the dashboard's window to the front itself as it ends,
+  while it still has the foreground.
+
 ## 1.0.16 (2026-11)
 
 ### Fixes

@@ -244,30 +244,43 @@ static void make_hdd(const char *root)
     }
 }
 
+/* The game's window has the screen: the one shown next (the dashboard back,
+ * a relaunched title's) is to have it, with the keyboard and the gamepad.
+ * Windows locks the foreground: without help that one stayed behind
+ * whatever window came next, its taskbar button flashing, as if minimized.
+ * Any process may take it (the grant); and back to the dashboard, the game
+ * shows the dashboard's window and gives it the foreground itself (its
+ * owner may give it to any window): the dashboard that started it says its
+ * window in XBASED_DASH_HWND. The grant alone left the dashboard without
+ * the gamepad on an ROG Xbox Ally X. While this process still has the
+ * foreground: before its window hides (hidden, another window has it). */
+static void give_foreground(bool to_dash)
+{
+#ifdef _WIN32
+    AllowSetForegroundWindow(ASFW_ANY);
+    const char *e = to_dash ? getenv("XBASED_DASH_HWND") : NULL;
+    HWND h = e ? (HWND)(uintptr_t)strtoull(e, NULL, 16) : NULL;
+    if (h && IsWindow(h)) {
+        ShowWindow(h, SW_SHOW);
+        SetForegroundWindow(h);
+    }
+#else
+    (void)to_dash;
+#endif
+}
+
 /* The process ends at once with code. On Windows ExitProcess would first
  * run every DLL's detach (the GPU driver's, the gamepads', the audio's) with
  * the emulation's threads cut off wherever they were, and one waiting on
  * another there hangs the process: a black full-screen window, and the
  * dashboard waiting behind it. TerminateProcess skips that; what the run
- * wrote is written (stderr isn't buffered, files are closed as they go). */
-/* The game's window has the screen: the one shown next (the dashboard
- * back, a relaunched title's) may take it. Without this, Windows' lock on
- * the foreground left that one behind whatever window came next, its
- * taskbar button flashing, as if minimized, and without the keyboard and
- * gamepad. Given while this process still has the foreground: before its
- * window hides (hidden, another window has it and the grant does nothing). */
-static void give_foreground(void)
-{
-#ifdef _WIN32
-    AllowSetForegroundWindow(ASFW_ANY);
-#endif
-}
-
+ * wrote is written (stderr isn't buffered, files are closed as they go).
+ * A code with bit 30 is a run started again (run_again): no dashboard. */
 static _Noreturn void exit_now(int code)
 {
     fflush(NULL);
 #ifdef _WIN32
-    give_foreground();
+    give_foreground(!(code & 0x40000000));
     TerminateProcess(GetCurrentProcess(), (UINT)code);
 #endif
     _exit(code);
@@ -589,7 +602,7 @@ static void ingame_menu(SDL_Window *win, bool *paused, bool minimized)
          * presenter's swapchain, the paused threads), so nothing can hold
          * the window */
         nc_log("hakuX-app", "quit to the dashboard");
-        give_foreground();
+        give_foreground(true);
         SDL_HideWindow(win);
         exit_now(0);
     }
@@ -727,7 +740,7 @@ static const char *pick_disc(void)
 }
 
 #ifndef XBASED_VERSION
-#define XBASED_VERSION "1.0.16"
+#define XBASED_VERSION "1.0.17"
 #endif
 #ifdef _WIN32
 #define NC_PLATFORM_NAME "Windows"

@@ -66,6 +66,17 @@ static bool mali_g57(const HleDriver *d)
     return mali(d) && strstr(d->props.deviceName, "Mali-G57") != NULL;
 }
 
+/* AMD hardware, any driver (vendor 0x1002) */
+static bool amd(const HleDriver *d)
+{
+    return d->props.vendorID == 0x1002;
+}
+
+static bool vb_align_on(const HleDriver *d)
+{
+    return mali_g57(d) || amd(d);
+}
+
 /* malisx2 reports Arm's vendor and driver IDs; "malisx2" in driverInfo tells
  * it apart. Some Arm quirks are blob bugs and must not apply to it. */
 static bool malisx2(const HleDriver *d)
@@ -184,8 +195,12 @@ static const HleQuirk k_quirks[] = {
      * 2026-10-26): Mortal Kombat Shaolin Monks' meshes exploded; its vertices
      * are 18 bytes, two floats at offset 10, and the diag build counted 7.8
      * million misaligned attribute fetches in 230 s, nothing else wrong.
-     * The driver has no VK_EXT_legacy_vertex_attributes. */
-    { HLE_QUIRK_VB_ALIGN, "vb_align", mali_g57 },
+     * The driver has no VK_EXT_legacy_vertex_attributes. AMD's proprietary
+     * driver (Radeon 890M, 26.10.1, an ROG Xbox Ally X, 2026-11-04): Grand
+     * Theft Auto San Andreas' and Vice City's characters stretched into
+     * spikes; their vertices are 9 bytes, three 16-bit integers at offset 3,
+     * which AMD's vertex fetch reads only at an offset their size divides. */
+    { HLE_QUIRK_VB_ALIGN, "vb_align", vb_align_on },
     /* Mali-G57 MC4, Arm's r40p0 (Anbernic RG556, Unisoc T820, GammaOS;
      * 2026-10-31): Morrowind lost the device 0.2 s into its loading screen,
      * every time, the kernel log "JS: Job Hard-Stopped (took more than 10
