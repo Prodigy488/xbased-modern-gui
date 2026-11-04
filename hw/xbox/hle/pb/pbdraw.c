@@ -151,6 +151,9 @@ typedef struct PbTex {
     uint32_t pal_hash;
     uint64_t checked;                   /* the epoch it was last checked at */
     uint64_t edge_hash[2];              /* its bytes on its first and last pages, at definition */
+    uint64_t wmid;                      /* writes reported to its inner pages, at definition */
+    uint32_t w0, wl;                    /* ... to its first and last pages, when last found
+                                           unchanged there */
     bool ok;                            /* defined (else it can't be: not again) */
 } PbTex;
 
@@ -2502,11 +2505,27 @@ static uint64_t span_hash(uint32_t pa, uint32_t len)
     return m ? XXH3_64bits(m, len) : 0;
 }
 
+/* The writes reported to a texture's pages (mem/barrier.c hle_mem_wseq_sum):
+ * its inner pages' sum, its first and last pages' counts. The dirty bits are
+ * not the texture's alone: any other user of its memory (another texture
+ * over it, a target's copy, a barrier's arm) takes them in and protects the
+ * pages again, and a write it took was lost to the texture. Return of the
+ * King's walls kept the stale texels of the memory's earlier texture, a
+ * smear of another level's stone, until a reload defined them again. The
+ * counts only grow. */
+static uint64_t tex_wseq(const PbTex *t, uint32_t *w0, uint32_t *wl)
+{
+    const uint32_t lo = t->pa, hi = lo + t->bytes, p0 = lo & ~4095u, pl = (hi - 1) & ~4095u;
+    const uint64_t sum = hle_mem_wseq_sum(lo, t->bytes, w0, wl);
+    return sum - *w0 - (pl != p0 ? *wl : 0);
+}
+
 static void tex_edges_set(PbTex *t)
 {
     const uint32_t lo = t->pa, hi = lo + t->bytes, p0 = lo & ~4095u, pl = (hi - 1) & ~4095u;
     t->edge_hash[0] = span_hash(lo, MIN(hi, p0 + 4096) - lo);
     t->edge_hash[1] = pl != p0 ? span_hash(pl, hi - pl) : 0;
+    t->wmid = tex_wseq(t, &t->w0, &t->wl);
 }
 
 static bool edge_dirty(uint32_t page)
@@ -2514,16 +2533,30 @@ static bool edge_dirty(uint32_t page)
     return hle_host_mem_dirty((uint32_t)(hle_ram_addr_base() + page));
 }
 
-static bool tex_written(const PbTex *t)
+static bool tex_written(PbTex *t)
 {
     if (!t->bytes) {
         return false;
     }
     const uint32_t lo = t->pa, hi = lo + t->bytes, p0 = lo & ~4095u, pl = (hi - 1) & ~4095u;
-    const bool mid = pl > p0 + 4096 && hle_mem_written(p0 + 4096, pl - p0 - 4096);
-    const bool first = edge_dirty(p0) && span_hash(lo, MIN(hi, p0 + 4096) - lo) != t->edge_hash[0];
-    const bool last = pl != p0 && edge_dirty(pl) && span_hash(pl, hi - pl) != t->edge_hash[1];
-    return mid || first || last;
+    uint32_t w0, wl;
+    const uint64_t wmid = tex_wseq(t, &w0, &wl);
+    /* the dirty bits taken in as well: they keep the inner pages protected,
+     * so a write from now on faults and counts */
+    const bool dirty = pl > p0 + 4096 && hle_mem_written(p0 + 4096, pl - p0 - 4096);
+    if (dirty || wmid != t->wmid) {
+        return true;
+    }
+    /* an edge page a neighbour shares: its bytes there, if written since */
+    if ((w0 != t->w0 || edge_dirty(p0)) && span_hash(lo, MIN(hi, p0 + 4096) - lo) != t->edge_hash[0]) {
+        return true;
+    }
+    if (pl != p0 && (wl != t->wl || edge_dirty(pl)) && span_hash(pl, hi - pl) != t->edge_hash[1]) {
+        return true;
+    }
+    t->w0 = w0;
+    t->wl = wl;
+    return false;
 }
 
 /* Palettes hashed, by address (direct-mapped), their bytes kept for the

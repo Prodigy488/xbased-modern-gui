@@ -1,5 +1,17 @@
 # xbased changelog
 
+## 1.0.19 (2026-11)
+
+### Fixes
+- The Lord of the Rings: The Return of the King: walls and floors turned
+  into a smear of another level's textures after playing for a while
+  (a savestate loaded there showed them right). A texture is defined
+  again when its memory is written, and that was seen through dirty
+  page bits any other user of the same memory could take in first (another
+  texture over it, a render target's copy). Each texture now also keeps
+  its pages' write counts, which only grow, and is defined again when
+  they change.
+
 ## 1.0.18 (2026-11)
 
 ### Fixes
