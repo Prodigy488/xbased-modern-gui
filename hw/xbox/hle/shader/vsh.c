@@ -233,6 +233,9 @@ static void head(Buf *bp, const HleVshKey *k)
                     "  vec4 v%u = vec4(vec3(bitfieldExtract(v%up, 0, 11), "
                     "bitfieldExtract(v%up, 11, 11), bitfieldExtract(v%up, 22, 10)) / "
                     "vec3(1023.0, 1023.0, 511.0), 1.0);\n", i, i, i, i, i, i, i);
+        } else if (k->in_mask & (1u << i) && (k->w1_mask >> i) & 1) {
+            /* a three-component array through its four-component format */
+            put(&b, "  vec4 v%u = vec4(vec3(v%u_in.xyz), 1.0);\n", i, i);
         } else if (k->in_mask & (1u << i)) {
             put(&b, "  vec4 v%u = vec4(v%u_in);\n", i, i);
         } else {

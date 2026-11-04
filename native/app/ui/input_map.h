@@ -53,12 +53,17 @@ typedef struct ImMap {
     float deadzone;
     float stick_range;          /* stick.range: the output's scale, 1 = the stick's own */
     bool stick_round;           /* stick.shape=round: the stick's circle kept, not the Duke's square */
+    float trigger_dz;           /* trigger.deadzone: travel ignored at the start, 0..1 */
+    float trigger_full;         /* trigger.full: the travel that is already a full press */
     bool rumble;
 } ImMap;
 void im_resolve(ImMap *m, const Config *global, const Config *game);
 /* A stick's position (x, y: -1..1, up positive) as the title gets it,
  * -1..1 on each axis: the dead zone, the shape and the range applied. */
 void im_stick(float x, float y, float deadzone, float range, bool round, float *ox, float *oy);
+/* A trigger's travel (0..1) as the title gets it, 0..1: nothing up to the
+ * dead zone, full from full on, in proportion between. */
+float im_trigger(float a, float deadzone, float full);
 /* Player p's state from its keyboard keys (keys: SDL_GetKeyboardState) and gamepad. */
 void im_read(const ImMap *m, int p, const bool *keys, SDL_Gamepad *pad, ImPad *out);
 

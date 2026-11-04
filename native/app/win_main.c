@@ -254,6 +254,11 @@ static _Noreturn void exit_now(int code)
 {
     fflush(NULL);
 #ifdef _WIN32
+    /* The game's window has the screen: the one shown next (the dashboard
+     * back, a relaunched title's) may take it. Without this, Windows' lock
+     * on the foreground left that one behind whatever window came next,
+     * its taskbar button flashing, as if minimized. */
+    AllowSetForegroundWindow(ASFW_ANY);
     TerminateProcess(GetCurrentProcess(), (UINT)code);
 #endif
     _exit(code);
@@ -712,7 +717,7 @@ static const char *pick_disc(void)
 }
 
 #ifndef XBASED_VERSION
-#define XBASED_VERSION "1.0.14"
+#define XBASED_VERSION "1.0.15"
 #endif
 #ifdef _WIN32
 #define NC_PLATFORM_NAME "Windows"

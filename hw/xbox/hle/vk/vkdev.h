@@ -68,6 +68,9 @@ typedef struct HleCaps {
                                    z to the depth range (shader/ff.h HLE_ZCLAMP_GLSL) */
     bool d24s8;                 /* D24_UNORM_S8_UINT a sampled, filtered depth attachment,
                                    else D32_SFLOAT_S8_UINT (vk/surf.c) */
+    bool vfmt3;                 /* the 3-component 8- and 16-bit vertex formats as the driver
+                                   reports them; off (debug), taken as missing, as on AMD's:
+                                   their 4-component forms then (vk/draw.c vfmt) */
     bool bda;                   /* bufferDeviceAddress (the guest RAM import asks for it) */
     bool ahb;                   /* AHB import: guest RAM used in place, else copied */
     /* Below Vulkan 1.3 (Mali Valhall on capped or older builds, PowerVR's BXM):

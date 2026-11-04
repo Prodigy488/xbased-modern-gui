@@ -281,6 +281,15 @@ void scr_settings(void)
                 cfg_set_int(&D.global, "stick.range", r < 50 ? 50 : r > 150 ? 150 : r);
             }
         }
+        {
+            /* the triggers' dead zone and full press, set on their own screen */
+            char val[64];
+            snprintf(val, sizeof(val), "%d%%  ·  %d%%", cfg_int(&D.global, "trigger.deadzone", 10),
+                     cfg_int(&D.global, "trigger.full", 100));
+            if (list_row(&l, T(S_TRIGGERS), val, NULL)) {
+                dash_push(SCR_TRIGGERS);
+            }
+        }
         opt_bool(&l, S_RUMBLE, "rumble", true, false);
         break;
     case 5:
@@ -888,6 +897,126 @@ void scr_sticks(void)
     }
     draw_hints(T(S_CHANGE), T(S_BACK), T(S_CLEAR), NULL);
     (void)H;
+}
+
+/* ------------------------------------------------------------ the triggers */
+
+/* The farthest each trigger went since the screen opened (0..1) */
+static float g_tpeak[2];
+static double g_triggers_seen;
+
+/* A trigger's travel in a bar (the travel up, as a trigger is pulled) with
+ * its dead zone and full-press zone, and beside it what the game gets */
+static void trigger_bar(int t, SDL_Gamepad *pad, float cx, float by, float BH, float dz, float full)
+{
+    const float TW = 64, OW = 30, tx = cx - 62, ox = cx + 30;
+    const float bot = by + BH;
+#define TY(v) (bot - (v) * BH)
+    ui_text(cx, by - 46, T(t ? S_IN_RT : S_IN_LT), 20, UI_FONT_BOLD, UI_WHITE, UI_ALIGN_CENTER);
+    ui_round(cx - 118, by - 16, 236, BH + 32, 14, UI_PANEL);
+    float a = 0;
+    if (pad) {
+        a = SDL_GetGamepadAxis(pad, t ? SDL_GAMEPAD_AXIS_RIGHT_TRIGGER : SDL_GAMEPAD_AXIS_LEFT_TRIGGER) / 32767.0f;
+        a = a < 0 ? 0 : a > 1 ? 1 : a;
+        g_tpeak[t] = a > g_tpeak[t] ? a : g_tpeak[t];
+    }
+    const float out = im_trigger(a, dz, full);
+    /* the scale: a tick every quarter, labelled at the ends and the middle */
+    for (int q = 0; q <= 4; q++) {
+        const float y = TY(q / 4.0f);
+        ui_line(tx - 12, y, tx - 4, y, 1.5f, ui_alpha(UI_GREEN, 0.45f));
+        if (q % 2 == 0) {
+            char s[8];
+            snprintf(s, sizeof(s), "%d", q * 25);
+            ui_text(tx - 16, y - 8, s, 14, UI_FONT_REGULAR, UI_GREY, UI_ALIGN_RIGHT);
+        }
+    }
+    /* the trigger's travel: the track, the dead zone (grey) at the start, the
+     * full press (green) at the end */
+    ui_round(tx, by, TW, BH, 10, ui_alpha(UI_GREEN_DARK, 0.95f));
+    if (dz > 0) {
+        ui_rect(tx + 3, TY(dz), TW - 6, dz * BH - 3, ui_alpha(UI_GREY, 0.20f));
+        ui_line(tx + 3, TY(dz), tx + TW - 3, TY(dz), 1.5f, ui_alpha(UI_GREY, 0.7f));
+    }
+    if (full < 1) {
+        ui_rect(tx + 3, by + 3, TW - 6, TY(full) - by - 3, ui_alpha(UI_GREEN, 0.16f));
+        ui_line(tx + 3, TY(full), tx + TW - 3, TY(full), 1.5f, ui_alpha(UI_GREEN, 0.8f));
+    }
+    if (a > 0) {
+        ui_rect_grad(tx + 6, TY(a), TW - 12, a * BH - 6, ui_alpha(UI_WHITE, 0.55f), ui_alpha(UI_WHITE, 0.12f));
+    }
+    if (g_tpeak[t] > 0) {   /* the farthest it went */
+        const float py = TY(g_tpeak[t]);
+        ui_line(tx - 2, py, tx + TW + 2, py, 2, UI_WHITE);
+    }
+    ui_round_outline(tx, by, TW, BH, 10, 1.5f, ui_alpha(UI_GREEN, 0.55f));
+    /* what the game gets, its fill joined to the trigger's position */
+    ui_round(ox, by, OW, BH, 8, ui_alpha(UI_GREEN_DARK, 0.95f));
+    if (out > 0) {
+        ui_rect_grad(ox + 4, TY(out), OW - 8, out * BH - 4, UI_GREEN_HI, UI_GREEN_DIM);
+        ui_glow(ox + OW / 2, TY(out), 26, ui_alpha(UI_GREEN_HI, 0.45f));
+    }
+    if (pad) {
+        ui_line(tx + TW + 2, TY(a), ox - 2, TY(out), 1.5f, ui_alpha(UI_GREEN_HI, 0.6f));
+        ui_circle(tx + TW + 2, TY(a), 4, UI_WHITE);
+        ui_circle(ox - 2, TY(out), 4, UI_GREEN_HI);
+    }
+    ui_round_outline(ox, by, OW, BH, 8, out >= 1 ? 2.5f : 1.5f, out >= 1 ? UI_GREEN_HI : ui_alpha(UI_GREEN, 0.55f));
+    char s[64];
+    snprintf(s, sizeof(s), "%d%%", (int)lroundf(out * 100));
+    ui_text(ox + OW + 10, TY(out) - 10, s, 18, UI_FONT_BOLD, out >= 1 ? UI_GREEN_HI : UI_WHITE, UI_ALIGN_LEFT);
+#undef TY
+    /* the reach: what the game got at the farthest press */
+    const float reach = im_trigger(g_tpeak[t], dz, full);
+    snprintf(s, sizeof(s), "%s: %d%%", T(S_STICK_REACH), (int)lroundf(reach * 100));
+    ui_text(cx, bot + 30, s, 22, UI_FONT_BOLD, reach >= 0.99f ? UI_GREEN_HI : reach >= 0.8f ? UI_WHITE : UI_RED,
+            UI_ALIGN_CENTER);
+}
+
+void scr_triggers(void)
+{
+    const float W = ui_w();
+    draw_header(T(S_TRIGGERS), NULL);
+    if (ui_time() - g_triggers_seen > 0.5) {
+        memset(g_tpeak, 0, sizeof(g_tpeak));    /* a fresh look each time it opens */
+    }
+    g_triggers_seen = ui_time();
+    Config *c = D.editing_game ? &D.game : &D.global;
+    const Config *dc = cfg_get(c, "trigger.deadzone") ? c : &D.global;
+    const Config *fc = cfg_get(c, "trigger.full") ? c : &D.global;
+    const float dz = cfg_int(dc, "trigger.deadzone", 10) / 100.0f, full = cfg_int(fc, "trigger.full", 100) / 100.0f;
+
+    /* the legend: the trigger's travel, what the game gets */
+    const float ly = 128;
+    float lx = W / 2 - (ui_text_width(T(S_TRIGGER_YOURS), 18, UI_FONT_REGULAR) +
+                        ui_text_width(T(S_TRIGGER_GAME), 18, UI_FONT_REGULAR) + 80) / 2;
+    ui_round(lx, ly + 2, 16, 18, 4, ui_alpha(UI_WHITE, 0.45f));
+    lx += 24;
+    lx += ui_text(lx, ly, T(S_TRIGGER_YOURS), 18, UI_FONT_REGULAR, UI_GREY, UI_ALIGN_LEFT) + 32;
+    ui_rect_grad(lx, ly + 2, 16, 18, UI_GREEN_HI, UI_GREEN_DIM);
+    lx += 24;
+    ui_text(lx, ly, T(S_TRIGGER_GAME), 18, UI_FONT_REGULAR, UI_GREY, UI_ALIGN_LEFT);
+
+    SDL_Gamepad *pad = dash_active_pad();
+    const float by = 214, BH = 230, gap = fminf(420, W - 480);
+    trigger_bar(0, pad, W / 2 - gap / 2, by, BH, dz, full);
+    trigger_bar(1, pad, W / 2 + gap / 2, by, BH, dz, full);
+    ui_text(W / 2, by + BH + 70, T(pad ? S_TRIGGER_PRESS : S_TRIGGER_NO_PAD), 18, UI_FONT_REGULAR,
+            pad ? UI_GREY : UI_RED, UI_ALIGN_CENTER);
+
+    List l;
+    list_begin(&l, 74, by + BH + 112, W - 148, 2 * 44, 44);
+    opt_int(&l, S_TRIGGER_DEADZONE, "trigger.deadzone", 0, 50, 2, 10, "%");
+    opt_int(&l, S_TRIGGER_FULL, "trigger.full", 50, 100, 5, 100, "%");
+    list_end(&l);
+    if (D.in.x) {
+        memset(g_tpeak, 0, sizeof(g_tpeak));
+    }
+    if (D.in.back) {
+        dash_save_cfg();
+        dash_pop();
+    }
+    draw_hints(T(S_CHANGE), T(S_BACK), T(S_CLEAR), NULL);
 }
 
 void scr_remap(void)

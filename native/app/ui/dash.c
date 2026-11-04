@@ -18,7 +18,7 @@
 #endif
 
 #ifndef XBASED_VERSION
-#define XBASED_VERSION "1.0.14"
+#define XBASED_VERSION "1.0.15"
 #endif
 
 Dash D;
@@ -356,7 +356,7 @@ static void poll_input(void)
                 in->pad_axis = (e.gaxis.axis + 1) * (v < 0 ? -1 : 1);
             }
             g_last_pad = e.gaxis.which;
-            in->pad |= dash_top() == SCR_STICKS && fabsf(v) > 0.5f; /* its hints: the gamepad's */
+            in->pad |= (dash_top() == SCR_STICKS || dash_top() == SCR_TRIGGERS) && fabsf(v) > 0.5f; /* its hints: the gamepad's */
             /* the sticks' screen: the stick is being looked at, not steering */
             if (dash_top() != SCR_STICKS &&
                 (e.gaxis.axis == SDL_GAMEPAD_AXIS_LEFTX || e.gaxis.axis == SDL_GAMEPAD_AXIS_LEFTY)) {
@@ -460,10 +460,12 @@ static void auto_poll(void)
             in->pad = true;
         } else if (!strncmp(line, "STICKS ", 7)) {
             /* a virtual gamepad's sticks (SDL's values: lx ly rx ry, down
-             * positive), plugged in the first time */
+             * positive) and optionally its triggers (lt rt, 0..32767),
+             * plugged in the first time */
             static SDL_Joystick *vj;
-            int v[4] = {0};
-            if (sscanf(line + 7, "%d %d %d %d", &v[0], &v[1], &v[2], &v[3]) >= 2) {
+            int v[6] = {0};
+            const int nv = sscanf(line + 7, "%d %d %d %d %d %d", &v[0], &v[1], &v[2], &v[3], &v[4], &v[5]);
+            if (nv >= 2) {
                 if (!vj) {
                     SDL_VirtualJoystickDesc d;
                     SDL_INIT_INTERFACE(&d);
@@ -473,7 +475,7 @@ static void auto_poll(void)
                     d.name = "xbased virtual gamepad";
                     vj = SDL_OpenJoystick(SDL_AttachVirtualJoystick(&d));
                 }
-                for (int a = 0; vj && a < 4; a++) {
+                for (int a = 0; vj && a < (nv > 4 ? 6 : 4); a++) {
                     SDL_SetJoystickVirtualAxis(vj, a, (Sint16)(v[a] > 32767 ? 32767 : v[a] < -32768 ? -32768 : v[a]));
                 }
             }
@@ -1554,6 +1556,7 @@ int dash_run(SDL_Window *win, const char *exe)
         case SCR_CONTROLS: scr_controls(); break;
         case SCR_REMAP: scr_remap(); break;
         case SCR_STICKS: scr_sticks(); break;
+        case SCR_TRIGGERS: scr_triggers(); break;
         case SCR_MEMORY: scr_memory(); break;
         case SCR_MEMORY_TITLE: scr_memory_title(); break;
         case SCR_ONLINE: scr_online(); break;
@@ -1804,6 +1807,7 @@ int dash_ingame(SDL_Window *win, const char *key, const char *title, const char 
         case SCR_CONTROLS: scr_controls(); break;
         case SCR_REMAP: scr_remap(); break;
         case SCR_STICKS: scr_sticks(); break;
+        case SCR_TRIGGERS: scr_triggers(); break;
         case SCR_SETTINGS: scr_settings(); break;
         default: dash_pop(); break;
         }

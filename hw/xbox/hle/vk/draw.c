@@ -2495,7 +2495,8 @@ static uint32_t lin_rect(const HleCmdDraw *c, const HleCmdState *s, unsigned st)
 }
 
 /* Vertex-buffer support of f, else of its four-component form (one more
- * element read past the attribute), else UNDEFINED. */
+ * element read past the attribute: a program's w is set to 1, HleVshKey
+ * w1_mask), else UNDEFINED. */
 static VkFormat vfmt(VkFormat f, VkFormat wide)
 {
     VkFormat c[2] = { f, wide };
@@ -2508,6 +2509,10 @@ static VkFormat vfmt(VkFormat f, VkFormat wide)
             VkFormatProperties fp;
             vkGetPhysicalDeviceFormatProperties(g_hvk.phys, c[i], &fp);
             *s = (fp.bufferFeatures & VK_FORMAT_FEATURE_VERTEX_BUFFER_BIT) ? 1 : -1;
+            if (!g_hvk.caps.vfmt3 && (c[i] == VK_FORMAT_R8G8B8_UNORM || c[i] == VK_FORMAT_R16G16B16_SNORM ||
+                                      c[i] == VK_FORMAT_R16G16B16_SINT || c[i] == VK_FORMAT_R16G16B16_SSCALED)) {
+                *s = -1;                /* debug.hakux.caps=-v3: as AMD's drivers */
+            }
         }
         if (*s > 0) {
             return c[i];
@@ -2519,7 +2524,7 @@ static VkFormat vfmt(VkFormat f, VkFormat wide)
 /* NV2A attribute format byte -> vertex input format. Programs fetch S32K as
  * integers (kind 1) and CMP as one packed dword (kind 2) and convert in the
  * shader; the FF generators take floats (SSCALED) and a CMP normal. */
-static VkFormat vat_format(uint8_t fmt, bool prog, unsigned *kind)
+static VkFormat vat_format(uint8_t fmt, bool prog, unsigned *kind, bool *w1)
 {
 #define F4(a, b, c, d) { VK_FORMAT_##a, VK_FORMAT_##b, VK_FORMAT_##c, VK_FORMAT_##d }
     static const VkFormat k_f[4] = F4(R32_SFLOAT, R32G32_SFLOAT, R32G32B32_SFLOAT,
@@ -2533,6 +2538,8 @@ static VkFormat vat_format(uint8_t fmt, bool prog, unsigned *kind)
 #undef F4
     unsigned n = hle_vat_count(fmt);
     *kind = 0;
+    *w1 = false;
+    VkFormat r;
     if (!n || n > 4) {
         return VK_FORMAT_UNDEFINED;
     }
@@ -2545,15 +2552,23 @@ static VkFormat vat_format(uint8_t fmt, bool prog, unsigned *kind)
         }
         /* fallthrough */
     case HLE_VAT_UB_OGL:
-        return vfmt(k_ub[n - 1], k_ub[3]);
+        r = vfmt(k_ub[n - 1], k_ub[3]);
+        *w1 = n == 3 && r == k_ub[3];
+        return r;
     case HLE_VAT_S1:
-        return vfmt(k_s1[n - 1], k_s1[3]);
+        r = vfmt(k_s1[n - 1], k_s1[3]);
+        *w1 = n == 3 && r == k_s1[3];
+        return r;
     case HLE_VAT_S32K:
         if (prog) {
             *kind = 1;
-            return vfmt(k_si[n - 1], k_si[3]);
+            r = vfmt(k_si[n - 1], k_si[3]);
+            *w1 = n == 3 && r == k_si[3];
+            return r;
         }
-        return vfmt(k_ss[n - 1], k_ss[3]);
+        r = vfmt(k_ss[n - 1], k_ss[3]);
+        *w1 = n == 3 && r == k_ss[3];
+        return r;
     case HLE_VAT_CMP:                   /* 16-bit halves: often only 2-byte aligned */
         *kind = 2;
         return vfmt(VK_FORMAT_R16G16_UINT, VK_FORMAT_UNDEFINED);
@@ -2563,7 +2578,7 @@ static VkFormat vat_format(uint8_t fmt, bool prog, unsigned *kind)
 }
 
 /* Declaration layout of a draw (HleCmdDraw.nbind > 0): attributes by
- * location; in, ints, cmps = the program key masks. False when an
+ * location; in, ints, cmps, w1s = the program key masks. False when an
  * attribute the FF shader reads has no usable format. The last one is
  * kept: draws mostly declare what the one before did (Blinx changes its
  * vertex input about once in 850), and building it for each was a tenth
@@ -2572,20 +2587,21 @@ static struct {
     bool valid, prog, ok;
     uint32_t nbind, attr[HLE_DRAW_ATTRS];
     VkVertexInputAttributeDescription2EXT a[HLE_DRAW_ATTRS];
-    uint32_t na, in, ints, cmps;
+    uint32_t na, in, ints, cmps, w1s;
 } g_decl;
 
 static bool decl_build(const HleCmdDraw *c, bool prog, VkVertexInputAttributeDescription2EXT *a,
-                       uint32_t *na, uint32_t *in, uint32_t *ints, uint32_t *cmps)
+                       uint32_t *na, uint32_t *in, uint32_t *ints, uint32_t *cmps, uint32_t *w1s)
 {
-    *na = *in = *ints = *cmps = 0;
+    *na = *in = *ints = *cmps = *w1s = 0;
     for (uint32_t loc = 0; loc < HLE_DRAW_ATTRS; loc++) {
         uint32_t x = c->attr[loc];
         if (!hle_vat_count(x & 0xFF)) {
             continue;
         }
         unsigned kind;
-        VkFormat f = vat_format(x & 0xFF, prog, &kind);
+        bool w1;
+        VkFormat f = vat_format(x & 0xFF, prog, &kind, &w1);
         if (!prog && kind == 2 && loc != 1) {
             f = VK_FORMAT_UNDEFINED;    /* FF decodes CMP for its normal only */
         }
@@ -2601,12 +2617,13 @@ static bool decl_build(const HleCmdDraw *c, bool prog, VkVertexInputAttributeDes
         *in |= 1u << loc;
         *ints |= (kind == 1 ? 1u : 0) << loc;
         *cmps |= (kind == 2 ? 1u : 0) << loc;
+        *w1s |= (w1 ? 1u : 0) << loc;
     }
     return true;
 }
 
 static bool decl_attrs(const HleCmdDraw *c, bool prog, VkVertexInputAttributeDescription2EXT *a,
-                       uint32_t *na, uint32_t *in, uint32_t *ints, uint32_t *cmps)
+                       uint32_t *na, uint32_t *in, uint32_t *ints, uint32_t *cmps, uint32_t *w1s)
 {
     if (!g_decl.valid || g_decl.prog != prog || g_decl.nbind != c->nbind ||
         memcmp(g_decl.attr, c->attr, sizeof(g_decl.attr))) {
@@ -2615,13 +2632,14 @@ static bool decl_attrs(const HleCmdDraw *c, bool prog, VkVertexInputAttributeDes
         g_decl.nbind = c->nbind;
         memcpy(g_decl.attr, c->attr, sizeof(g_decl.attr));
         g_decl.ok = decl_build(c, prog, g_decl.a, &g_decl.na, &g_decl.in, &g_decl.ints,
-                               &g_decl.cmps);
+                               &g_decl.cmps, &g_decl.w1s);
     }
     memcpy(a, g_decl.a, g_decl.na * sizeof(*a));
     *na = g_decl.na;
     *in = g_decl.in;
     *ints = g_decl.ints;
     *cmps = g_decl.cmps;
+    *w1s = g_decl.w1s;
     return g_decl.ok;
 }
 
@@ -3440,8 +3458,8 @@ void hle_draw_cmd_draw(const HleCmdDraw *c, VkCommandBuffer cb, uint32_t rt_id, 
     k.vs.fvf = c->fvf;
     bool prog = c->vsh != 0;
     VkVertexInputAttributeDescription2EXT ad[HLE_DRAW_ATTRS];
-    uint32_t na = 0, in = 0, ints = 0, cmps = 0;
-    if (c->nbind && !decl_attrs(c, prog, ad, &na, &in, &ints, &cmps)) {
+    uint32_t na = 0, in = 0, ints = 0, cmps = 0, w1s = 0;
+    if (c->nbind && !decl_attrs(c, prog, ad, &na, &in, &ints, &cmps, &w1s)) {
         g_dr.layout_skips++;
         drop(DROP_DECL, c, rt_id, ds_id);
         return;
@@ -3736,6 +3754,7 @@ void hle_draw_cmd_draw(const HleCmdDraw *c, VkCommandBuffer cb, uint32_t rt_id, 
         k.vk.in_mask = in;
         k.vk.int_mask = ints;
         k.vk.cmp_mask = cmps;
+        k.vk.w1_mask = (uint16_t)w1s;
         k.vk.flat = s->rs[RS_SHADEMODE] == 0x1D00;
         k.vk.spec_off = !s->spec;
         k.vk.fog_table = s->rs[RS_FOGENABLE] && (s->rs[RS_FOGTABLEMODE] & 3) != 0;

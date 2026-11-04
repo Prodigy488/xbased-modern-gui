@@ -1,7 +1,8 @@
 /*
  * hakuX HLE GPU — on-disk shader and pipeline caches (P3 Task 13).
- * - SPIR-V: <base>/hle_spirv/<fnv64 of the GLSL>-<stage>.spv, a header with
- *   the source length and a second hash so a collision reads as a miss
+ * - SPIR-V: <base>/hle_spirv/<title id>.pack, the title's shaders in one file,
+ *   each keyed by the GLSL's fnv64 with its length and a second hash so a
+ *   collision reads as a miss; legacy.pack, the loose files of before
  *   (hle_spirv-vk11/: SPIR-V 1.3, for a device below Vulkan 1.3).
  * - Pipelines: <base>/hle_pipeline_cache/<title id>.bin, the title's
  *   VkPipelineCache blob (the driver rejects a blob from another device or
@@ -20,6 +21,7 @@
  *   it in memory and wrote all of it back.
  */
 #include "hw/xbox/hle/base.h"
+#include <dirent.h>
 #include <pthread.h>
 #include <stdio.h>
 #include <sys/stat.h>
@@ -43,6 +45,9 @@ static struct {
     HleSem go;
     bool started, busy, stop;       /* busy: a write in flight */
 } g_pc;
+
+static void spv_packs_open(void);
+static void spv_packs_close(void);
 
 static uint64_t fnv64(const void *p, size_t n, uint64_t h)
 {
@@ -87,6 +92,7 @@ void hle_pcache_init(void)
             data ? (size_t)len : 0);
     g_free(data);
     g_pc.last_save = g_get_monotonic_time();
+    spv_packs_open();
 }
 
 VkPipelineCache hle_pcache_get(void)
@@ -189,81 +195,305 @@ void hle_pcache_destroy(void)
         T.vkDestroyPipelineCache(g_hvk.dev, g_pc.cache, NULL);
         g_pc.cache = VK_NULL_HANDLE;
     }
+    spv_packs_close();
     g_free(g_pc.dir);
     g_free(g_pc.blob);
     g_pc.dir = g_pc.blob = NULL;
 }
 
-typedef struct SpvHeader {
+/* ---- SPIR-V packs ----
+ * The title's shaders in one file, <dir>/<title id>.pack: a header, then a
+ * record per shader as it compiles (PackRec, then the words), appended, and
+ * an index in memory. One file a shader (before 1.0.15) made thousands of
+ * small files: a filesystem's clusters made 400 MB of them take gigabytes,
+ * and each look-up was a file to open (slow on a hard disk). Those loose
+ * files go into legacy.pack the first time (every title's, read after the
+ * title's own), and are removed. A record cut short (the process ended in
+ * its write) ends the walk and is cut off. */
+#define PACK_MAGIC  0x4b505348u     /* "HSPK" */
+#define PACK_VER    1u
+
+typedef struct SpvHeader {          /* a loose file's, before */
     uint32_t magic, src_len;
     uint64_t check;                 /* second hash of the source */
     uint32_t nwords, pad;
 } SpvHeader;
 
-/* src's SPIR-V from the disk cache, or NULL (*path: the file, g_free'd by the caller) */
-static uint32_t *spv_read(HleShaderStage stage, const char *src, size_t *nwords, char **path,
-                          uint64_t *check_out)
+typedef struct PackRec {
+    uint32_t magic, src_len;        /* SPV_MAGIC */
+    uint64_t key, check;            /* the source's hash (^ stage), a second one */
+    uint32_t nwords, pad;
+} PackRec;
+
+typedef struct Pack {
+    uint8_t *data;                  /* the records (the file's, then the appended) */
+    size_t len, cap;
+    uint64_t *keys;                 /* open addressing: key, record offset + 1 (0 free) */
+    size_t *offs;
+    size_t slots, n;
+    FILE *f;                        /* appends */
+    char *path;
+} Pack;
+
+static HleMutex g_pack_mx;
+static Pack g_title_pack, g_legacy_pack;
+
+static void pack_index(Pack *p, uint64_t key, size_t off)
 {
-    size_t len = strlen(src);
-    uint64_t key = fnv64(src, len, 0xcbf29ce484222325ull) ^ (uint64_t)stage;
-    uint64_t check = fnv64(src, len, 0x84222325cbf29ce4ull);
-    *check_out = check;
-    *path = g_pc.dir ? g_strdup_printf("%s/%016llx-%d.spv", g_pc.dir,
-                                       (unsigned long long)key, (int)stage) : NULL;
-    gchar *data = NULL;
+    if ((p->n + 1) * 2 > p->slots) {
+        const size_t ns = p->slots ? p->slots * 2 : 1024;
+        uint64_t *nk = g_new0(uint64_t, ns);
+        size_t *no = g_new0(size_t, ns);
+        for (size_t i = 0; i < p->slots; i++) {
+            if (p->offs[i]) {
+                size_t j = (size_t)(p->keys[i] * 0x9e3779b97f4a7c15ull) & (ns - 1);
+                while (no[j]) {
+                    j = (j + 1) & (ns - 1);
+                }
+                nk[j] = p->keys[i];
+                no[j] = p->offs[i];
+            }
+        }
+        g_free(p->keys);
+        g_free(p->offs);
+        p->keys = nk;
+        p->offs = no;
+        p->slots = ns;
+    }
+    size_t j = (size_t)(key * 0x9e3779b97f4a7c15ull) & (p->slots - 1);
+    while (p->offs[j] && p->keys[j] != key) {
+        j = (j + 1) & (p->slots - 1);
+    }
+    if (!p->offs[j]) {
+        p->n++;
+    }
+    p->keys[j] = key;
+    p->offs[j] = off + 1;           /* a later record of the key wins */
+}
+
+static const PackRec *pack_find(const Pack *p, uint64_t key)
+{
+    if (!p->slots) {
+        return NULL;
+    }
+    size_t j = (size_t)(key * 0x9e3779b97f4a7c15ull) & (p->slots - 1);
+    while (p->offs[j]) {
+        if (p->keys[j] == key) {
+            return (const PackRec *)(p->data + p->offs[j] - 1);
+        }
+        j = (j + 1) & (p->slots - 1);
+    }
+    return NULL;
+}
+
+static void pack_grow(Pack *p, size_t more)
+{
+    if (p->len + more > p->cap) {
+        p->cap = MAX(p->cap * 2, p->len + more + (1u << 20));
+        p->data = g_realloc(p->data, p->cap);
+    }
+}
+
+/* The pack at path read and indexed, opened for appends */
+static void pack_open(Pack *p, const char *path)
+{
+    memset(p, 0, sizeof(*p));
+    p->path = g_strdup(path);
+    gchar *file = NULL;
     gsize n = 0;
-    if (*path && g_file_get_contents(*path, &data, &n, NULL) && n >= sizeof(SpvHeader)) {
-        SpvHeader h;
-        memcpy(&h, data, sizeof(h));
-        if (h.magic == SPV_MAGIC && h.src_len == len && h.check == check &&
-            n == sizeof(h) + 4ull * h.nwords && h.nwords) {
-            uint32_t *spv = g_malloc(4ull * h.nwords);
-            memcpy(spv, data + sizeof(h), 4ull * h.nwords);
-            g_free(data);
-            *nwords = h.nwords;
-            hle_atomic_inc(&g_pc.spv_hits);
-            return spv;
+    uint32_t head[2];
+    size_t good = 0;                /* the valid records' end in the file */
+    if (g_file_get_contents(path, &file, &n, NULL) && n >= sizeof(head)) {
+        memcpy(head, file, sizeof(head));
+        if (head[0] == PACK_MAGIC && head[1] == PACK_VER) {
+            good = sizeof(head);
+            while (good + sizeof(PackRec) <= n) {
+                PackRec r;
+                memcpy(&r, file + good, sizeof(r));
+                const size_t sz = sizeof(r) + 4ull * r.nwords;
+                if (r.magic != SPV_MAGIC || !r.nwords || r.nwords > (64u << 20) || good + sz > n) {
+                    break;
+                }
+                good += sz;
+            }
         }
     }
-    g_free(data);
-    return NULL;
+    if (good) {
+        pack_grow(p, good - sizeof(head));
+        memcpy(p->data, file + sizeof(head), good - sizeof(head));
+        p->len = good - sizeof(head);
+        for (size_t o = 0; o < p->len;) {
+            const PackRec *r = (const PackRec *)(p->data + o);
+            pack_index(p, r->key, o);
+            o += sizeof(*r) + 4ull * r->nwords;
+        }
+    }
+    if (!good || good != n) {
+        /* new, unreadable or cut short: written again from what was good */
+        head[0] = PACK_MAGIC;
+        head[1] = PACK_VER;
+        FILE *w = fopen(path, "wb");
+        if (w) {
+            fwrite(head, sizeof(head), 1, w);
+            if (p->len) {
+                fwrite(p->data, p->len, 1, w);
+            }
+            fclose(w);
+        }
+        if (n && good != n) {
+            hle_log("hakuX-hle-pipe", "spirv pack %s: %zu bytes past its last whole record cut off",
+                    path, (size_t)(n - good));
+        }
+    }
+    g_free(file);
+    p->f = fopen(path, "ab");
+}
+
+static void pack_add(Pack *p, uint64_t key, uint64_t check, uint32_t src_len, const uint32_t *words,
+                     uint32_t nwords)
+{
+    const PackRec r = { SPV_MAGIC, src_len, key, check, nwords, 0 };
+    const size_t sz = sizeof(r) + 4ull * nwords;
+    pack_grow(p, sz);
+    memcpy(p->data + p->len, &r, sizeof(r));
+    memcpy(p->data + p->len + sizeof(r), words, 4ull * nwords);
+    pack_index(p, key, p->len);
+    p->len += sz;
+    if (p->f) {
+        fwrite(p->data + p->len - sz, sz, 1, p->f);
+        fflush(p->f);
+    }
+}
+
+static void pack_close(Pack *p)
+{
+    if (p->f) {
+        fclose(p->f);
+    }
+    g_free(p->data);
+    g_free(p->keys);
+    g_free(p->offs);
+    g_free(p->path);
+    memset(p, 0, sizeof(*p));
+}
+
+/* The loose files of before into legacy.pack, once (removed as they go in) */
+static void spv_migrate(const char *dir)
+{
+    DIR *d = opendir(dir);
+    if (!d) {
+        return;
+    }
+    unsigned moved = 0;
+    size_t bytes = 0;
+    struct dirent *e;
+    while ((e = readdir(d)) != NULL) {
+        unsigned long long key;
+        int stage;
+        char tail[8];
+        if (sscanf(e->d_name, "%16llx-%d.%4s", &key, &stage, tail) != 3 || strcmp(tail, "spv")) {
+            continue;
+        }
+        g_autofree char *path = g_strdup_printf("%s/%s", dir, e->d_name);
+        gchar *data = NULL;
+        gsize n = 0;
+        if (g_file_get_contents(path, &data, &n, NULL) && n >= sizeof(SpvHeader)) {
+            SpvHeader h;
+            memcpy(&h, data, sizeof(h));
+            if (h.magic == SPV_MAGIC && h.nwords && n == sizeof(h) + 4ull * h.nwords) {
+                if (!pack_find(&g_legacy_pack, key)) {
+                    pack_add(&g_legacy_pack, key, h.check, h.src_len,
+                             (const uint32_t *)(data + sizeof(h)), h.nwords);
+                }
+                moved++;
+                bytes += n;
+            }
+        }
+        g_free(data);
+        remove(path);
+    }
+    closedir(d);
+    if (moved) {
+        hle_log("hakuX-hle-pipe", "spirv: %u loose files (%zu bytes) packed into %s", moved, bytes,
+                g_legacy_pack.path);
+    }
+}
+
+static void spv_packs_open(void)
+{
+    hle_mutex_init(&g_pack_mx);
+    if (!g_pc.dir) {
+        return;
+    }
+    g_autofree char *legacy = g_strdup_printf("%s/legacy.pack", g_pc.dir);
+    g_autofree char *title = g_strdup_printf("%s/%08x.pack", g_pc.dir, g_hle.title.xbe.title_id);
+    pack_open(&g_legacy_pack, legacy);
+    spv_migrate(g_pc.dir);
+    pack_open(&g_title_pack, title);
+    hle_log("hakuX-hle-pipe", "spirv packs: %s %zu shaders, legacy %zu", title, g_title_pack.n,
+            g_legacy_pack.n);
+}
+
+static void spv_packs_close(void)
+{
+    hle_mutex_lock(&g_pack_mx);
+    pack_close(&g_title_pack);
+    pack_close(&g_legacy_pack);
+    hle_mutex_unlock(&g_pack_mx);
+}
+
+/* src's SPIR-V from the packs, or NULL */
+static uint32_t *spv_read(HleShaderStage stage, const char *src, size_t *nwords, uint64_t *key_out,
+                          uint64_t *check_out)
+{
+    const size_t len = strlen(src);
+    const uint64_t key = fnv64(src, len, 0xcbf29ce484222325ull) ^ (uint64_t)stage;
+    const uint64_t check = fnv64(src, len, 0x84222325cbf29ce4ull);
+    *key_out = key;
+    *check_out = check;
+    uint32_t *spv = NULL;
+    hle_mutex_lock(&g_pack_mx);
+    const Pack *packs[2] = { &g_title_pack, &g_legacy_pack };
+    for (unsigned i = 0; i < 2 && !spv; i++) {
+        const PackRec *r = pack_find(packs[i], key);
+        if (r && r->src_len == len && r->check == check) {   /* else a collision: a miss */
+            spv = g_malloc(4ull * r->nwords);
+            memcpy(spv, r + 1, 4ull * r->nwords);
+            *nwords = r->nwords;
+        }
+    }
+    hle_mutex_unlock(&g_pack_mx);
+    if (spv) {
+        hle_atomic_inc(&g_pc.spv_hits);
+    }
+    return spv;
 }
 
 uint32_t *hle_spirv_peek(HleShaderStage stage, const char *src, size_t *nwords)
 {
-    char *path;
-    uint64_t check;
-    uint32_t *spv = spv_read(stage, src, nwords, &path, &check);
-    g_free(path);
-    return spv;
+    uint64_t key, check;
+    return spv_read(stage, src, nwords, &key, &check);
 }
 
 uint32_t *hle_spirv_get(HleShaderStage stage, const char *src, size_t *nwords)
 {
-    char *path;
-    uint64_t check;
-    uint32_t *spv = spv_read(stage, src, nwords, &path, &check);
+    uint64_t key, check;
+    uint32_t *spv = spv_read(stage, src, nwords, &key, &check);
     if (spv) {
-        g_free(path);
         return spv;
     }
-    size_t len = strlen(src);
     /* any thread: the render thread, the pipeline workers, the prebuild.
      * glslang compiles in parallel (16.x: a pool allocator per thread, its
      * built-in tables made under its own lock), as the other callers of
      * hle_glsl_compile always did */
     spv = hle_glsl_compile(stage, src, nwords);
     hle_atomic_inc(&g_pc.spv_misses);
-    if (spv && path) {
-        SpvHeader h = { SPV_MAGIC, (uint32_t)len, check, (uint32_t)*nwords, 0 };
-        size_t total = sizeof(h) + 4 * *nwords;
-        uint8_t *out = g_malloc(total);
-        memcpy(out, &h, sizeof(h));
-        memcpy(out + sizeof(h), spv, 4 * *nwords);
-        g_file_set_contents(path, (const gchar *)out, total, NULL);
-        g_free(out);
+    if (spv && *nwords) {
+        hle_mutex_lock(&g_pack_mx);
+        if (g_title_pack.path) {
+            pack_add(&g_title_pack, key, check, (uint32_t)strlen(src), spv, (uint32_t)*nwords);
+        }
+        hle_mutex_unlock(&g_pack_mx);
     }
-    g_free(path);
     return spv;
 }
-

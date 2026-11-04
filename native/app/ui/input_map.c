@@ -289,6 +289,10 @@ void im_resolve(ImMap *m, const Config *global, const Config *game)
     const Config *ss = game && cfg_get(game, "stick.shape") ? game : global;
     const char *shape = cfg_get(ss, "stick.shape");
     m->stick_round = shape && !strcmp(shape, "round");
+    const Config *td = game && cfg_get(game, "trigger.deadzone") ? game : global;
+    m->trigger_dz = cfg_int(td, "trigger.deadzone", 10) / 100.0f;
+    const Config *tf = game && cfg_get(game, "trigger.full") ? game : global;
+    m->trigger_full = cfg_int(tf, "trigger.full", 100) / 100.0f;
     m->rumble = cfg_bool(global, "rumble", true);
 }
 
@@ -330,6 +334,20 @@ void im_stick(float x, float y, float dz, float range, bool round, float *ox, fl
     *oy = sy > 1 ? 1 : sy < -1 ? -1 : sy;
 }
 
+/* A worn trigger that stops short of its end still reaches 255 (full), and
+ * the travel past the dead zone is spread over the whole range, not cut off
+ * (the old fixed 10% jumped from 0 to 26). Keys give 1, a full press. */
+float im_trigger(float a, float dz, float full)
+{
+    if (a <= dz) {
+        return 0;
+    }
+    if (full <= dz || a >= full) {
+        return 1;
+    }
+    return (a - dz) / (full - dz);
+}
+
 static void stick(const ImMap *m, float xpos, float xneg, float ypos, float yneg, int16_t *ox, int16_t *oy)
 {
     float x, y;
@@ -359,7 +377,12 @@ void im_read(const ImMap *m, int p, const bool *keys, SDL_Gamepad *pad, ImPad *o
         }
     }
     for (int i = 0; i < 8; i++) {
-        const float a = v[IM_A + i];
+        float a = v[IM_A + i];
+        if (IM_A + i == IM_LT || IM_A + i == IM_RT) {
+            a = im_trigger(a, m->trigger_dz, m->trigger_full);
+            out->analog[i] = (uint8_t)(a >= 1 ? 255 : a * 255);
+            continue;
+        }
         out->analog[i] = (uint8_t)(a >= 1 ? 255 : a <= 0.1f ? 0 : a * 255);
     }
     stick(m, v[IM_LRIGHT], v[IM_LLEFT], v[IM_LUP], v[IM_LDOWN], &out->lx, &out->ly);

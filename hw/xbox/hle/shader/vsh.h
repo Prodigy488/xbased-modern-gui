@@ -35,6 +35,10 @@ typedef struct HleVshKey {
                                    no oFog: distance 0, else factor 1) */
     uint8_t zclamp;             /* depth clamped, not clipped (the pipeline's: in the
                                    padding, the key's size is the pipeline record's) */
+    uint16_t w1_mask;           /* of in_mask, three-component arrays fetched with
+                                   their four-component format (the driver's lacks
+                                   vertex support: AMD's for 8 and 16 bits), the
+                                   fourth read past them: w is 1 (in the padding too) */
 } HleVshKey;
 
 /* Parses nslots 4-dword instructions (stopping at the FINAL one) and writes

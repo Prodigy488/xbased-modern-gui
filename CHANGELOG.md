@@ -1,5 +1,33 @@
 # xbased changelog
 
+## 1.0.15 (2026-11)
+
+### New
+- Trigger calibration (Settings › Controls › Triggers, also from the in-game
+  menu's settings): a bar per trigger shows its travel as you
+  press it, with the dead zone and the full-press zone, beside what the
+  game gets and how far it reached. Trigger dead zone (default 10%) and
+  Full press at (default 100%: lower it for a trigger that no longer
+  reaches its end). Past the dead zone a trigger now rises smoothly to full
+  instead of jumping from nothing to a tenth.
+
+### Fixes
+- AMD graphics cards: geometry broken or missing in games with vertex
+  programs (Def Jam: Fight for NY's menus black, with a stray band across
+  them). AMD's drivers lack the 3-component 8- and 16-bit vertex formats;
+  their 4-component forms were used, and the extra component, read past
+  the array, became the position's w. It is now 1, as on the console.
+- Windows: back from a game to the dashboard, or a game restarting itself
+  (Crimson Skies after a mission), the window could end up behind others,
+  its taskbar button flashing, as if minimized.
+
+### Shader cache
+- The compiled shaders are kept in one file per game (hle_spirv/<title
+  id>.pack) instead of a file each: thousands of small files took far more
+  disk than their size and were slow to open on a hard disk. The existing
+  ones are packed into one file (legacy.pack) the first time, nothing to
+  compile again.
+
 ## 1.0.14 (2026-11)
 
 ### Fixes

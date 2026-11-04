@@ -175,7 +175,7 @@ static void caps_override(HleCaps *c)
         { "push", offsetof(HleCaps, push) },         { "pushdesc", offsetof(HleCaps, push_desc) },
         { "cbc", offsetof(HleCaps, cbc) },           { "d24s8", offsetof(HleCaps, d24s8) },
         { "4444", offsetof(HleCaps, x4444) },        { "bindless", offsetof(HleCaps, bindless) },
-        { "dclamp", offsetof(HleCaps, depth_clamp) },
+        { "dclamp", offsetof(HleCaps, depth_clamp) }, { "v3", offsetof(HleCaps, vfmt3) },
         { "bda", offsetof(HleCaps, bda) },           { "ahb", offsetof(HleCaps, ahb) },
         { "fbfetch", offsetof(HleCaps, fbfetch) },   { "vk13", offsetof(HleCaps, vk13) },
         { "dynrender", offsetof(HleCaps, dyn_render) }, { "sync2", offsetof(HleCaps, sync2) },
@@ -555,6 +555,7 @@ int hle_vk_init(void)
         c->d24s8 = (dp.optimalTilingFeatures & ds) == ds &&
                    ((dp.optimalTilingFeatures & lin) == lin || (fp.optimalTilingFeatures & lin) != lin);
     }
+    c->vfmt3 = true;
     c->bda = v13 ? q12.bufferDeviceAddress : e_bda && q_bda.bufferDeviceAddress;
     c->ahb = e_ahb;
     c->max_lod_bias = v->props.limits.maxSamplerLodBias;
