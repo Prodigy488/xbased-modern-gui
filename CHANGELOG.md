@@ -1,5 +1,14 @@
 # xbased changelog
 
+## 1.0.16 (2026-11)
+
+### Fixes
+- Windows: back in the dashboard after quitting a game from the in-game
+  menu, the dashboard showed but had neither the keyboard nor the gamepad
+  until clicked or Alt+Tabbed to. The game hid its window before handing
+  the foreground on, and hidden it no longer had one to hand; it now hands
+  it on first, and the dashboard takes the foreground as it comes back.
+
 ## 1.0.15 (2026-11)
 
 ### New

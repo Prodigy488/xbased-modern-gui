@@ -250,15 +250,24 @@ static void make_hdd(const char *root)
  * another there hangs the process: a black full-screen window, and the
  * dashboard waiting behind it. TerminateProcess skips that; what the run
  * wrote is written (stderr isn't buffered, files are closed as they go). */
+/* The game's window has the screen: the one shown next (the dashboard
+ * back, a relaunched title's) may take it. Without this, Windows' lock on
+ * the foreground left that one behind whatever window came next, its
+ * taskbar button flashing, as if minimized, and without the keyboard and
+ * gamepad. Given while this process still has the foreground: before its
+ * window hides (hidden, another window has it and the grant does nothing). */
+static void give_foreground(void)
+{
+#ifdef _WIN32
+    AllowSetForegroundWindow(ASFW_ANY);
+#endif
+}
+
 static _Noreturn void exit_now(int code)
 {
     fflush(NULL);
 #ifdef _WIN32
-    /* The game's window has the screen: the one shown next (the dashboard
-     * back, a relaunched title's) may take it. Without this, Windows' lock
-     * on the foreground left that one behind whatever window came next,
-     * its taskbar button flashing, as if minimized. */
-    AllowSetForegroundWindow(ASFW_ANY);
+    give_foreground();
     TerminateProcess(GetCurrentProcess(), (UINT)code);
 #endif
     _exit(code);
@@ -580,6 +589,7 @@ static void ingame_menu(SDL_Window *win, bool *paused, bool minimized)
          * presenter's swapchain, the paused threads), so nothing can hold
          * the window */
         nc_log("hakuX-app", "quit to the dashboard");
+        give_foreground();
         SDL_HideWindow(win);
         exit_now(0);
     }
@@ -717,7 +727,7 @@ static const char *pick_disc(void)
 }
 
 #ifndef XBASED_VERSION
-#define XBASED_VERSION "1.0.15"
+#define XBASED_VERSION "1.0.16"
 #endif
 #ifdef _WIN32
 #define NC_PLATFORM_NAME "Windows"

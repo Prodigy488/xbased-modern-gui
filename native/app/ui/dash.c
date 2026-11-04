@@ -18,7 +18,7 @@
 #endif
 
 #ifndef XBASED_VERSION
-#define XBASED_VERSION "1.0.15"
+#define XBASED_VERSION "1.0.16"
 #endif
 
 Dash D;
@@ -992,7 +992,13 @@ static void wait_child(void)
     }
     g_hide_at = 0;
     SDL_ShowWindow(g_win);
+    /* the game had the screen: past Windows' lock on the foreground, so the
+     * dashboard has the keyboard and the gamepads again, not just its picture
+     * (the game grants it as it ends, this attaches to the foreground's input
+     * where that wasn't enough) */
+    SDL_SetHint(SDL_HINT_FORCE_RAISEWINDOW, "1");
     SDL_RaiseWindow(g_win);
+    SDL_SetHint(SDL_HINT_FORCE_RAISEWINDOW, "0");
     cfg_load(&D.global, D.global.path);     /* the game may have changed settings */
     upscale_migrate(&D.global);
     g_auto_off = -1;    /* the scripted commands meanwhile were the game's */
