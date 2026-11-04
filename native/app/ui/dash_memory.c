@@ -7,6 +7,7 @@
  */
 #include "native/app/ui/dash_int.h"
 #include "native/app/ui/xbox_data.h"
+#include "native/app/ui/xemu_import.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -31,14 +32,83 @@ static bool g_loaded;
 static Entry *g_title;      /* the open one */
 static int g_target;        /* the save asked about */
 
-static void udata_dir(char *out, size_t n)
+static void hdd_dir(char *out, size_t n)
 {
     const char *h = cfg_get(&D.global, "hdd");
     if (h && *h) {
-        snprintf(out, n, "%s/Partition1/UDATA", h);
+        snprintf(out, n, "%s", h);
     } else {
-        snprintf(out, n, "%shdd/Partition1/UDATA", cfg_data_dir());
+        snprintf(out, n, "%shdd", cfg_data_dir());
     }
+}
+
+static void udata_dir(char *out, size_t n)
+{
+    char h[1024];
+    hdd_dir(h, sizeof(h));
+    snprintf(out, n, "%s/Partition1/UDATA", h);
+}
+
+/* ---- xemu's saves (xemu_import.c): its xemu.toml where xemu keeps it, or
+ * chosen; asked about, then imported on a thread; the outcome a toast */
+
+static char g_xemu_toml[1100];
+static SDL_AtomicInt g_toml_picked;     /* 1: the dialog answered (g_xemu_toml, "" none) */
+
+static void SDLCALL toml_cb(void *ud, const char *const *files, int filter)
+{
+    (void)ud;
+    (void)filter;
+    snprintf(g_xemu_toml, sizeof(g_xemu_toml), "%s", files && files[0] ? files[0] : "");
+    SDL_SetAtomicInt(&g_toml_picked, 1);
+}
+
+static void import_yes(Dash *d)
+{
+    (void)d;
+    char h[1024];
+    hdd_dir(h, sizeof(h));
+    xi_start(g_xemu_toml, h);
+}
+
+static void import_ask(void)
+{
+    if (xi_running()) {
+        return;
+    }
+    if (!xi_find_toml(g_xemu_toml, sizeof(g_xemu_toml))) {
+        static const SDL_DialogFileFilter f[] = {{"xemu.toml", "toml"}};
+        dash_toast(T(S_IMPORT_XEMU_PICK));
+        SDL_ShowOpenFileDialog(toml_cb, NULL, NULL, f, 1, NULL, false);
+        return;
+    }
+    dash_ask(T(S_IMPORT_XEMU_ASK), import_yes);
+}
+
+/* each frame on the Memory screens: a file chosen, an import done */
+static void import_poll(void)
+{
+    if (SDL_CompareAndSwapAtomicInt(&g_toml_picked, 1, 0) && g_xemu_toml[0]) {
+        dash_ask(T(S_IMPORT_XEMU_ASK), import_yes);
+    }
+    XiReport r;
+    if (!xi_take_report(&r)) {
+        return;
+    }
+    char msg[1024];
+    if (!r.ok) {
+        snprintf(msg, sizeof(msg), "%s", r.error);
+    } else {
+        int k = snprintf(msg, sizeof(msg), T(S_IMPORT_XEMU_DONE), r.titles, r.files, r.resigned);
+        if (r.no_cert && k > 0 && k < (int)sizeof(msg)) {
+            k += snprintf(msg + k, sizeof(msg) - (size_t)k, " %s", T(S_IMPORT_XEMU_NOBIOS));
+        } else if (r.no_key && k > 0 && k < (int)sizeof(msg)) {
+            msg[k++] = ' ';
+            k += snprintf(msg + k, sizeof(msg) - (size_t)k, T(S_IMPORT_XEMU_NOKEY), r.no_key);
+        }
+    }
+    dash_toast(msg);
+    g_loaded = false;   /* the list again */
 }
 
 static void exports_dir(char *out, size_t n)
@@ -280,6 +350,7 @@ static void del_title(Dash *d)
 void scr_memory(void)
 {
     const float W = ui_w(), H = ui_h();
+    import_poll();
     if (!g_loaded || D.anim == 0) {
         load_titles();
     }
@@ -289,6 +360,9 @@ void scr_memory(void)
     }
     char sub[96];
     size_text(total, sub, sizeof(sub));
+    if (xi_running()) {
+        snprintf(sub, sizeof(sub), "%s", T(S_IMPORTING));
+    }
     draw_header(T(S_MEMORY), sub);
     if (!g_ntitles) {
         ui_text(W / 2, H * 0.45f, T(S_NO_SAVES), 26, UI_FONT_REGULAR, UI_GREY, UI_ALIGN_CENTER);
@@ -311,10 +385,13 @@ void scr_memory(void)
         }
     }
     list_end(&l);
+    if (D.in.y) {
+        import_ask();
+    }
     if (D.in.back) {
         dash_pop();
     }
-    draw_hints(T(S_SELECT), T(S_BACK), T(S_DELETE), NULL);
+    draw_hints(T(S_SELECT), T(S_BACK), T(S_DELETE), T(S_IMPORT_XEMU));
 }
 
 static void del_save(Dash *d)

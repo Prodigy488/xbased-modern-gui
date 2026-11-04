@@ -1,4 +1,4 @@
-﻿/*
+/*
  * hakuX front end â€” the dashboard (dash.h): its loop, input, lists, and
  * the main, games and game screens. Settings, controls, memory and online
  * are in dash_settings.c, dash_memory.c.
@@ -18,7 +18,7 @@
 #endif
 
 #ifndef XBASED_VERSION
-#define XBASED_VERSION "1.0.11"
+#define XBASED_VERSION "1.0.12"
 #endif
 
 Dash D;
@@ -99,7 +99,65 @@ enum Screen dash_top(void)
 void dash_toast(const char *msg)
 {
     snprintf(D.toast, sizeof(D.toast), "%s", msg);
-    D.toast_until = ui_time() + 3;
+    /* time to read it: longer for a longer one */
+    const double t = 3 + strlen(D.toast) / 30.0;
+    D.toast_until = ui_time() + (t < 12 ? t : 12);
+}
+
+/* s in lines no wider than max_w (at spaces; CJK, which has none, between
+ * characters): their count, at most max. */
+static int wrap_lines(const char *s, float size, int font, float max_w, char lines[][512], int max)
+{
+    int nl = 0;
+    while (*s && nl < max) {
+        size_t n = 0, last_space = 0;
+        char *line = lines[nl];
+        while (s[n] && n < 511) {
+            line[n] = s[n];
+            line[n + 1] = 0;
+            if (s[n] == ' ') {
+                last_space = n;
+            }
+            if (ui_text_width(line, size, font) > max_w) {
+                if (last_space) {
+                    n = last_space;
+                } else {
+                    while (n > 1 && (s[n] & 0xC0) == 0x80) {
+                        n--;
+                    }
+                }
+                break;
+            }
+            n++;
+        }
+        snprintf(line, 512, "%.*s", (int)n, s);
+        nl++;
+        s += n ? n : 1;
+        while (*s == ' ') {
+            s++;
+        }
+    }
+    return nl;
+}
+
+/* The toast: a line, or lines wrapped to the screen's width (from the
+ * bottom up), in a rounded box. */
+static void draw_toast(void)
+{
+    const float W = ui_w();
+    char lines[8][512];
+    const int nl = wrap_lines(D.toast, 22, UI_FONT_REGULAR, W - 240, lines, 8);
+    float widest = 0;
+    for (int i = 0; i < nl; i++) {
+        const float w = ui_text_width(lines[i], 22, UI_FONT_REGULAR);
+        widest = w > widest ? w : widest;
+    }
+    const float tw = widest + 40, th = 14 + 30.0f * (float)nl, y = ui_h() - 76 - th;
+    ui_round((W - tw) / 2, y, tw, th, 22, (UiColor){0x10, 0x30, 0x08, 0xF0});
+    ui_round_outline((W - tw) / 2, y, tw, th, 22, 1.5f, UI_GREEN);
+    for (int i = 0; i < nl; i++) {
+        ui_text(W / 2, y + 10 + 30.0f * (float)i, lines[i], 22, UI_FONT_REGULAR, UI_WHITE, UI_ALIGN_CENTER);
+    }
 }
 
 void dash_ask(const char *q, void (*on_yes)(Dash *))
@@ -1065,9 +1123,11 @@ static void scr_games(void)
         if (D.in.back) {
             dash_pop();
         }
-        draw_hints(lib_scanning() ? NULL : T(S_ADD_FOLDER), T(S_BACK), NULL, NULL);
+        draw_hints(lib_scanning() ? NULL : T(S_ADD_FOLDER), T(S_BACK), NULL, lib_scanning() ? NULL : T(S_ADD_GAME_FILE));
         if ((D.in.ok || D.in.click) && !lib_scanning()) {
             SDL_ShowOpenFolderDialog(add_folder_cb, NULL, g_win, NULL, false);
+        } else if (D.in.y && !lib_scanning()) {
+            dash_pick_game_file();
         }
         return;
     }
@@ -1260,11 +1320,18 @@ static void draw_ask(void)
     const float W = ui_w(), H = ui_h();
     ui_rect(0, 0, W, H, (UiColor){0, 0, 0, 170});
     /* three answers take a wider panel (and the longer questions they come with) */
-    const float w = D.nchoices == 3 ? 900 : 620, h = 230, x = (W - w) / 2, y = (H - h) / 2;
+    const float w = D.nchoices == 3 ? 900 : 620, fs = D.nchoices == 3 ? 24 : 26;
+    /* a longer question on lines of its own, the panel taller for them */
+    char qlines[5][512];
+    const int nq = wrap_lines(D.ask, fs, UI_FONT_BOLD, w - 40, qlines, 5);
+    const float extra = (nq > 1 ? nq - 1 : 0) * (fs + 8);
+    const float h = 230 + extra, x = (W - w) / 2, y = (H - h) / 2;
     ui_glow(W / 2, H / 2, w * 0.8f, ui_alpha(UI_GREEN, 0.18f));
     ui_round(x, y, w, h, 18, (UiColor){0x0A, 0x1C, 0x06, 0xF4});
     ui_round_outline(x, y, w, h, 18, 2, UI_GREEN);
-    ui_text_fit(W / 2, y + 50, D.ask, D.nchoices == 3 ? 24 : 26, UI_FONT_BOLD, UI_WHITE, UI_ALIGN_CENTER, w - 40);
+    for (int i = 0; i < nq; i++) {
+        ui_text_fit(W / 2, y + 50 + i * (fs + 8), qlines[i], fs, UI_FONT_BOLD, UI_WHITE, UI_ALIGN_CENTER, w - 40);
+    }
     /* the selection: No for a yes/no question (the safe one), else the first */
     static int sel = -1;
     static const char *sel_for;
@@ -1283,7 +1350,7 @@ static void draw_ask(void)
     const float bw = n == 3 ? 260 : 220, gap = n == 3 ? 24 : 40, bh = 56;
     const float x0 = x + (w - (n * bw + (n - 1) * gap)) / 2;
     for (int i = 0; i < n; i++) {
-        const float bx = x0 + i * (bw + gap), by = y + 130;
+        const float bx = x0 + i * (bw + gap), by = y + 130 + extra;
         const bool over = D.in.mx >= bx && D.in.mx < bx + bw && D.in.my >= by && D.in.my < by + bh;
         if (over && D.in.moved) {
             sel = i;
@@ -1375,10 +1442,12 @@ static void update_poll(void)
 
 /* ------------------------------------------------------------ the loop */
 
+/* what the library scans: the game folders, and the game files added one by one */
 static void folders(const char ***out, int *n)
 {
-    static const char *v[16];
+    static const char *v[48];
     *n = cfg_all(&D.global, "gamedir", v, 16);
+    *n += cfg_all(&D.global, "gamefile", v + *n, 32);
     *out = v;
 }
 
@@ -1524,10 +1593,7 @@ int dash_run(SDL_Window *win, const char *exe)
             draw_ask();
         }
         if (D.toast[0] && ui_time() < D.toast_until) {
-            const float tw = ui_text_width(D.toast, 22, UI_FONT_REGULAR) + 40, W = ui_w();
-            ui_round((W - tw) / 2, ui_h() - 120, tw, 44, 22, (UiColor){0x10, 0x30, 0x08, 0xF0});
-            ui_round_outline((W - tw) / 2, ui_h() - 120, tw, 44, 22, 1.5f, UI_GREEN);
-            ui_text(W / 2, ui_h() - 110, D.toast, 22, UI_FONT_REGULAR, UI_WHITE, UI_ALIGN_CENTER);
+            draw_toast();
         }
         auto_shot();
         ui_end();

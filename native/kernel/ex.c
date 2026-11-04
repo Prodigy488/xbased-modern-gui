@@ -942,8 +942,15 @@ static uint64_t HalReturnToFirmware(NcKernel *k, NcFrame *f, const uint32_t *a)
     if (page) {
         memcpy(launch, nc_vm_host(k->vm, page + LAUNCH_PATH_OFF), LAUNCH_PATH_LEN);
     }
-    /* the title is done (the dashboard, a reboot): the game closes */
+    /* the title is done (the dashboard, a reboot): the game closes; asking
+     * the dashboard for a page of its (an Xbox Live account's creation or
+     * recovery) with none installed, the app says why */
     k->quit = true;
+    if (a[0] == 2 && page) {
+        const uint8_t *pg = nc_vm_host(k->vm, page);
+        k->quit_no_dash = nc_rd32(pg) == LDT_LAUNCH_DASHBOARD && nc_rd32(pg + LAUNCH_DATA_OFF) &&
+                          !nc_io_host_file(NC_DASHBOARD_PATH, host, sizeof(host));
+    }
     nc_kernel_request_stop(k, f, "title returned to the firmware (routine %u%s%s)", a[0],
                            page ? ", launch path " : "", launch);
     return 0;

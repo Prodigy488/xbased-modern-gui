@@ -47,8 +47,8 @@ the port, the dashboard, the game fixes and every release.
 
 | Platform | File | |
 |---|---|---|
-| **Windows** 10/11 (x64) | `xbased-1.0.11-windows-x64.zip` | Unzip anywhere and run `xbased.exe`. Portable: everything stays in its folder. |
-| **Linux** (x86-64) | `xbased-1.0.11-x86_64.AppImage` | `chmod +x` it and run. Ubuntu 22.04 or newer, or any distribution of the same age. |
+| **Windows** 10/11 (x64) | `xbased-1.0.12-windows-x64.zip` | Unzip anywhere and run `xbased.exe`. Portable: everything stays in its folder. |
+| **Linux** (x86-64) | `xbased-1.0.12-x86_64.AppImage` | `chmod +x` it and run. Ubuntu 22.04 or newer, or any distribution of the same age. |
 
 Get them from **[Releases](https://github.com/crazyriddler/xbased/releases/latest)**.
 
@@ -81,6 +81,8 @@ xbased doesn't include any copyrighted Xbox software.
 - **A page per game**: play, load a state, settings, patches, controls.
 - **Memory manager**: your games' saves with their icons; export, import and
   delete.
+- **Import from xemu**: xemu's saves copied in and re-signed so games accept
+  them (Memory, Y).
 - **Broad compatibility** with many games, inherited from hakuX.
 
 </td>
@@ -177,7 +179,8 @@ xbased doesn't include any copyrighted Xbox software.
 1. Download xbased from [Releases](https://github.com/crazyriddler/xbased/releases/latest):
    unzip it anywhere (Windows) or run the AppImage (Linux).
 2. Start it: the dashboard opens. **Settings › Interface › Add folder** and pick
-   the folder with your disc images.
+   the folder with your disc images (or **Add a game file** for a single
+   image).
 3. Choose a game in **Games**. Box art downloads automatically (it can be
    turned off).
 

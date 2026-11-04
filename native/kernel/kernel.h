@@ -287,6 +287,7 @@ struct NcKernel {
     char stop_reason[512];
     bool relaunch;             /* stopped for a quick reboot into another XBE (relaunch.bin) */
     bool quit;                 /* stopped as the title left: to the dashboard, a reboot, a shutdown */
+    bool quit_no_dash;         /* ... for a dashboard page (an Xbox Live account's) with no dashboard installed */
     char image_path[128];      /* XeImageFileName ("" = \Device\CdRom0\default.xbe) */
     uint64_t calls;
     unsigned first_ordinal;    /* first kernel call made (0: none yet) */

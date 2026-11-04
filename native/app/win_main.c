@@ -225,9 +225,9 @@ static void game_options(const char *disc)
             add_arg("fullscreen=0");
         }
     }
+    i18n_set(opt_value("ui.lang"));     /* the app's messages */
     const char *lang = opt_value("lang");
     if (!lang || !strcmp(lang, "auto")) {
-        i18n_set(opt_value("ui.lang"));
         char a[16];
         snprintf(a, sizeof(a), "lang=%d", i18n_console_lang());
         add_arg(a);
@@ -242,6 +242,21 @@ static void make_hdd(const char *root)
         snprintf(p, sizeof(p), "%s/Partition%d", root, i);
         mkdir(p, 0775);
     }
+}
+
+/* The process ends at once with code. On Windows ExitProcess would first
+ * run every DLL's detach (the GPU driver's, the gamepads', the audio's) with
+ * the emulation's threads cut off wherever they were, and one waiting on
+ * another there hangs the process: a black full-screen window, and the
+ * dashboard waiting behind it. TerminateProcess skips that; what the run
+ * wrote is written (stderr isn't buffered, files are closed as they go). */
+static _Noreturn void exit_now(int code)
+{
+    fflush(NULL);
+#ifdef _WIN32
+    TerminateProcess(GetCurrentProcess(), (UINT)code);
+#endif
+    _exit(code);
 }
 
 static void fatal_box(const char *title, const char *msg)
@@ -281,8 +296,7 @@ static void run_again(const char *extra)
         CloseHandle(pi.hProcess);
         /* the dashboard waits for this process: the new one's id in the
          * exit code (bit 30 set) lets it follow the game on (dash.c) */
-        fflush(stderr);
-        _exit((int)(0x40000000u | (pi.dwProcessId & 0x3FFFFFFFu)));
+        exit_now((int)(0x40000000u | (pi.dwProcessId & 0x3FFFFFFFu)));
     }
 #else
     /* this process becomes the new run (the same arguments as above) */
@@ -306,7 +320,7 @@ static void run_again(const char *extra)
     fflush(stderr);
     execv(exe, argv);
 #endif
-    _exit(0);
+    exit_now(0);
 }
 
 /* ------------------------------------------------------------- the core */
@@ -555,8 +569,16 @@ static void ingame_menu(SDL_Window *win, bool *paused, bool minimized)
     int slot = 0;
     const char *title = strrchr(g_disc, '\\');
     const int act = dash_ingame(win, g_key, title ? title + 1 : g_disc, pic, &slot);
-    SDL_HideCursor();   /* the game doesn't use the mouse; the menu may have shown it */
     remove(pic);
+    if (act == DASH_INGAME_QUIT) {
+        /* straight out: nothing of the run is taken back first (the
+         * presenter's swapchain, the paused threads), so nothing can hold
+         * the window */
+        nc_log("hakuX-app", "quit to the dashboard");
+        SDL_HideWindow(win);
+        exit_now(0);
+    }
+    SDL_HideCursor();   /* the game doesn't use the mouse; the menu may have shown it */
     nc_auto_resync();
     /* the presenter back on the window before anything is shown or saved */
     SDL_Delay(50);
@@ -610,9 +632,6 @@ static void ingame_menu(SDL_Window *win, bool *paused, bool minimized)
     case DASH_INGAME_RESTART:
         run_again(NULL);
         break;
-    case DASH_INGAME_QUIT:
-        nc_log("hakuX-app", "quit to the dashboard");
-        _exit(0);
     default:
         break;
     }
@@ -693,7 +712,7 @@ static const char *pick_disc(void)
 }
 
 #ifndef XBASED_VERSION
-#define XBASED_VERSION "1.0.11"
+#define XBASED_VERSION "1.0.12"
 #endif
 #ifdef _WIN32
 #define NC_PLATFORM_NAME "Windows"
@@ -960,6 +979,9 @@ int main(int argc, char *argv[])
                 run_again("relaunch");
             }
             if (g_core.kernel.quit) {
+                if (g_core.kernel.quit_no_dash) {
+                    SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_INFORMATION, "xbased", T(S_NO_DASHBOARD), win);
+                }
                 break;
             }
             if (!told) {
@@ -976,5 +998,5 @@ int main(int argc, char *argv[])
         }
     }
     nc_log("hakuX-app", "native core: leaving");
-    _exit(0); /* the core thread has no stop yet */
+    exit_now(0); /* the core thread has no stop yet */
 }

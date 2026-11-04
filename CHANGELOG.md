@@ -1,5 +1,42 @@
 # xbased changelog
 
+## 1.0.12 (2026-11)
+
+### New
+- Import from xemu (Memory, Y): xemu's game saves (its hard disk's E:
+  UDATA and TDATA) copied into xbased and re-signed, so games accept them.
+  Copied as they were, a game found them damaged: xemu's console signs
+  saves with its own keys (from its BIOS and EEPROM), xbased with its own.
+  xemu's settings (xemu.toml) are found where xemu keeps them, or chosen;
+  its BIOS, boot ROM, EEPROM and qcow2 or raw hard disk image are only read.
+  Saves whose game isn't in the library are copied but not re-signed: add
+  the game and import again. xemu_import.log beside xbased lists each file.
+- Add a game file (Settings, below the game folders, or Y in an empty
+  Games screen): a
+  disc image the folder scan doesn't find (another extension, another
+  place) added on its own; it stays in the library.
+
+### Fixes
+- Halo: Combat Evolved: starting a campaign level closed the game back to
+  xbased's menu. Halo lays out its game state and tags from 0x61000 to past
+  16 MiB, and D3D's second page of visibility-test results has to be below
+  16 MiB: the kernel kept 256 KiB of low memory it doesn't use (the Xbox
+  kernel lets its start-up memory go), none was left, and the game read
+  through the page it didn't get.
+- Grand Theft Auto III and Vice City: a black screen at start. Their timer
+  reads save the registers with the 16-bit PUSHA/POPA, which stopped the
+  game; they run now.
+- Quit from the in-game menu, and a game closing itself (a title opening
+  the Xbox dashboard), could leave a black full-screen window that had to
+  be closed by force: the process now ends at once, without waiting on the
+  graphics, gamepad and audio drivers' shutdown.
+- A game opening the Xbox dashboard's Xbox Live account page (creating or
+  recovering an account) with no dashboard installed now says so instead
+  of just closing.
+
+### Dashboard
+- Long messages and questions wrap over several lines instead of being cut.
+
 ## 1.0.11 (2026-11)
 
 ### Fixes

@@ -229,7 +229,7 @@ static void scan_dir(const char *dir, int depth)
 }
 
 typedef struct {
-    char dirs[16][1024];
+    char dirs[48][1024];    /* folders, and game files added one by one */
     int n;
 } ScanArgs;
 
@@ -240,7 +240,12 @@ static int scan_thread(void *arg)
         cache_load();
     }
     for (int i = 0; i < a->n; i++) {
-        scan_dir(a->dirs[i], 0);
+        SDL_PathInfo pi;
+        if (SDL_GetPathInfo(a->dirs[i], &pi) && pi.type == SDL_PATHTYPE_FILE) {
+            add_game(a->dirs[i], &pi);  /* any name: it was chosen */
+        } else {
+            scan_dir(a->dirs[i], 0);
+        }
     }
     /* games whose files went away */
     SDL_LockMutex(L.mu);
@@ -268,7 +273,7 @@ void lib_scan(const char *const *folders, int n)
         SDL_WaitThread(L.scan, NULL);
     }
     ScanArgs *a = calloc(1, sizeof(*a));
-    for (int i = 0; i < n && i < 16; i++) {
+    for (int i = 0; i < n && i < 48; i++) {
         snprintf(a->dirs[a->n++], sizeof(a->dirs[0]), "%s", folders[i]);
     }
     SDL_SetAtomicInt(&L.scanning, 1);

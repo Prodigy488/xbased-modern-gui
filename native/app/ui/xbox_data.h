@@ -18,6 +18,13 @@ typedef struct XdGame {
     uint8_t *icon;          /* RGBA, icon_w x icon_h, or NULL */
     int icon_w, icon_h;
     int64_t size;
+    /* the certificate's save signing keys: its own (+0xC0), and for each
+     * alternate title ID (+0x5C) that title's (+0xD0); not in the library's
+     * cache (xemu_import.c reads the disc again) */
+    bool has_keys;
+    uint8_t sig_key[16];
+    uint32_t alt_ids[16];
+    uint8_t alt_keys[16][16];
 } XdGame;
 
 /* The game on an Xbox disc image (XISO, or a full dump's game partition).

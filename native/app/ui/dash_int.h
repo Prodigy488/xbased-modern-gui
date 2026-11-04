@@ -47,7 +47,7 @@ typedef struct Dash {
     int nchoices;                               /* 0: yes/no */
     void (*on_choice)(struct Dash *, int);      /* the choice, -1 backed out */
     char ask_buf[256];
-    char toast[256];
+    char toast[1024];
     double toast_until;
     char exe[1024];
     bool quit;
@@ -118,7 +118,8 @@ void scr_mods(void);
 void scr_states(void);
 /* the folder picker's answer: a game folder added (SDL_ShowOpenFolderDialog) */
 void add_folder_cb(void *ud, const char *const *files, int filter);
-void dash_take_folder(void);    /* each frame: a folder picked meanwhile goes in */
+void dash_take_folder(void);
+void dash_pick_game_file(void);  /* a disc image the folders don't have, added on its own */    /* each frame: a folder picked meanwhile goes in */
 
 /* the game's files */
 void game_cfg_path(const LibGame *g, char *out, size_t n);

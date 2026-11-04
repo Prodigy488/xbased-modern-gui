@@ -215,6 +215,14 @@ bool xd_read_game(const char *path, XdGame *g)
                 }
                 ok = true;
             }
+            if (cert + 0x1D0 <= size) {
+                memcpy(g->sig_key, x + cert + 0xC0, 16);
+                for (int i = 0; i < 16; i++) {
+                    g->alt_ids[i] = rd32(x + cert + 0x5C + i * 4);
+                }
+                memcpy(g->alt_keys, x + cert + 0xD0, sizeof(g->alt_keys));
+                g->has_keys = true;
+            }
             uint32_t il = 0;
             uint8_t *img = xbe_section(x, size, "$$XTIMAGE", &il);
             if (!img) {

@@ -98,12 +98,49 @@ void add_folder_cb(void *ud, const char *const *files, int filter)
     }
 }
 
+/* a game file: any name (what the folders' scan leaves out: another
+ * extension, a folder deeper than it looks) */
+static char g_new_file[1024];
+static SDL_AtomicInt g_new_file_set;
+
+static void SDLCALL add_file_cb(void *ud, const char *const *files, int filter)
+{
+    (void)ud;
+    (void)filter;
+    if (files && files[0] && !SDL_GetAtomicInt(&g_new_file_set)) {
+        snprintf(g_new_file, sizeof(g_new_file), "%s", files[0]);
+        SDL_SetAtomicInt(&g_new_file_set, 1);
+    }
+}
+
+void dash_pick_game_file(void)
+{
+    static const SDL_DialogFileFilter f[] = {
+        {"Xbox disc images (*.iso, *.xiso, *.cci)", "iso;xiso;cci"},
+        {"All files", "*"},
+    };
+    SDL_ShowOpenFileDialog(add_file_cb, NULL, SDL_GetKeyboardFocus(), f, 2, NULL, false);
+}
+
 void dash_take_folder(void)
 {
     if (SDL_GetAtomicInt(&g_new_folder_set)) {
         cfg_add(&D.global, "gamedir", g_new_folder);
         cfg_save(&D.global);
         SDL_SetAtomicInt(&g_new_folder_set, 0);
+    }
+    if (SDL_GetAtomicInt(&g_new_file_set)) {
+        const char *have[32];
+        const int n = cfg_all(&D.global, "gamefile", have, 32);
+        bool dup = false;
+        for (int i = 0; i < n; i++) {
+            dup |= !strcmp(have[i], g_new_file);
+        }
+        if (!dup) {
+            cfg_add(&D.global, "gamefile", g_new_file);
+            cfg_save(&D.global);
+        }
+        SDL_SetAtomicInt(&g_new_file_set, 0);
     }
 }
 
@@ -193,6 +230,22 @@ void scr_settings(void)
         }
         if (list_row(&l, T(S_ADD_FOLDER), "+", NULL)) {
             SDL_ShowOpenFolderDialog(add_folder_cb, NULL, SDL_GetKeyboardFocus(), NULL, false);
+        }
+        const char *files[32];
+        const int nf = cfg_all(&D.global, "gamefile", files, 32);
+        for (int i = 0; i < nf; i++) {
+            char label[64];
+            snprintf(label, sizeof(label), "%s %d", T(S_GAME_FILE), i + 1);
+            if (list_row(&l, label, files[i], NULL) || (list_selected(&l) && D.in.x)) {
+                char f[1024];
+                snprintf(f, sizeof(f), "%s", files[i]);
+                cfg_remove_value(&D.global, "gamefile", f);
+                cfg_save(&D.global);
+                break;
+            }
+        }
+        if (list_row(&l, T(S_ADD_GAME_FILE), "+", NULL)) {
+            dash_pick_game_file();
         }
         break;
     }

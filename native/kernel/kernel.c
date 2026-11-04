@@ -39,6 +39,17 @@ static const NcKExport *k_by_ordinal[NC_KORDINAL_MAX];
 #define K_IDT      0x11000u /* 256 gates of 8 bytes */
 #define K_FAST     0x12000u /* exports run as guest code (install_fast_paths) */
 #define K_FAST_END 0x13000u
+/* The physical pages the kernel keeps of its area: what it uses, rounded up.
+ * The rest is free memory, as the Xbox kernel's area is once its INIT
+ * section is let go: the few pages below 16 MiB a title that fills the rest
+ * of low RAM still has. Halo lays out its game state from 0x61000 and its
+ * tags from 0x3A6000 to 0x19A6000; D3D's second page of visibility-test
+ * reports (index 256 on: its lights in The Pillar of Autumn) must be below
+ * 16 MiB (the GPU's report offsets are 24 bits): with the kernel's whole
+ * area kept there was none, the allocation failed, GetVisibilityTestResult
+ * read through D3D's null page and the game closed at its first level. */
+#define K_CLAIMED  0x20000u
+_Static_assert(K_FAST_END <= K_CLAIMED && K_CLAIMED <= NC_KERNEL_SIZE, "the kernel's pages");
 
 /* Kernel pool: starts with one 64 KiB chunk of physical RAM, reached through
  * the contiguous window, and grows a chunk at a time as needed (pool.c), as
@@ -388,13 +399,13 @@ bool nc_kernel_init(NcKernel *k, NcVm *vm)
 {
     memset(k, 0, sizeof(*k));
     k->vm = vm;
-    if (!nc_vm_claim_phys(vm, NC_KERNEL_PA, NC_KERNEL_SIZE)) {
+    if (!nc_vm_claim_phys(vm, NC_KERNEL_PA, K_CLAIMED)) {
         nc_log("hakuX-native", "kernel: physical 0x%x-0x%x taken", NC_KERNEL_PA,
-               NC_KERNEL_PA + NC_KERNEL_SIZE);
+               NC_KERNEL_PA + K_CLAIMED);
         return false;
     }
     uint8_t *km = nc_vm_host(vm, NC_KERNEL_VA);
-    memset(km, 0, NC_KERNEL_SIZE);
+    memset(km, 0, K_CLAIMED);
     memset(km + K_STUBS, 0xCC, K_DATA - K_STUBS);
 
     for (size_t i = 0; i < sizeof(k_exports) / sizeof(k_exports[0]); i++) {
@@ -1665,6 +1676,37 @@ static bool sysop(void *opaque, NcFrame *f, enum NcSysOp op, unsigned size)
             nc_frame_set_gpr(f, NC_ESP, esp + 12);
             nc_frame_set_eflags(f, fl);
             nc_frame_set_eip(f, to);
+            break;
+        }
+        /* PUSHA / POPA with the operand-size prefix (66 60, 66 61): the 16-bit
+         * registers, 2 bytes each (AX CX DX BX SP BP SI DI, SP as it was
+         * before; POPAW skips SP's word and sets the low halves only).
+         * Rockstar's timer reads (GTA III, Vice City) wrap RDTSC in
+         * PUSHAW/POPAW; the CPU back end hands them over here. */
+        if (insn[0] == 0x66 && (insn[1] == 0x60 || insn[1] == 0x61)) {
+            static const int order[8] = {NC_EAX, NC_ECX, NC_EDX, NC_EBX, NC_ESP, NC_EBP, NC_ESI, NC_EDI};
+            uint32_t esp = nc_frame_gpr(f, NC_ESP);
+            if (insn[1] == 0x60) {
+                const uint32_t sp0 = esp;
+                for (int i = 0; i < 8; i++) {
+                    esp -= 2;
+                    const uint32_t v = order[i] == NC_ESP ? sp0 : nc_frame_gpr(f, order[i]);
+                    uint8_t *w = nc_vm_host(k->vm, esp);
+                    w[0] = (uint8_t)v;
+                    w[1] = (uint8_t)(v >> 8);
+                }
+            } else {
+                for (int i = 7; i >= 0; i--) {
+                    const uint8_t *r = nc_vm_host(k->vm, esp);
+                    const uint16_t v = (uint16_t)(r[0] | r[1] << 8);
+                    esp += 2;
+                    if (order[i] != NC_ESP) {
+                        nc_frame_set_gpr(f, order[i], (nc_frame_gpr(f, order[i]) & 0xFFFF0000u) | v);
+                    }
+                }
+            }
+            nc_frame_set_gpr(f, NC_ESP, esp);
+            nc_frame_set_eip(f, eip + 2);
             break;
         }
         nc_kernel_request_stop(k, f, "system op %d at %08x (%02x %02x %02x)", (int)op, eip, insn[0], insn[1],
