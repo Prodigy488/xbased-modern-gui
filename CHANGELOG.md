@@ -1,5 +1,15 @@
 # xbased changelog
 
+## 1.0.13 (2026-11)
+
+### Fixes
+- Prince of Persia: The Sands of Time: a band of stray colour (green,
+  purple) down the right of the screen in the menus and in game. The game's
+  glow adds four sizes of a blurred picture in one pass, each smaller than
+  the image it sits in (the extra columns are never drawn); only the first
+  was kept to its own size, and the others' filtering read the stale
+  columns. Every texture of such a pass is now kept to its own size.
+
 ## 1.0.12 (2026-11)
 
 ### New

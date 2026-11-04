@@ -375,8 +375,13 @@ size_t hle_psh_glsl(const HlePshKey *k, char *buf, size_t cap, unsigned *unsuppo
             "uniform subpassInput uFb;\n" : "",
         k->fbfetch & HLE_FB_ZEQ ? HLE_ZEQ_DECL_GLSL : "",
         /* a linear texture kept to its own size (ff.h HLE_NVRECT_GLSL): the stage fog.w names */
-        k->vol & HLE_PSH_RECT ? HLE_NVRECT_GLSL : "",
-        k->vol & HLE_PSH_RECT ?
+        k->vol & (HLE_PSH_RECT | HLE_PSH_RECT4) ? HLE_NVRECT_GLSL : "",
+        k->vol & HLE_PSH_RECT4 ?
+            /* vertex programs: each stage's own (pc.scr, its word; 0 none) */
+            "  { uint r = floatBitsToUint(pc.scr[s]);\n"
+            "    if (r != 0u)\n"
+            "      uv = nvrectr(uv, r, (pc.flags & (256u << s)) != 0u ? 0.5 / float(pc.flags >> 24) : 0.5); }\n"
+            : k->vol & HLE_PSH_RECT ?
             "  { uint r = floatBitsToUint(pc.fog.w);\n"
             "    if (r != 0u && s == ((r >> 28 & 1u) | (r >> 30 & 2u)))\n"
             "      uv = nvrect(uv, (pc.flags & (256u << s)) != 0u ? 0.5 / float(pc.flags >> 24) : 0.5); }\n"

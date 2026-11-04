@@ -80,8 +80,9 @@ typedef struct HlePshKey {
                                            coordinates' r; HLE_PSH_RECT: the stage the
                                            push block's fog.w names has its linear
                                            texture kept to its own size, part of a
-                                           larger surface (ff.h HLE_NVRECT_GLSL); bits
-                                           5-7 free */
+                                           larger surface (ff.h HLE_NVRECT_GLSL);
+                                           HLE_PSH_RECT4: each stage by its word of
+                                           pc.scr (vertex programs); bits 6-7 free */
     uint8_t wbuf;                       /* W-buffering: depth = vW (HLE_WBUF_*_GLSL) */
     uint8_t fbfetch;                    /* stages (bits 0-3) whose texture is the colour
                                            target drawn into: its pixel, read as the
@@ -92,6 +93,7 @@ typedef struct HlePshKey {
                                            HleFfPsKey.sblend) */
 } HlePshKey;
 #define HLE_PSH_RECT 0x10u              /* HlePshKey.vol: a linear texture kept to its size */
+#define HLE_PSH_RECT4 0x20u             /* HlePshKey.vol: each stage's in pc.scr (programs) */
 
 /* Key from the render-state array (rs[0..56] = the pixel-shader block). */
 void hle_psh_key(const uint32_t *rs, HlePshKey *k);

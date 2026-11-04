@@ -3539,10 +3539,18 @@ void hle_draw_cmd_draw(const HleCmdDraw *c, VkCommandBuffer cb, uint32_t rt_id, 
                 k.pk.tex_modes -= (HLE_PST_PROJECT3D - HLE_PST_PROJECT2D) << (5 * st);
             }
         }
-        /* the first stage that samples a 2D image through samp() (as psh.c
+        /* the stages that sample a 2D image through samp() (as psh.c
          * generates it) whose linear texture is part of a larger surface:
-         * its texel coordinates kept to the texture's own size */
-        for (unsigned st = 0; st < 4 && !rect; st++) {
+         * their texel coordinates kept to the texture's own size. Vertex
+         * program draws (pc.scr unused) have one in each of pc.scr's words
+         * (HLE_PSH_RECT4); fixed function, the first stage's in fog.w.
+         * Prince of Persia: The Sands of Time's glow adds four levels of a
+         * blur in one draw, 10 x 7, 20 x 15 and 40 x 30 images in 16-, 32-
+         * and 48-pixel targets (the pitch's 64-byte multiple): kept to the
+         * first one's size alone, the others' filters read the columns never
+         * drawn, and the glow put a band of their stale colours down the
+         * right of the screen. */
+        for (unsigned st = 0; st < 4; st++) {
             const unsigned m = (k.pk.tex_modes >> (5 * st)) & 0x1F;
             const bool v = (k.pk.vol >> st) & 1;
             const bool samp2d = m == HLE_PST_DOT_ST || m == HLE_PST_BRDF || m == HLE_PST_DOT_ZW ||
@@ -3552,7 +3560,13 @@ void hle_draw_cmd_draw(const HleCmdDraw *c, VkCommandBuffer cb, uint32_t rt_id, 
                                 ((m == HLE_PST_DPNDNT_AR || m == HLE_PST_DPNDNT_GB) && !st);
             if (samp2d && !((k.pk.shadow >> st) & 1) && !((k.pk.fbfetch >> st) & 1) &&
                 (pc.tex[st] & 0xFFFFu)) {
-                rect = lin_rect(c, s, st);
+                const uint32_t r = lin_rect(c, s, st);
+                if (r && prog) {
+                    memcpy(&pc.scr[st], &r, 4);
+                    k.pk.vol |= HLE_PSH_RECT4;
+                } else if (r && !rect) {
+                    rect = r;
+                }
             }
         }
         if (rect) {

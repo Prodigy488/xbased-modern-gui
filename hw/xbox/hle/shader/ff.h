@@ -213,7 +213,8 @@ extern bool g_hle_push_ssbo;
  * texel coordinates kept inside that size first, as the stage's address mode
  * says: else the sampler's edges are the surface's, and the rows past the
  * texture's (black) drew a box over the ground. The push block's fog.w (bits,
- * vk/draw.c lin_rect; one stage a draw): width - 1 in 0-11, height - 1 in
+ * vk/draw.c lin_rect; one stage a draw; vertex programs: a word a stage in
+ * pc.scr, HLE_PSH_RECT4): width - 1 in 0-11, height - 1 in
  * 12-23 (the NV2A's are 4096 at most), U's and V's mode in 24-25 and 26-27 (0
  * clamp, 1 border, 2 wrap, 3 mirror), the stage's low bit in 28 and high bit
  * in 31, bit 29 set and 30 clear: as a float always a normal, finite number
@@ -223,7 +224,7 @@ extern bool g_hle_push_ssbo;
  * the image (e: 0.5 over the resolution scale for a scaled surface) inside the
  * edges, so filtering never reaches a texel past them (a wrap's seam blends
  * with its edge texel instead of the opposite one). Emitted only for the keys
- * that ask (HlePshKey.vol's HLE_PSH_RECT). */
+ * that ask (HlePshKey.vol's HLE_PSH_RECT, HLE_PSH_RECT4). */
 #define HLE_NVRECT_GLSL \
     "float nvaxis(float u, float n, uint m, float e) {\n" \
     "  if (m == 1u && (u < 0.0 || u > n)) return -65536.0;\n" \
@@ -231,11 +232,11 @@ extern bool g_hle_push_ssbo;
     "  else if (m == 3u) { u -= 2.0 * n * floor(u / (2.0 * n)); u = u < n ? u : 2.0 * n - u; }\n" \
     "  return clamp(u, e, n - e);\n" \
     "}\n" \
-    "vec2 nvrect(vec2 uv, float e) {\n" \
-    "  uint r = floatBitsToUint(pc.fog.w);\n" \
+    "vec2 nvrectr(vec2 uv, uint r, float e) {\n" \
     "  return vec2(nvaxis(uv.x, float((r & 0xFFFu) + 1u), (r >> 24) & 3u, e),\n" \
     "              nvaxis(uv.y, float(((r >> 12) & 0xFFFu) + 1u), (r >> 26) & 3u, e));\n" \
-    "}\n"
+    "}\n" \
+    "vec2 nvrect(vec2 uv, float e) { return nvrectr(uv, floatBitsToUint(pc.fog.w), e); }\n"
 
 /* Mali (vk/quirks.h HLE_QUIRK_Z_EQ_W, set with g_hle_push_ssbo): a clip-space
  * z equal to w corrupts the depth buffer (PPSSPP's EQUAL_WZ_CORRUPTS_DEPTH,
