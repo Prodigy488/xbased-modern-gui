@@ -22,6 +22,7 @@ typedef struct In {
     int pad_button;         /* the gamepad button pressed, -1 none */
     int pad_axis;           /* an axis pushed past half: 1 + axis, negated for negative; 0 none */
     const char *text;       /* text typed (text fields) */
+    bool repeat;            /* up/down/left/right came from a held key or stick repeating */
 } In;
 
 enum Screen {

@@ -1,5 +1,22 @@
 # xbased changelog
 
+## 1.0.18 (2026-11)
+
+### Fixes
+- Disney's The Haunted Mansion: the cutscenes were black with their sound
+  playing. The game copies each Bink frame into a frame buffer and draws it
+  from there; the frame buffer's image was written back to memory as it was
+  unbound, after the game had already written its next frame there (the
+  command decoder runs behind the CPU), landing the older image over it.
+  The CPU's writes now go into the image first.
+- Settings: holding left or right on an on/off option changes it once,
+  instead of repeating on to the next value.
+
+### About
+- xbased is an original Xbox emulator for Windows and Linux, developed by
+  crazyriddler. Based on hakuX. The About screen, the executable's details
+  and the Linux menu entry say so.
+
 ## 1.0.17 (2026-11)
 
 ### Fixes

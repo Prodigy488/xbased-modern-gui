@@ -969,6 +969,13 @@ static void writeback(uint32_t id)
         ((uint64_t)d->pitch * d->h > WRITEBACK_MAX && !(cpu_wb && o && o->cpu_used))) {
         return;
     }
+    /* the CPU's writes since the image last took them go into it first. The
+     * decoder runs behind the CPU: it met this unbind after the title had
+     * written its next frame there, and the writeback landed the older image
+     * over it, its pages' dirty bits taken with it, so no draw uploaded the
+     * frame either (Haunted Mansion copies each Bink frame into a frame
+     * buffer and draws it from there: its cutscenes were black) */
+    rt_cpu_upload(id, false);
     const uint32_t len = d->pitch * d->h;
     const uint32_t fb = hle_res_rb_fb(len);
     if (!fb) {

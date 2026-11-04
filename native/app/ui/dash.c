@@ -18,7 +18,7 @@
 #endif
 
 #ifndef XBASED_VERSION
-#define XBASED_VERSION "1.0.17"
+#define XBASED_VERSION "1.0.18"
 #endif
 
 Dash D;
@@ -253,6 +253,7 @@ static void poll_input(void)
             in->pad = false;
             cursor(false);
             in->key = e.key.key;
+            in->repeat |= e.key.repeat;
             in->any = true;
             const SDL_Keycode k = e.key.key;
             if (k == SDLK_UP || k == SDLK_W) {
@@ -396,6 +397,7 @@ static void poll_input(void)
     }
     if (g_rep_dir && ui_time() >= g_rep_at) {
         press(g_rep_dir);
+        in->repeat = true;
         g_rep_at = ui_time() + 0.09;
     }
 }
@@ -823,6 +825,11 @@ void opt_bool(List *l, enum UiStr label, const char *key, bool def, bool flag_st
     int delta = 0;
     if (list_row(l, T(label), text, &delta)) {
         delta = 1;
+    } else if (D.in.repeat) {
+        /* an on/off row steps once a press: a held direction's repeat went on
+         * to the next value at once (a game's: on, then its global value
+         * again, which read as the option turning itself off) */
+        delta = 0;
     }
     if (!delta) {
         return;
