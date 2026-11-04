@@ -770,7 +770,7 @@ int main(int argc, char *argv[])
     if (again) {
         nc_log("hakuX-app", "---- started again (%s)", opt_flag("relaunch") ? "the title's relaunch" : "a state loaded");
     }
-    nc_log("hakuX-app", "xbased " XBASED_VERSION " (crazyriddler's Windows and Linux edition of hakuX by rfandango), " NC_PLATFORM_NAME);
+    nc_log("hakuX-app", "xbased " XBASED_VERSION " (an original Xbox emulator by crazyriddler, based on hakuX), " NC_PLATFORM_NAME);
 
     SDL_SetHint(SDL_HINT_JOYSTICK_ALLOW_BACKGROUND_EVENTS, "1");
 #ifndef _WIN32

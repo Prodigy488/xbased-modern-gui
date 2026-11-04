@@ -29,7 +29,7 @@ cat > "$APPDIR/usr/share/applications/xbased.desktop" <<EOF
 Type=Application
 Name=xbased
 GenericName=Xbox Emulator
-Comment=Original Xbox emulator: crazyriddler's Windows and Linux edition of hakuX by rfandango
+Comment=Original Xbox emulator for Windows and Linux, developed by crazyriddler
 Exec=xbased %f
 Icon=xbased
 Terminal=false

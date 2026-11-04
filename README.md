@@ -4,8 +4,8 @@
 
 <p align="center">
   <b>The original Xbox, on your PC.</b><br>
-  A free and open-source Xbox emulator for Windows and Linux, with a console-style dashboard.<br>
-  <b>By crazyriddler</b>: the Windows and Linux edition of <a href="https://github.com/rfandango/hakuX">hakuX</a> by rfandango.
+  xbased is an original Xbox emulator for Windows and Linux, developed by <b>crazyriddler</b>.<br>
+  Free and open source, with a console-style dashboard. Based on <a href="https://github.com/rfandango/hakuX">hakuX</a>.
 </p>
 
 <p align="center">
@@ -33,15 +33,17 @@ https://github.com/user-attachments/assets/bf62adff-002a-4dc6-9b28-eee775181646
 
 ---
 
-**xbased** runs original Xbox games on a PC. It is **crazyriddler's Windows and
-Linux edition of [hakuX](https://github.com/rfandango/hakuX) by rfandango**:
-the same reimplemented Xbox kernel, high-level NV2A renderer on Vulkan and
-accurate MCPX audio core, brought to x86-64 Windows and Linux with a
+**xbased** is an original Xbox emulator for Windows and Linux, developed by
+**[crazyriddler](https://github.com/crazyriddler)**. Based on
+[hakuX](https://github.com/rfandango/hakuX).
+
+It runs original Xbox games on a PC with a reimplemented Xbox kernel, a
+high-level NV2A renderer on Vulkan and an accurate MCPX audio core, behind a
 console-style front end of its own.
 No BIOS, MCPX ROM or hard-disk image is needed.
 
 xbased is created and maintained by **[crazyriddler](https://github.com/crazyriddler)**:
-the port, the dashboard, the game fixes and every release.
+the emulator, the dashboard, the game fixes and every release.
 
 ## Download
 
@@ -281,14 +283,13 @@ More options (link-time optimization, the dependencies' location) are in
 ## Credits
 
 - **xbased** by **[crazyriddler](https://github.com/crazyriddler)**, its creator
-  and maintainer: the port of hakuX to x86-64 Windows and Linux, the
+  and maintainer: the emulator for x86-64 Windows and Linux, the
   console-style dashboard and front end, the game fixes (Fable, The Thing,
   BloodRayne 2, NFL Fever 2004, Panzer Dragoon Orta and more), internal
   resolution up to 8x, 5.1 audio, the automatic updates and every release
   ([CHANGELOG.md](CHANGELOG.md)).
-- **[hakuX](https://github.com/rfandango/hakuX)** by **rfandango**: the
-  emulator core xbased is built on (kernel, NV2A renderer, MCPX audio). Its own
-  README and changelog are in [docs/hakuX](docs/hakuX/).
+- Based on **[hakuX](https://github.com/rfandango/hakuX)**. Its README and
+  changelog are in [docs/hakuX](docs/hakuX/).
 - Box art from the [libretro-thumbnails](https://github.com/libretro-thumbnails)
   project. Interface font: Play (SIL Open Font License).
 - SDL3, Zydis, libslirp, xxHash, volk, Vulkan Memory Allocator, glslang,

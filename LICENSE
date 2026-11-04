@@ -1,13 +1,14 @@
-hakuX is free software: you can redistribute it and/or modify it under the
+xbased is free software: you can redistribute it and/or modify it under the
 terms of the GNU General Public License as published by the Free Software
 Foundation, either version 3 of the License, or (at your option) any later
-version. The full text is in COPYING.
+version. The full text is in COPYING. xbased is based on hakuX, under the
+same license.
 
-hakuX is distributed in the hope that it will be useful, but WITHOUT ANY
+xbased is distributed in the hope that it will be useful, but WITHOUT ANY
 WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS FOR
 A PARTICULAR PURPOSE. See the GNU General Public License for more details.
 
-Anyone who distributes hakuX, or a work based on it, in binary form must also
+Anyone who distributes xbased, or a work based on it, in binary form must also
 make its complete corresponding source code available under the same license.
 
 Parts from other projects keep their own licenses, all compatible with the

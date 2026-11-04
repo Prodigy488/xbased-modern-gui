@@ -21,7 +21,7 @@ BEGIN
         BLOCK "040904B0"
         BEGIN
             VALUE "CompanyName", "crazyriddler"
-            VALUE "FileDescription", "xbased - crazyriddler's Windows and Linux edition of hakuX by rfandango"
+            VALUE "FileDescription", "xbased - original Xbox emulator by crazyriddler"
             VALUE "FileVersion", "1.0.17"
             VALUE "InternalName", "xbased"
             VALUE "OriginalFilename", "xbased.exe"
