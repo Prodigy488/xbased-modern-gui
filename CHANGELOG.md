@@ -1,5 +1,13 @@
 # xbased changelog
 
+## 1.0.24 (2026-11)
+
+### New
+- A game with a frame rate patch of its own (60 or 120 fps, in Mods &
+  patches) says so when the frame rate is unlocked: the patch is made for
+  the game and keeps its speed right, where lifting the console's pace can
+  break it. The frame rate option's help says so too.
+
 ## 1.0.23 (2026-11)
 
 ### New

@@ -7,6 +7,7 @@
 #include "native/app/ui/input_map.h"
 #include "native/core/xcheat.h"
 
+#include <ctype.h>
 #include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -633,6 +634,23 @@ static void help_panel(const char *s)
     }
 }
 
+/* the game's frame rate patch in the list (60 or 120 fps), if it has one */
+static const ModItem *fps_patch(void)
+{
+    for (int i = 0; i < g_nmods; i++) {
+        const ModItem *m = &g_mods[i];
+        char s[200];
+        snprintf(s, sizeof(s), "%s %s", m->id, m->name);
+        for (char *c = s; *c; c++) {
+            *c = (char)tolower((unsigned char)*c);
+        }
+        if (!m->cheat && (strstr(s, "60fps") || strstr(s, "60 fps") || strstr(s, "120fps") || strstr(s, "120 fps"))) {
+            return m;
+        }
+    }
+    return NULL;
+}
+
 void scr_mods(void)
 {
     const float W = ui_w(), H = ui_h();
@@ -669,9 +687,22 @@ void scr_mods(void)
             } else {
                 cfg_unset(&D.game, "fpscap");
             }
+            /* unlocked where the game has a patch of its own for it: the
+             * patch, made for the game, is the better way */
+            const ModItem *fp = fps_patch();
+            if (cur == 0 && to != 0 && fp && !mod_on(fp)) {
+                static char tip[600];
+                snprintf(tip, sizeof(tip), T(S_FPS_PATCH_TIP), fp->name);
+                dash_toast(tip);
+            }
         }
         if (list_selected(&l)) {
-            help = T(S_UNCAP_HELP);
+            const ModItem *fp = fps_patch();
+            static char tip[600];
+            if (fp) {
+                snprintf(tip, sizeof(tip), T(S_FPS_PATCH_TIP), fp->name);
+            }
+            help = fp ? tip : T(S_UNCAP_HELP);
         }
     }
     for (int i = 0; i < g_nmods; i++) {
@@ -709,7 +740,9 @@ void scr_mods(void)
         }
     }
     list_end(&l);
-    if (help) {
+    if (D.toast[0] && ui_time() < D.toast_until) {
+        /* a notice over the help's place (the frame rate patch's) */
+    } else if (help) {
         help_panel(help);
     } else if (shown && shown->desc[0]) {
         help_panel(shown->desc);
