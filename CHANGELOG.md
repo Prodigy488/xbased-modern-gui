@@ -1,5 +1,19 @@
 # xbased changelog
 
+## 1.0.31 (2026-11)
+
+### Fixes
+- StarCraft: Ghost's 2003 build froze on its title screen with 128 MB of
+  console memory. D3D's push buffer went at the very top of memory, past
+  the end of the area the GPU reads commands from (D3D leaves the top 20 KB
+  of a development kit's 128 MB to the GPU), so its last commands never
+  ran. With 128 MB those 20 KB now stay out of every allocation, as on a
+  development kit.
+- Development builds that import the debug monitor (xbdm.dll) no longer
+  stop at the first call into it: its DmRegisterCommandProcessor is a stub
+  that reports success (StarCraft: Ghost's GhostR.xbe stopped at its first
+  video). Other xbdm imports are listed in the log.
+
 ## 1.0.30 (2026-11)
 
 ### Fixes
