@@ -1,5 +1,15 @@
 # xbased changelog
 
+## 1.0.32 (2026-11)
+
+### Fixes
+- SNK vs. Capcom: SVC Chaos went back to the dashboard after the Neo Geo
+  screen. It makes thousands of small contiguous memory blocks at boot, and
+  past 4096 of them every allocation failed even with plenty of memory free,
+  so a disc read went into a block it never got. The kernel now holds as
+  many blocks as memory has pages, so only running out of memory fails, as
+  on the console.
+
 ## 1.0.31 (2026-11)
 
 ### Fixes

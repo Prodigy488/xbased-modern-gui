@@ -30,7 +30,12 @@
 #define USER_HI   0x7FFE0000u
 #define VA_GRAIN  0x10000u
 #define MAX_REGIONS 4096
-#define MAX_CONTIG  4096
+/* Contiguous blocks: as many as RAM has pages (128 MiB's), so that only the
+ * memory runs out, as on the console. SNK vs. Capcom: SVC Chaos makes
+ * thousands of 1365-byte ones at boot: past 4096 every one failed with 10
+ * MiB free, and a disc read into a block it didn't get sent it back to the
+ * dashboard from the Neo Geo screen. */
+#define MAX_CONTIG  32768
 
 typedef struct Region {
     uint32_t base, size, protect;
