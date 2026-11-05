@@ -1,5 +1,15 @@
 # xbased changelog
 
+## 1.0.27 (2026-11)
+
+### Fixes
+- Prince of Persia: The Two Thrones on AMD graphics cards: the screen
+  filled with blocks of other images over the menus and the game. Its glow
+  shrinks the frame through targets down to 10x7 and samples them before
+  all of them are drawn; an image read before anything wrote it held the
+  memory's leftovers, which NVIDIA's drivers clear and AMD's don't. Such an
+  image now reads as zeros (a depth buffer as its far plane) on every GPU.
+
 ## 1.0.26 (2026-11)
 
 ### New
