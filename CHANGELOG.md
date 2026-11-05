@@ -1,5 +1,16 @@
 # xbased changelog
 
+## 1.0.33 (2026-11)
+
+### Fixes
+- Rainbow Six 3 crashed back to the dashboard while loading the first
+  campaign mission. At boot it rewrites the C runtime's malloc, calloc and
+  free to use its own allocator, and malloc had already been translated, so
+  the old version kept handing out the system heap's memory while free sent
+  it to the game's allocator. Changing a range's protection (as a game does
+  before and after patching its code) now drops the code translated from
+  it.
+
 ## 1.0.32 (2026-11)
 
 ### Fixes
