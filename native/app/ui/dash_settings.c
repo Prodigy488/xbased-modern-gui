@@ -5,6 +5,7 @@
  */
 #include "native/app/ui/dash_int.h"
 #include "native/app/ui/input_map.h"
+#include "native/core/xcheat.h"
 
 #include <math.h>
 #include <stdio.h>
@@ -378,6 +379,101 @@ static ModItem g_mods[96];
 static int g_nmods;
 static char g_mods_key[24];
 
+/* The Xbox scene's cheat files for the title (cheats/<TITLE ID>/*.etm,
+ * .xbtf: core/xcheat.h), an entry an option, kept in the game's settings
+ * as xcheat=cheats/<TITLE ID>/<file>|<its options' states, 1 on>. */
+typedef struct {
+    char file[160];                 /* cheats/<TITLE ID>/<file> */
+    char from[88];                  /* the file's own title */
+    char label[88];
+    int idx, nopts;
+} XOpt;
+
+static XOpt g_xopts[256];
+static int g_nxopts;
+
+static void xcheats_scan(const char *root)
+{
+    char dir[1400];
+    snprintf(dir, sizeof(dir), "%scheats/%08X", root, D.cur->g.title_id);
+    int n = 0;
+    char **names = SDL_GlobDirectory(dir, NULL, 0, &n);
+    for (int i = 0; names && i < n; i++) {
+        char rel[160], full[1600];
+        snprintf(rel, sizeof(rel), "cheats/%08X/%s", D.cur->g.title_id, names[i]);
+        bool dup = false;
+        for (int k = 0; k < g_nxopts; k++) {
+            dup |= !SDL_strcasecmp(g_xopts[k].file, rel);
+        }
+        snprintf(full, sizeof(full), "%s/%s", dir, names[i]);
+        NcXCheat x;
+        if (dup || !nc_xcheat_load(full, &x)) {
+            continue;
+        }
+        if (nc_xcheat_for_title(&x, D.cur->g.title_id)) {
+            for (int o = 0; o < x.nopts && g_nxopts < 256; o++) {
+                XOpt *e = &g_xopts[g_nxopts++];
+                snprintf(e->file, sizeof(e->file), "%s", rel);
+                snprintf(e->from, sizeof(e->from), "%s", x.name);
+                snprintf(e->label, sizeof(e->label), "%s", x.labels[o]);
+                e->idx = o;
+                e->nopts = x.nopts;
+            }
+        }
+        nc_xcheat_free(&x);
+    }
+    SDL_free(names);
+}
+
+static void xcheats_load(void)
+{
+    g_nxopts = 0;
+    xcheats_scan(cfg_data_dir());           /* the user's first */
+    if (strcmp(cfg_data_dir(), cfg_exe_dir())) {
+        xcheats_scan(cfg_exe_dir());
+    }
+}
+
+/* the game's states for a cheat file ("" if none) */
+static const char *xcheat_states(const char *file)
+{
+    const char *v[64];
+    const int n = cfg_all(&D.game, "xcheat", v, 64);
+    const size_t fl = strlen(file);
+    for (int i = 0; i < n; i++) {
+        if (!strncmp(v[i], file, fl) && v[i][fl] == '|') {
+            return v[i] + fl + 1;
+        }
+    }
+    return "";
+}
+
+static void xcheat_toggle(const XOpt *e)
+{
+    char states[NC_XCHEAT_MAX_OPTS + 1], old[NC_XCHEAT_MAX_OPTS + 1];
+    snprintf(old, sizeof(old), "%s", xcheat_states(e->file));
+    bool any = false;
+    for (int i = 0; i < e->nopts; i++) {
+        char c = i < (int)strlen(old) && old[i] == '1' ? '1' : '0';
+        if (i == e->idx) {
+            c = c == '1' ? '0' : '1';
+        }
+        states[i] = c;
+        any |= c == '1';
+    }
+    states[e->nopts] = 0;
+    if (old[0]) {
+        char was[300];
+        snprintf(was, sizeof(was), "%s|%s", e->file, old);
+        cfg_remove_value(&D.game, "xcheat", was);
+    }
+    if (any) {
+        char now[300];
+        snprintf(now, sizeof(now), "%s|%s", e->file, states);
+        cfg_add(&D.game, "xcheat", now);
+    }
+}
+
 static void mods_load(void)
 {
     if (!strcmp(g_mods_key, D.cur->g.key)) {
@@ -474,6 +570,20 @@ static void mods_load(void)
         s = e ? e + 1 : NULL;
     }
     SDL_free(t);
+    /* the widescreen database's entry for the title (win_mods.c) */
+    snprintf(p, sizeof(p), "%smods/widescreen.dat", cfg_exe_dir());
+    t = SDL_LoadFile(p, &len);
+    char want[16];
+    snprintf(want, sizeof(want), "\n:%08x", D.cur->g.title_id);
+    if (t && g_nmods < 96 && SDL_strcasestr(t, want)) {
+        ModItem *m = &g_mods[g_nmods++];
+        memset(m, 0, sizeof(*m));
+        snprintf(m->id, sizeof(m->id), "widescreen-db");
+        snprintf(m->name, sizeof(m->name), "%s", T(S_WS_DB));
+        snprintf(m->desc, sizeof(m->desc), "%s", T(S_WS_DB_HELP));
+    }
+    SDL_free(t);
+    xcheats_load();
 }
 
 static bool mod_on(const ModItem *m)
@@ -578,6 +688,24 @@ void scr_mods(void)
         }
         if (list_selected(&l)) {
             shown = m;
+        }
+    }
+    static char xhelp[512];
+    for (int i = 0; i < g_nxopts; i++) {
+        const XOpt *e = &g_xopts[i];
+        char label[160];
+        snprintf(label, sizeof(label), "[cheat] %s", e->label);
+        const char *st = xcheat_states(e->file);
+        const bool on = e->idx < (int)strlen(st) && st[e->idx] == '1';
+        int delta = 0;
+        if (list_row(&l, label, on ? T(S_ON) : T(S_OFF), &delta) || delta) {
+            xcheat_toggle(e);
+        }
+        if (list_selected(&l)) {
+            const char *base = strrchr(e->file, '/');
+            snprintf(xhelp, sizeof(xhelp), "%s %s (%s). %s", T(S_XCHEAT_FROM), e->from, base ? base + 1 : e->file,
+                     T(S_XCHEAT_HELP));
+            help = xhelp;
         }
     }
     list_end(&l);

@@ -1,5 +1,25 @@
 # xbased changelog
 
+## 1.0.23 (2026-11)
+
+### New
+- Cheats for 500 games: the Xbox scene's cheat files (.etm and .xbtf,
+  the ones EvolutionX, Avalaunch and XBMC4Xbox ran as trainers) ship in
+  `cheats/`, about a thousand of them, by title ID. A game's Mods & patches
+  lists each file's options as `[cheat]` entries; switched on, the file's
+  code runs once before the game's entry point and patches it, as the
+  console's loader ran it. `.xbtf` files get the helper routines XBMC4Xbox
+  loads for them. Your own files go in `cheats/<TITLE ID>/`.
+- Over 160 widescreen, 60 fps and 480p patches ship in `mods/<TITLE ID>/`
+  (icup321's and Slippy2k's XboxGraphicalPatches, matched to their games
+  through xemu's title database; the 720p ones, which their authors call
+  unstable, left out). They were made for the USA releases: a patch made for
+  another release of a game can break it.
+- Widescreen 16:9 (database) for 90 games: OgXHD's widescreen patterns,
+  searched for in the disc's executable and written where they're found
+  (their old bytes checked), so they hold across releases where the code is
+  the same and do nothing where it isn't.
+
 ## 1.0.22 (2026-11)
 
 ### New

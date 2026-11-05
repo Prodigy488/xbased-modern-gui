@@ -5,6 +5,7 @@
 #include "native/core/options.h"
 #include "native/core/core.h"
 #include "native/core/mods.h"
+#include "native/core/xcheat.h"
 #include "native/hle/hle_native.h"
 #include "native/kernel/kernel.h"
 #include "native/net/net.h"
@@ -38,6 +39,15 @@ bool nc_option(NcOptions *o, const char *arg)
         nc_core_set_relaunch(true);
     } else if (!strcmp(arg, "dash")) {
         nc_core_set_dashboard(true);            /* no disc: the disc argument is "none" */
+    } else if ((v = value(arg, "xcheat="))) {
+        /* a cheat file and its options' states: <file>|<1s and 0s> */
+        char path[1024];
+        snprintf(path, sizeof(path), "%s", v);
+        char *bar = strrchr(path, '|');
+        if (bar) {
+            *bar = 0;
+        }
+        nc_xcheat_set(path, bar ? bar + 1 : "");
     } else if ((v = value(arg, "fpscap="))) {
         o->fps_cap = atoi(v) > 0 ? atoi(v) : 0;
     } else if ((v = value(arg, "loadstate="))) {

@@ -7,6 +7,7 @@
 #include "native/hle/hle_native.h"
 #include "native/core/mmio.h"
 #include "native/core/mods.h"
+#include "native/core/xcheat.h"
 #include "native/net/net.h"
 #include "native/state/save.h"
 
@@ -222,7 +223,10 @@ bool nc_core_boot(NcCore *c, int disc_fd)
     if (c->xbe.stack_commit > stack) {
         stack = nc_align_up(c->xbe.stack_commit, NC_PAGE);
     }
-    g_boot = nc_kernel_boot_thread(&c->kernel, c->cpu, c->xbe.info.entry, stack);
+    /* a cheat file chosen for this title (core/xcheat.c): run before the entry point */
+    const uint32_t start = g_loadstate[0] ? c->xbe.info.entry
+                                          : nc_xcheat_install(&c->kernel, &c->vm, c->xbe.info.entry, c->xbe.info.title_id);
+    g_boot = nc_kernel_boot_thread(&c->kernel, c->cpu, start, stack);
     if (!g_boot) {
         return boot_failed("The emulated CPU couldn't start.");
     }
