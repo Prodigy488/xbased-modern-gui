@@ -1,5 +1,13 @@
 # xbased changelog
 
+## 1.0.34 (2026-11)
+
+### Fixes
+- Spikeout: Battle Street said its program was damaged and didn't start.
+  Its executable has 398 sections and the loader took no more than 256; it
+  now takes up to 512.
+- That error message said hakuX where it should say xbased.
+
 ## 1.0.33 (2026-11)
 
 ### Fixes
