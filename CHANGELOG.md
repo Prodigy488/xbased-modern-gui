@@ -1,5 +1,21 @@
 # xbased changelog
 
+## 1.0.25 (2026-11)
+
+### Fixes
+- 3D sound (Halo, Grand Theft Auto San Andreas and every game with
+  positional effects and voices): muffled, smeared and too quiet. The
+  console's HRTF filters, the head-related responses DirectSound loads
+  for 3D voices, come as sign-and-magnitude bytes; they were read as two's
+  complement, so a small negative tap (0x81, -1) became -127 and each
+  response turned to noise across its 31 taps. Each was then divided by
+  the sum of its taps' sizes, which left 3D voices 8 to 10 dB under the
+  rest of the mix (dialogue among them). The taps are read as the
+  hardware reads them and weighed as it does: the frontal response passes
+  speech at about unity, and the sides show the head's shadow and the
+  ear's resonance as they should. Savestates from before are converted as
+  they load.
+
 ## 1.0.24 (2026-11)
 
 ### New
