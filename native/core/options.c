@@ -48,6 +48,13 @@ bool nc_option(NcOptions *o, const char *arg)
             *bar = 0;
         }
         nc_xcheat_set(path, bar ? bar + 1 : "");
+    } else if ((v = value(arg, "ram="))) {
+        /* 64 (retail) or 128 MiB (a debug kit's: core.c, for titles not marked for 64) */
+        if (atoi(v) == 128) {
+            setenv("NC_RAM_MB", "128", 1);
+        } else {
+            unsetenv("NC_RAM_MB");
+        }
     } else if ((v = value(arg, "fpscap="))) {
         o->fps_cap = atoi(v) > 0 ? atoi(v) : 0;
     } else if ((v = value(arg, "loadstate="))) {

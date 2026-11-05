@@ -1,5 +1,17 @@
 # xbased changelog
 
+## 1.0.26 (2026-11)
+
+### New
+- Console memory, 64 MB (retail) or 128 MB (debug kit), for all games or
+  one (Settings › System, or a game's settings): betas, demos and debug
+  builds made for a debug kit's 128 MB (StarCraft: Ghost's beta, Halo 2's
+  E3 2003 demo and others) get it. A game marked for 64 MB keeps 64, as a
+  debug kit runs it (given 128, a retail Halo drew nothing). The GPU
+  reports the memory as well. On the command line: `ram=128`.
+- Play a game file without adding it to the library: Settings › Interface
+  › Play a game file, or drop the disc image on xbased's window.
+
 ## 1.0.25 (2026-11)
 
 ### Fixes

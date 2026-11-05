@@ -44,6 +44,15 @@ static void rows_pal(List *l)
     opt_choice(l, S_PAL_GAMES, "pal60", pv, pn, 2, "1");
 }
 
+/* the console's memory: 64 MiB, or a debug kit's 128 for the betas and
+ * debug builds that need it (titles marked for 64 MiB keep 64: core.c) */
+static void rows_ram(List *l)
+{
+    static const char *const rv[] = {"64", "128"};
+    const char *rn[] = {T(S_RAM_64), T(S_RAM_128)};
+    opt_choice(l, S_RAM_SIZE, "ram", rv, rn, 2, "64");
+}
+
 static void rows_console(List *l)
 {
     static const char *lv[] = {"auto", "1", "2", "3", "4", "5", "6", "7", "8", "9"};
@@ -124,8 +133,51 @@ void dash_pick_game_file(void)
     SDL_ShowOpenFileDialog(add_file_cb, NULL, SDL_GetKeyboardFocus(), f, 2, NULL, false);
 }
 
+/* a game file played once, not added to the library (the dialog's, or one
+ * dropped on the window): started from the UI's thread (dash_take_folder) */
+static char g_play_file[1024];
+static SDL_AtomicInt g_play_file_set;
+
+void dash_play_file_later(const char *path)
+{
+    if (path && path[0] && !SDL_GetAtomicInt(&g_play_file_set)) {
+        snprintf(g_play_file, sizeof(g_play_file), "%s", path);
+        SDL_SetAtomicInt(&g_play_file_set, 1);
+    }
+}
+
+static void SDLCALL play_file_cb(void *ud, const char *const *files, int filter)
+{
+    (void)ud;
+    (void)filter;
+    if (files && files[0]) {
+        dash_play_file_later(files[0]);
+    }
+}
+
+void dash_pick_play_file(void)
+{
+    static const SDL_DialogFileFilter f[] = {
+        {"Xbox disc images (*.iso, *.xiso, *.cci, *.chd)", "iso;xiso;cci;chd"},
+        {"All files", "*"},
+    };
+    SDL_ShowOpenFileDialog(play_file_cb, NULL, SDL_GetKeyboardFocus(), f, 2, NULL, false);
+}
+
 void dash_take_folder(void)
 {
+    if (SDL_GetAtomicInt(&g_play_file_set)) {
+        static LibGame once;
+        memset(&once, 0, sizeof(once));
+        if (xd_read_game(g_play_file, &once.g)) {
+            xd_free_game(&once.g);
+            launch_game(&once, NULL);
+        } else {
+            xd_free_game(&once.g);
+            dash_toast(T(S_NOT_A_GAME));
+        }
+        SDL_SetAtomicInt(&g_play_file_set, 0);
+    }
     if (SDL_GetAtomicInt(&g_new_folder_set)) {
         cfg_add(&D.global, "gamedir", g_new_folder);
         cfg_save(&D.global);
@@ -188,6 +240,7 @@ void scr_settings(void)
         opt_videoflag(&l, S_P720, 0x20000);
         opt_videoflag(&l, S_I1080, 0x40000);
         rows_pal(&l);
+        rows_ram(&l);
         static const char *pv[] = {"hdtv", "standard", "svideo", "scart", "vga"};
         static const char *pn[] = {"HDTV (component)", "Standard (composite)", "S-Video", "SCART (RGB)", "VGA"};
         opt_choice(&l, S_AVPACK, "avpack", pv, pn, 5, "hdtv");
@@ -250,6 +303,9 @@ void scr_settings(void)
         }
         if (list_row(&l, T(S_ADD_GAME_FILE), "+", NULL)) {
             dash_pick_game_file();
+        }
+        if (list_row(&l, T(S_PLAY_GAME_FILE), ">", NULL)) {
+            dash_pick_play_file();
         }
         break;
     }
@@ -356,6 +412,7 @@ void scr_game_settings(void)
     opt_choice(&l, S_CONSOLE_LANG, "lang", lv, ln, 10, "auto");
     opt_videoflag(&l, S_WIDESCREEN, 0x10000);
     rows_pal(&l);
+    rows_ram(&l);
     opt_bool(&l, S_ASYNC_SHADERS, "asyncpipe", true, false);
     if (list_row(&l, T(S_RESET_GAME), NULL, NULL)) {
         dash_ask(T(S_RESET_GAME), reset_game);
