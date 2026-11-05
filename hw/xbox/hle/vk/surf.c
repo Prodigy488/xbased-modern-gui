@@ -691,32 +691,6 @@ void hle_surf_transition(VkCommandBuffer cb, HleVkSurf *s, VkImageLayout to)
         general_use(cb, s, to);
         return;
     }
-    if (s->layout == VK_IMAGE_LAYOUT_UNDEFINED && to != VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL &&
-        to != VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL &&
-        to != VK_IMAGE_LAYOUT_RENDERING_LOCAL_READ_KHR && s->img) {
-        /* Read (or copied into in part) before anything wrote it: zeros (a
-         * depth buffer's far plane), not the memory's leftovers. NVIDIA's
-         * drivers hand new images over cleared, AMD's with whatever the
-         * memory held: Prince of Persia: The Two Thrones samples its glow's
-         * small targets before they are all drawn, and on a Radeon the
-         * screen filled with blocks of other images. A first pass into a
-         * target clears it itself (open_pass, HLE_QUIRK_FRESH_CLEAR). */
-        hle_img_barrier(cb, s->img, s->aspect, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL);
-        VkImageSubresourceRange all = { s->aspect, 0, 1, 0, 1 };   /* as hle_img_barrier: one level, one face */
-        if (s->aspect & VK_IMAGE_ASPECT_COLOR_BIT) {
-            VkClearColorValue z = { { 0 } };
-            T.vkCmdClearColorImage(cb, s->img, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, &z, 1, &all);
-        } else {
-            VkClearDepthStencilValue z = { 1.0f, 0 };
-            T.vkCmdClearDepthStencilImage(cb, s->img, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, &z, 1, &all);
-        }
-        s->layout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
-        static unsigned s_logged;
-        if (s_logged++ < 8) {
-            hle_log("hakuX-hle-back", "surface %ux%u format %d read before written: cleared first", s->w, s->h,
-                    (int)s->fmt);
-        }
-    }
     if (s->layout != to) {
         hle_img_barrier(cb, s->img, s->aspect, s->layout, to);
         s->layout = to;

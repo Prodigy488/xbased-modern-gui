@@ -1,5 +1,13 @@
 # xbased changelog
 
+## 1.0.28 (2026-11)
+
+### Changes
+- 1.0.27's change for Prince of Persia: The Two Thrones on AMD graphics
+  cards is taken back. It wasn't tested on AMD hardware and it isn't what
+  draws the blocks, so images read before anything wrote them behave as in
+  1.0.26 again. The blocks are still being looked into.
+
 ## 1.0.27 (2026-11)
 
 ### Fixes
