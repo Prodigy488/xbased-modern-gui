@@ -744,7 +744,7 @@ static const char *pick_disc(void)
 }
 
 #ifndef XBASED_VERSION
-#define XBASED_VERSION "1.0.29"
+#define XBASED_VERSION "1.0.30"
 #endif
 #ifdef _WIN32
 #define NC_PLATFORM_NAME "Windows"

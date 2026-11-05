@@ -1,5 +1,22 @@
 # xbased changelog
 
+## 1.0.30 (2026-11)
+
+### Fixes
+- WWE WrestleMania 21 stayed on a black screen at boot. It copies its
+  1024 x 512 legal screen whole into its 640 x 480 front buffer, and the rows
+  past the buffer's end ran over the commands it had just sent the GPU (and
+  a page of its own code), so nothing after them ever ran. A copy whose rows
+  are wider than the render target it goes into now stops at the target's
+  edges, which leaves the target exactly as the console's copy does.
+- Prince of Persia: The Two Thrones' menus and gameplay were washed out to
+  a bright green and yellow haze. Its glow shrinks the frame in place,
+  drawing each smaller copy into the corner of the same target while it
+  reads the bigger one, and those reads were taken as each pixel reading
+  itself, so nothing shrank and the frame was added over itself. A draw now
+  reads its own target that way only where the texture is the target's
+  full size.
+
 ## 1.0.29 (2026-11)
 
 ### Fixes
