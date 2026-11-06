@@ -1,5 +1,28 @@
 # xbased changelog
 
+## 1.0.35 (2026-11)
+
+### Sound
+The voice processor now follows raddad772's measurements of the audio chip
+on a retail console (xemu pull request #3105):
+
+- 3D sound (HRTF): the filter taps are read as the chip's small floating
+  point numbers, so 3D voices no longer come out several times too loud and
+  lopsided between ears; the left and right ears go to their own routes, a
+  3D voice plays mono, and new HRTF settings blend in across one frame.
+- Voices are resampled with the chip's 8-point interpolation instead of a
+  linear one: cleaner highs, no aliasing.
+- Volume and pitch changes ramp across each frame instead of stepping (no
+  clicks or buzz on envelopes), with the chip's volume curve and envelope
+  timing.
+- The ParaEQ and I3DL2 filters and the voice LFOs (vibrato, tremolo) work;
+  the DLS2 filter has no extra input cut or distortion.
+- DirectSound submixes (multipass voices) are no longer up to 42 dB too
+  quiet, and a voice sharing a page number with an output buffer no longer
+  goes silent.
+- Savestates from earlier versions load; their voices fade back in over
+  one frame.
+
 ## 1.0.34 (2026-11)
 
 ### Fixes
