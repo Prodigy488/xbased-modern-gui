@@ -1,5 +1,20 @@
 # xbased changelog
 
+## 1.0.41 (2026-11)
+
+### Fixes
+- Sound no longer stutters and pops now and then, mostly while a game is
+  loading. The emulator kept only one block of sound ready ahead of what
+  the sound system takes at a time, so if it was a few milliseconds late
+  (the computer busy with a game's loading) the sound ran dry for a
+  moment and came back with a click. It now keeps two blocks ready, sized
+  from what the sound system actually asks for rather than what it was
+  asked for at the start. That matters most on Linux, where PulseAudio
+  and PipeWire can take bigger blocks than asked: with Burnout 3 on
+  PulseAudio taking 43 ms blocks, gaps went from over two thousand in
+  three minutes to one or two. Sound now runs about 10 ms further
+  behind the picture. Thanks to saultsomy-jpg for the report (#77).
+
 ## 1.0.40 (2026-11)
 
 ### Fixes
