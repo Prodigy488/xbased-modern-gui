@@ -6,6 +6,7 @@
 #ifndef NATIVE_APP_UI_LIBRARY_H
 #define NATIVE_APP_UI_LIBRARY_H
 
+#include "native/app/ui/ui.h"
 #include "native/app/ui/xbox_data.h"
 
 #include <SDL3/SDL.h>
@@ -13,7 +14,7 @@
 
 typedef struct LibGame {
     XdGame g;               /* g.title: the name shown (the user's, if renamed) */
-    SDL_Texture *icon_tex, *cover_tex;
+    UiTex *icon_tex, *cover_tex;
     bool cover_tried;       /* its file looked for */
     int64_t mtime;
     char orig[128];         /* renamed: the disc's own name; "" otherwise */
@@ -27,8 +28,8 @@ bool lib_scanning(void);
 int lib_count(void);
 LibGame *lib_get(int i);
 /* Textures for the ones on screen (the UI's thread). */
-SDL_Texture *lib_icon(LibGame *g);
-SDL_Texture *lib_cover(LibGame *g);
+UiTex *lib_icon(LibGame *g);
+UiTex *lib_cover(LibGame *g);
 /* Box art: g's (or every game's without one) fetched on a thread. */
 void lib_fetch_cover(LibGame *g);
 void lib_fetch_all_covers(void);
@@ -36,7 +37,7 @@ const char *lib_fetch_status(void);   /* NULL: idle */
 void lib_poll(void);
 void lib_shutdown(void);
 /* A PNG (or JPEG) file as a texture, NULL if it can't be read. */
-SDL_Texture *lib_load_png(const char *path);
+UiTex *lib_load_png(const char *path);
 /* The user's own for a game, kept in <data>/covers/custom.txt: a name
  * (NULL or "": the disc's again), hidden or not; hidden games are left out
  * of lib_count / lib_get unless shown. */

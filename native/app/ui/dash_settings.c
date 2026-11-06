@@ -31,6 +31,12 @@ static void rows_video(List *l)
     static const char *av[] = {"auto", "4:3", "16:9", "stretch"};
     const char *an[] = {T(S_AUTO), "4:3", "16:9", T(S_STRETCH)};
     opt_choice(l, S_ASPECT, "aspect", av, an, 4, "auto");
+    /* overscan as a TV's, in any shape: the share of the picture hidden
+     * past the screen's edges (a CRT hid some 5-10%; 7% and 10% the
+     * action-safe areas, EBU's and the classic), or underscan's border */
+    static const char *const ov[] = {"-10", "-5", "-3", "0", "3", "5", "7", "10", "15"};
+    const char *on[] = {"-10%", "-5%", "-3%", T(S_OFF), "3%", "5%", "7%", "10%", "15%"};
+    opt_choice(l, S_OVERSCAN, "overscan", ov, on, 9, "0");
     opt_bool(l, S_FXAA, "fxaa", false, false);
     static const char *anv[] = {"0", "2", "4", "8", "16"};
     const char *ann[] = {T(S_OFF), "2x", "4x", "8x", "16x"};
@@ -275,6 +281,7 @@ void scr_settings(void)
         }
         opt_bool(&l, S_COVERS_ONLINE, "covers", true, false);
         opt_bool(&l, S_ANIMATED_BG, "ui.anim", true, false);
+        opt_bool(&l, S_TRANSITIONS, "ui.fx", true, false);
         opt_bool(&l, S_UI_SOUNDS, "ui.sounds", true, false);
         opt_bool(&l, S_CHECK_UPDATES, "update.check", true, false);
         opt_bool(&l, S_SHOW_HIDDEN, "ui.showhidden", false, false);
@@ -838,7 +845,7 @@ void scr_mods(void)
 
 /* ------------------------------------------------------------ save states */
 
-static SDL_Texture *g_thumb[11];
+static UiTex *g_thumb[11];
 static char g_thumb_key[24];
 static int g_del_slot;
 
@@ -854,13 +861,13 @@ static void del_state(Dash *d)
 }
 
 /* a state's picture (the game writes a BMP of its frame) */
-SDL_Texture *load_bmp(const char *path)
+UiTex *load_bmp(const char *path)
 {
     SDL_Surface *s = SDL_LoadBMP(path);
     if (!s) {
         return NULL;
     }
-    SDL_Texture *t = SDL_CreateTextureFromSurface(ui_renderer(), s);
+    UiTex *t = ui_texture_surface(s);
     SDL_DestroySurface(s);
     return t;
 }
@@ -880,7 +887,7 @@ void scr_states(void)
     if (strcmp(g_thumb_key, D.cur->g.key)) {
         for (int i = 0; i < 11; i++) {
             if (g_thumb[i]) {
-                SDL_DestroyTexture(g_thumb[i]);
+                ui_texture_free(g_thumb[i]);
                 g_thumb[i] = NULL;
             }
             char p[1200];

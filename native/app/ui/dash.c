@@ -19,12 +19,12 @@
 #endif
 
 #ifndef XBASED_VERSION
-#define XBASED_VERSION "1.0.37"
+#define XBASED_VERSION "1.0.38"
 #endif
 
 Dash D;
 static SDL_Window *g_win;
-static SDL_Texture *g_layer, *g_prev;   /* this screen's foreground, the last one's */
+static UiTex *g_layer, *g_prev;   /* this screen's foreground, the last one's */
 static float g_trans = 1;               /* the transition's progress, 0-1 */
 static int g_trans_dir = 1;
 static SDL_Gamepad *g_pads[8];
@@ -511,11 +511,7 @@ static void auto_shot(void)
     if (!g_shot_req[0]) {
         return;
     }
-    SDL_Surface *s = SDL_RenderReadPixels(ui_renderer(), NULL);
-    if (s) {
-        SDL_SaveBMP(s, g_shot_req);
-        SDL_DestroySurface(s);
-    }
+    ui_shot(g_shot_req);
     g_shot_req[0] = 0;
 }
 
@@ -680,7 +676,7 @@ bool list_row(List *l, const char *label, const char *value, int *delta)
     return row_chosen(l, i);
 }
 
-bool list_row_icon(List *l, SDL_Texture *icon, const char *label, const char *sub, const char *value, int *delta)
+bool list_row_icon(List *l, UiTex *icon, const char *label, const char *sub, const char *value, int *delta)
 {
     float ry;
     bool sel;
@@ -941,16 +937,27 @@ void states_dir(const LibGame *g, char *out, size_t n)
 
 static SDL_Process *g_child;
 static double g_hide_at;    /* the window's hiding: the game's taking over, or this time (0: hidden) */
+static bool child_running(void);
 
-void launch_game(LibGame *g, const char *extra)
+/* The way into a game and back: the screen as it was breaks into shards
+ * (the launch's sound over it), the game's window comes up on the black
+ * left behind; back from it, the screen rushes in out of black. The
+ * screen's picture: a layer of the window's size (drawn into, the frame
+ * the launch was asked in; each frame on the way back). */
+#define GO_OUT 0.5          /* seconds */
+#define GO_BACK 0.42
+static struct {
+    bool on;                /* breaking */
+    double t0;              /* since (< 0: the screen's picture not taken yet) */
+    double back;            /* coming back since (0: not) */
+    char path[1024], extra[1300];
+    bool has_extra;
+    UiTex *pic;
+} g_go;
+
+static void go_spawn(void)
 {
-    dash_save_cfg();
-    const char *args[4] = {D.exe, g->g.path, extra, NULL};
-    if (!extra) {
-        args[2] = NULL;
-    }
-    snd_play(SND_LAUNCH);
-    SDL_Delay(400);
+    const char *args[4] = {D.exe, g_go.path, g_go.has_extra ? g_go.extra : NULL, NULL};
 #ifdef _WIN32
     {   /* the game gives this window the foreground as it quits (win_main.c give_foreground) */
         char hv[32];
@@ -962,10 +969,31 @@ void launch_game(LibGame *g, const char *extra)
     g_child = SDL_CreateProcess(args, false);
     if (!g_child) {
         dash_toast(SDL_GetError());
+        g_go.back = ui_time();      /* the screen back */
         return;
     }
     /* shown until the game's window takes the screen (no desktop between) */
     g_hide_at = ui_time() + 8.0;
+}
+
+void launch_game(LibGame *g, const char *extra)
+{
+    if (g_go.on || child_running()) {
+        return;
+    }
+    dash_save_cfg();
+    snprintf(g_go.path, sizeof(g_go.path), "%s", g->g.path);
+    g_go.has_extra = extra != NULL;
+    snprintf(g_go.extra, sizeof(g_go.extra), "%s", extra ? extra : "");
+    snd_play(SND_LAUNCH);
+    g_go.back = 0;
+    if (!cfg_bool(&D.global, "ui.fx", true)) {
+        SDL_Delay(400);         /* the launch's sound, then the game */
+        go_spawn();
+        return;
+    }
+    g_go.on = true;
+    g_go.t0 = -1;
 }
 
 #ifdef _WIN32
@@ -1023,6 +1051,7 @@ static void wait_child(void)
         return;
     }
     g_hide_at = 0;
+    g_go.back = cfg_bool(&D.global, "ui.fx", true) ? ui_time() : 0;   /* the screen rushes back in */
     SDL_ShowWindow(g_win);
     /* the game had the screen: past Windows' lock on the foreground, so the
      * dashboard has the keyboard and the gamepads again, not just its picture
@@ -1118,14 +1147,14 @@ static void draw_card(LibGame *g, float x, float y, float w, float h, bool sel, 
         ui_glow(x + w / 2, y + h / 2, w * 1.1f, ui_alpha(UI_GREEN, 0.35f * alpha));
     }
     ui_round(x, y, w, h, 10, ui_alpha((UiColor){0x0E, 0x26, 0x07, 0xFF}, alpha));
-    SDL_Texture *cv = lib_cover(g);
+    UiTex *cv = lib_cover(g);
     if (cv) {
         ui_image(cv, x + 4, y + 4, w - 8, h - 8, alpha);
     } else {
         /* no box art: the disc's own icon on a green card, its title under */
         ui_rect_grad(x + 4, y + 4, w - 8, h - 8, ui_alpha((UiColor){0x1E, 0x52, 0x0A, 0xFF}, alpha),
                      ui_alpha((UiColor){0x06, 0x14, 0x03, 0xFF}, alpha));
-        SDL_Texture *ic = lib_icon(g);
+        UiTex *ic = lib_icon(g);
         const float is = w * 0.62f;
         if (ic) {
             ui_image(ic, x + (w - is) / 2, y + h * 0.16f, is, is, alpha);
@@ -1660,9 +1689,31 @@ int dash_run(SDL_Window *win, const char *exe)
             }
         }
         snd_enable(cfg_bool(&D.global, "ui.sounds", true));
+        if (g_go.on && g_go.t0 >= 0) {
+            /* into the game: the screen's picture breaks; the game's window
+             * comes up on the black it leaves */
+            const float k = (float)((ui_time() - g_go.t0) / GO_OUT);
+            ui_begin();
+            ui_fx_shatter(g_go.pic, k);
+            auto_shot();
+            ui_end();
+            if (k >= 1) {
+                g_go.on = false;
+                go_spawn();
+            }
+            continue;
+        }
+        const bool go_pic = g_go.on;    /* the frame the launch was asked in, again: its picture */
+        const bool go_back = g_go.back > 0 && ui_time() - g_go.back < GO_BACK;
+        if (!go_back) {
+            g_go.back = 0;
+        }
         const int sp_before = D.sp;
         const enum Screen top_before = dash_top();
         ui_begin();
+        if (go_pic || go_back) {
+            g_go.pic = ui_layer_begin(g_go.pic);
+        }
         ui_backdrop(cfg_bool(&D.global, "ui.anim", true) ? 1.0f : 0.0f);
         /* the screen's foreground in a layer: the transitions turn it in 3D */
         g_layer = ui_layer_begin(g_layer);
@@ -1689,7 +1740,7 @@ int dash_run(SDL_Window *win, const char *exe)
         /* a screen pushed: the old one swings away to the left, the new one
          * in from the right (popped: the other way), in perspective */
         if (D.sp != sp_before || dash_top() != top_before) {
-            SDL_Texture *t = g_prev;
+            UiTex *t = g_prev;
             g_prev = g_layer;
             g_layer = t;
             g_trans = 0;
@@ -1720,6 +1771,15 @@ int dash_run(SDL_Window *win, const char *exe)
         if (D.toast[0] && ui_time() < D.toast_until) {
             draw_toast();
         }
+        if (go_pic || go_back) {
+            ui_layer_end();
+            if (go_pic) {
+                ui_layer_draw3d(g_go.pic, 0, 0, 1);
+                g_go.t0 = ui_time();
+            } else {
+                ui_fx_flash_in(g_go.pic, (float)((ui_time() - g_go.back) / GO_BACK), UI_BLACK);
+            }
+        }
         auto_shot();
         ui_end();
         D.anim += 1.0f / 60;
@@ -1740,7 +1800,7 @@ int dash_run(SDL_Window *win, const char *exe)
 
 /* ------------------------------------------------------------ the in-game menu */
 
-SDL_Texture *load_bmp(const char *path);
+UiTex *load_bmp(const char *path);
 void states_forget(void);
 
 static int g_ig_result, g_ig_slot;
@@ -1803,7 +1863,7 @@ static void scr_ingame(void)
     draw_hints(T(S_SELECT), T(S_RESUME), NULL, NULL);
 }
 
-static SDL_Texture *g_ig_thumb[11];
+static UiTex *g_ig_thumb[11];
 
 static void scr_ingame_slots(void)
 {
@@ -1815,7 +1875,7 @@ static void scr_ingame_slots(void)
         g_ig_thumbs_stale = false;
         for (int i = 0; i < 11; i++) {
             if (g_ig_thumb[i]) {
-                SDL_DestroyTexture(g_ig_thumb[i]);
+                ui_texture_free(g_ig_thumb[i]);
                 g_ig_thumb[i] = NULL;
             }
             char p[1200];
@@ -1861,7 +1921,8 @@ static void scr_ingame_slots(void)
     draw_hints(g_ig_saving ? T(S_SAVE_STATE) : T(S_LOAD_STATE), T(S_BACK), NULL, NULL);
 }
 
-int dash_ingame(SDL_Window *win, const char *key, const char *title, const char *frame_bmp, int *slot)
+int dash_ingame(SDL_Window *win, const char *key, const char *title, const char *frame_bmp, int *slot,
+                void (*live)(const struct Config *global, const struct Config *game))
 {
     memset(&D, 0, sizeof(D));
     g_win = win;
@@ -1885,20 +1946,49 @@ int dash_ingame(SDL_Window *win, const char *key, const char *title, const char 
     D.stack[0] = SCR_INGAME;
     D.sel[SCR_INGAME] = 0;  /* on Resume each time, as a console's: no Quit by habit */
     g_auto_off = -1;
-    char fonts[1200];
-    snprintf(fonts, sizeof(fonts), "%sfonts/", cfg_exe_dir());
-    if (!ui_init(win, fonts)) {
-        return DASH_INGAME_RESUME;
+    /* the game's overlay (its presenter draws the menu over its picture),
+     * or a renderer of this menu's own on the window */
+    const bool ov = ui_is_overlay();
+    if (!ov) {
+        char fonts[1200];
+        snprintf(fonts, sizeof(fonts), "%sfonts/", cfg_exe_dir());
+        if (!ui_init(win, fonts)) {
+            return DASH_INGAME_RESUME;
+        }
     }
     snd_init();
     snd_enable(cfg_bool(&D.global, "ui.sounds", true));
-    SDL_Texture *frame = load_bmp(frame_bmp);
+    UiTex *frame = ov ? NULL : load_bmp(frame_bmp);
     g_ig_done = false;
     g_ig_result = DASH_INGAME_RESUME;
     snd_play(SND_TAB);
-    while (!g_ig_done && !D.quit) {
+    /* over the overlay: the game's picture blurs and the menu fades in (a
+     * fifth of a second), and the other way out, back to the game */
+    const double t_open = ui_time();
+    double t_close = 0;
+    for (;;) {
+        if ((g_ig_done || D.quit) && !t_close) {
+            const bool away = D.quit || g_ig_result == DASH_INGAME_QUIT || g_ig_result == DASH_INGAME_RESTART;
+            if (!ov || away) {
+                break;  /* the game breaks away itself (win_main.c) */
+            }
+            t_close = ui_time();
+        }
+        float k = (float)((ui_time() - t_open) / 0.2);
+        if (t_close) {
+            k = 1.0f - (float)((ui_time() - t_close) / 0.16);
+            if (k <= 0) {
+                break;
+            }
+        }
+        k = k < 0 ? 0 : k > 1 ? 1 : k;
+        const float ek = ease(k);
         poll_input();
         auto_poll();
+        if (t_close) {
+            memset(&D.in, 0, sizeof(D.in));     /* closing: nothing more chosen */
+            D.in.mx = D.in.my = -1;
+        }
         const In saved = D.in;
         const bool asked = D.ask != NULL;  /* a question asked this frame answers from the next */
         if (D.ask) {
@@ -1916,11 +2006,16 @@ int dash_ingame(SDL_Window *win, const char *key, const char *title, const char 
             }
         }
         ui_begin();
-        /* the paused game under a green veil */
-        if (frame) {
-            SDL_RenderTexture(ui_renderer(), frame, NULL, NULL);
+        /* the paused game under a green veil: blurred, over the overlay */
+        if (ov) {
+            ui_cover(true);
+            ui_fill(ui_scene(false), UI_WHITE);
+            ui_fill(ui_scene(true), ui_alpha(UI_WHITE, ek));
+            ui_set_alpha(ek);
+        } else if (frame) {
+            ui_fill(frame, UI_WHITE);
         }
-        ui_rect_grad(0, 0, ui_w(), ui_h(), (UiColor){0, 12, 0, 200}, (UiColor){0, 24, 0, 225});
+        ui_rect_grad(0, 0, ui_w(), ui_h(), (UiColor){0, 12, 0, ov ? 150 : 200}, (UiColor){0, 24, 0, ov ? 190 : 225});
         ui_glow(ui_w() / 2, ui_h() / 2, ui_h() * 0.8f, ui_alpha(UI_GREEN, 0.10f));
         switch (dash_top()) {
         case SCR_INGAME: scr_ingame(); break;
@@ -1943,6 +2038,10 @@ int dash_ingame(SDL_Window *win, const char *key, const char *title, const char 
             }
             draw_ask();
         }
+        ui_set_alpha(1);
+        if (live) {
+            live(&D.global, &D.game);   /* the picture's shape and filters under the menu, as chosen */
+        }
         auto_shot();
         ui_end();
         D.anim += 1.0f / 60;
@@ -1950,16 +2049,16 @@ int dash_ingame(SDL_Window *win, const char *key, const char *title, const char 
     dash_save_cfg();
     for (int i = 0; i < 11; i++) {
         if (g_ig_thumb[i]) {
-            SDL_DestroyTexture(g_ig_thumb[i]);
+            ui_texture_free(g_ig_thumb[i]);
             g_ig_thumb[i] = NULL;
         }
     }
-    if (frame) {
-        SDL_DestroyTexture(frame);
-    }
+    ui_texture_free(frame);
     states_forget();
     snd_shutdown();
-    ui_shutdown();
+    if (!ov) {
+        ui_shutdown();
+    }
     *slot = g_ig_slot;
     return D.quit ? DASH_INGAME_QUIT : g_ig_result;
 }

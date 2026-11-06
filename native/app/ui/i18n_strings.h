@@ -46,6 +46,7 @@ X(S_INTERFACE, "Interface", "Interfaz", "Interface", "Oberfläche", "Interfaccia
 X(S_HOTKEYS, "Shortcuts", "Atajos", "Raccourcis", "Tastenkürzel", "Scorciatoie", "Atalhos", "Горячие клавиши", "Skróty", "ショートカット", "快捷键", "단축키")
 /* video */
 X(S_RENDER_SCALE, "Internal resolution", "Resolución interna", "Résolution interne", "Interne Auflösung", "Risoluzione interna", "Resolução interna", "Внутреннее разрешение", "Rozdzielczość wewnętrzna", "内部解像度", "内部分辨率", "내부 해상도")
+X(S_OVERSCAN, "Overscan", "Sobrebarrido (overscan)", "Surbalayage (overscan)", "Overscan", "Overscan", "Overscan", "Оверскан", "Overscan", "オーバースキャン", "过扫描", "오버스캔")
 X(S_ASPECT, "Aspect ratio", "Relación de aspecto", "Format d'image", "Seitenverhältnis", "Proporzioni", "Proporção", "Соотношение сторон", "Proporcje obrazu", "アスペクト比", "宽高比", "화면 비율")
 X(S_STRETCH, "Stretch", "Estirar", "Étirer", "Strecken", "Allarga", "Esticar", "Растянуть", "Rozciągnij", "引き伸ばし", "拉伸", "늘이기")
 X(S_FULLSCREEN, "Fullscreen", "Pantalla completa", "Plein écran", "Vollbild", "Schermo intero", "Tela cheia", "Полный экран", "Pełny ekran", "フルスクリーン", "全屏", "전체 화면")
@@ -86,6 +87,7 @@ X(S_ADD_FOLDER, "Add folder", "Añadir carpeta", "Ajouter un dossier", "Ordner h
 X(S_REMOVE, "Remove", "Quitar", "Retirer", "Entfernen", "Rimuovi", "Remover", "Убрать", "Usuń", "削除", "移除", "제거")
 X(S_COVERS_ONLINE, "Download covers automatically", "Descargar carátulas automáticamente", "Télécharger les jaquettes", "Cover automatisch laden", "Scarica copertine automaticamente", "Baixar capas automaticamente", "Скачивать обложки", "Pobieraj okładki", "カバーを自動ダウンロード", "自动下载封面", "표지 자동 다운로드")
 X(S_ANIMATED_BG, "Animated background", "Fondo animado", "Fond animé", "Animierter Hintergrund", "Sfondo animato", "Fundo animado", "Анимированный фон", "Animowane tło", "アニメーション背景", "动态背景", "애니메이션 배경")
+X(S_TRANSITIONS, "Transitions in and out of games", "Transiciones al entrar y salir de los juegos", "Transitions à l'entrée et à la sortie des jeux", "Übergänge beim Starten und Verlassen von Spielen", "Transizioni in entrata e in uscita dai giochi", "Transições ao entrar e sair dos jogos", "Переходы при входе в игру и выходе", "Przejścia przy wejściu do gry i wyjściu", "ゲーム開始・終了時のトランジション", "进入和退出游戏时的过渡效果", "게임 시작·종료 전환 효과")
 X(S_UI_SOUNDS, "Interface sounds", "Sonidos de la interfaz", "Sons de l'interface", "Oberflächenklänge", "Suoni interfaccia", "Sons da interface", "Звуки интерфейса", "Dźwięki interfejsu", "効果音", "界面音效", "인터페이스 소리")
 /* controls */
 X(S_PLAYER, "Player", "Jugador", "Joueur", "Spieler", "Giocatore", "Jogador", "Игрок", "Gracz", "プレイヤー", "玩家", "플레이어")
@@ -162,6 +164,9 @@ X(S_RESUME, "Resume", "Continuar", "Reprendre", "Fortsetzen", "Riprendi", "Conti
 X(S_QUIT_GAME, "Quit to dashboard", "Salir al menú", "Retour au menu", "Zum Menü", "Esci al menu", "Sair para o menu", "Выйти в меню", "Wyjdź do menu", "ダッシュボードに戻る", "退出到主界面", "대시보드로 나가기")
 X(S_RESTART, "Restart", "Reiniciar", "Redémarrer", "Neu starten", "Riavvia", "Reiniciar", "Перезапустить", "Uruchom ponownie", "リスタート", "重新开始", "다시 시작")
 X(S_SAVED, "Saved", "Guardado", "Sauvegardé", "Gespeichert", "Salvato", "Salvo", "Сохранено", "Zapisano", "保存しました", "已保存", "저장됨")
+X(S_STATE_SAVED, "State saved in slot %d", "Estado guardado en la ranura %d", "État sauvegardé dans l'emplacement %d", "Stand in Platz %d gespeichert", "Stato salvato nello slot %d", "Estado salvo no espaço %d", "Состояние сохранено в ячейку %d", "Stan zapisany w slocie %d", "スロット%dにステートセーブしました", "已即时存档到第 %d 格", "슬롯 %d에 상태 저장됨")
+X(S_STATE_NOT_NOW, "The state can't be saved right now", "Ahora no se puede guardar el estado", "L'état ne peut pas être sauvegardé maintenant", "Der Stand kann gerade nicht gespeichert werden", "Ora non si può salvare lo stato", "Não é possível salvar o estado agora", "Сейчас нельзя сохранить состояние", "Teraz nie można zapisać stanu", "今はステートセーブできません", "现在无法即时存档", "지금은 상태를 저장할 수 없습니다")
+X(S_SHOT_SAVED, "Screenshot saved", "Captura guardada", "Capture enregistrée", "Screenshot gespeichert", "Screenshot salvato", "Captura salva", "Снимок экрана сохранён", "Zrzut ekranu zapisany", "スクリーンショットを保存しました", "截图已保存", "스크린샷 저장됨")
 X(S_NEEDS_RESTART, "Applies when the game starts again.", "Se aplica al reiniciar el juego.", "S'applique au prochain démarrage du jeu.", "Gilt beim nächsten Spielstart.", "Si applica al prossimo avvio del gioco.", "Vale quando o jogo reiniciar.", "Применится при следующем запуске игры.", "Zadziała po ponownym uruchomieniu gry.", "次回起動時に反映されます。", "下次启动游戏时生效。", "게임을 다시 시작하면 적용됩니다.")
 /* about */
 X(S_ABOUT, "About", "Acerca de", "À propos", "Über", "Informazioni", "Sobre", "О программе", "O programie", "情報", "关于", "정보")

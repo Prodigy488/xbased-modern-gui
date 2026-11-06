@@ -20,7 +20,7 @@ typedef struct {
     char dir[1100];         /* its folder */
     char id[16];            /* the title ID / the save's folder name */
     char name[128];
-    SDL_Texture *icon;
+    UiTex *icon;
     int64_t bytes;
     int64_t mtime;
     bool exported_only;     /* in exports/, not on the disk (an import) */
@@ -140,7 +140,7 @@ static bool meta_value(const char *path, const char *key, char *out, size_t n)
     return false;
 }
 
-static SDL_Texture *xpr_texture(const char *path)
+static UiTex *xpr_texture(const char *path)
 {
     size_t len = 0;
     uint8_t *b = SDL_LoadFile(path, &len);
@@ -153,7 +153,7 @@ static SDL_Texture *xpr_texture(const char *path)
     if (!px) {
         return NULL;
     }
-    SDL_Texture *t = ui_texture_rgba(px, w, h);
+    UiTex *t = ui_texture_rgba(px, w, h);
     free(px);
     return t;
 }
@@ -225,7 +225,7 @@ static void free_entries(Entry *e, int n)
 {
     for (int i = 0; i < n; i++) {
         if (e[i].icon) {
-            SDL_DestroyTexture(e[i].icon);
+            ui_texture_free(e[i].icon);
             e[i].icon = NULL;
         }
     }

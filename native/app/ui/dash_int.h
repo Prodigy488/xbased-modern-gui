@@ -92,7 +92,7 @@ void list_begin(List *l, float x, float y, float w, float h, float row_h);
 /* A row: its label and value; true when chosen (A, Enter, a click). delta:
  * left/right on it (-1, +1), may be NULL. */
 bool list_row(List *l, const char *label, const char *value, int *delta);
-bool list_row_icon(List *l, SDL_Texture *icon, const char *label, const char *sub, const char *value, int *delta);
+bool list_row_icon(List *l, UiTex *icon, const char *label, const char *sub, const char *value, int *delta);
 void list_end(List *l);
 bool list_selected(const List *l);   /* the last row is the selected one */
 

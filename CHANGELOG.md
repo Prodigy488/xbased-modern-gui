@@ -1,5 +1,44 @@
 # xbased changelog
 
+## 1.0.38 (2026-11)
+
+### The interface over the game
+The interface is now drawn by the game's own presenter, over the game's
+picture, so the window never changes hands while you play.
+
+- The in-game menu comes up over the paused game, blurred behind a
+  translucent veil, and fades in and out. Before, the presenter let go of
+  the window and another renderer drew the menu over a still picture.
+- Changing the screen shape in the menu shows at once on the picture
+  under it, and the picture eases into its new shape instead of jumping.
+- Saving a state and taking a screenshot show a short notice over the
+  game.
+
+### Overscan
+Settings > Video (and each game's settings) have an Overscan row, for any
+screen shape, 4:3 as much as 16:9. As on a TV, it's the share of the
+picture hidden past the screen's edges: 3% to 15%, where a CRT hid some
+5 to 10% (7% and 10% are the action-safe areas). The negative values
+underscan, leaving that much border. It shows at once, under the in-game
+menu too. Thanks to P1Login for asking (#67).
+
+### Transitions in and out of games
+- Starting a game: the dashboard breaks into shards that fly at you, and
+  the game comes in out of a white flash. Quitting to the dashboard or
+  restarting breaks the game's picture the same way, and the dashboard
+  comes back in out of black. Each takes half a second.
+- Loading a state, or a game switching to another of its executables:
+  the picture stays on screen until the new one is ready, then fades into
+  it. The next window opens under the current one, which closes only once
+  the new one has drawn, so there's no desktop or blank window between
+  them. A window keeps its place and size.
+- Settings > Interface > Transitions in and out of games turns the
+  effects off.
+
+None of this runs during gameplay. Checked against 1.0.37 on Conker's
+same scene: the same frame rate unlocked (840) and at Original (59.9, one
+dropped frame in each), and the same presenter timings.
+
 ## 1.0.37 (2026-11)
 
 ### Patches and cheats only for the build they were made for

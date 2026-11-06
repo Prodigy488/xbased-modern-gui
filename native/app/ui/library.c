@@ -422,32 +422,32 @@ LibGame *lib_get(int idx)
     return r;
 }
 
-SDL_Texture *lib_load_png(const char *path)
+UiTex *lib_load_png(const char *path)
 {
     int w, h, c;
     uint8_t *px = stbi_load(path, &w, &h, &c, 4);
     if (!px) {
         return NULL;
     }
-    SDL_Texture *t = ui_texture_rgba(px, w, h);
+    UiTex *t = ui_texture_rgba(px, w, h);
     stbi_image_free(px);
     return t;
 }
 
-SDL_Texture *lib_icon(LibGame *g)
+UiTex *lib_icon(LibGame *g)
 {
     if (!g->icon_tex) {
         char p[1200];
         icon_path(&g->g, p, sizeof(p));
         g->icon_tex = lib_load_png(p);
         if (!g->icon_tex) {
-            g->icon_tex = (SDL_Texture *)1;    /* none: not looked for again */
+            g->icon_tex = (UiTex *)1;    /* none: not looked for again */
         }
     }
-    return g->icon_tex == (SDL_Texture *)1 ? NULL : g->icon_tex;
+    return g->icon_tex == (UiTex *)1 ? NULL : g->icon_tex;
 }
 
-SDL_Texture *lib_cover(LibGame *g)
+UiTex *lib_cover(LibGame *g)
 {
     if (!g->cover_tex && !g->cover_tried) {
         char p[1200];
@@ -508,7 +508,7 @@ bool lib_set_cover_file(LibGame *g, const char *path)
     const bool ok = stbi_write_png(to, w, h, 4, px, w * 4) != 0;
     stbi_image_free(px);
     if (g->cover_tex) {
-        SDL_DestroyTexture(g->cover_tex);
+        ui_texture_free(g->cover_tex);
         g->cover_tex = NULL;
     }
     g->cover_tried = false;
@@ -830,7 +830,7 @@ void lib_poll(void)
     for (int i = 0; i < L.n; i++) {
         LibGame *g = L.games[i];
         if (!g->cover_tried && g->cover_tex) {
-            SDL_DestroyTexture(g->cover_tex);
+            ui_texture_free(g->cover_tex);
             g->cover_tex = NULL;
         }
     }
@@ -847,11 +847,11 @@ void lib_shutdown(void)
     }
     for (int i = 0; i < L.n; i++) {
         LibGame *g = L.games[i];
-        if (g->icon_tex && g->icon_tex != (SDL_Texture *)1) {
-            SDL_DestroyTexture(g->icon_tex);
+        if (g->icon_tex && g->icon_tex != (UiTex *)1) {
+            ui_texture_free(g->icon_tex);
         }
         if (g->cover_tex) {
-            SDL_DestroyTexture(g->cover_tex);
+            ui_texture_free(g->cover_tex);
         }
         free(g);
     }
