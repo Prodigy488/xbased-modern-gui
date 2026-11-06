@@ -1,5 +1,17 @@
 # xbased changelog
 
+## 1.0.43 (2026-11)
+
+### Fixes
+- Crimson Skies: High Road to Revenge no longer goes back to the
+  dashboard as it starts. Some games check that the disc is an original
+  by reading its security sector, which lives in a part of the disc that
+  disc images don't include, and the emulator handed back zeros. The
+  emulated DVD drive now makes a security sector that passes the game's
+  check (the right time stamp and checksum, signed with a key of
+  xbased's own, which the emulated console uses as its public key). The
+  game now boots and plays. Thanks to BlueDragon992 for the report (#80).
+
 ## 1.0.42 (2026-11)
 
 ### Fixes
