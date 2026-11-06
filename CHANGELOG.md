@@ -1,5 +1,17 @@
 # xbased changelog
 
+## 1.0.44 (2026-11)
+
+### Fixes
+- The updater on Windows no longer gives up on an update that unpacked
+  fine. It unpacks the new version with Windows' own tar, and on some
+  Windows 10 machines tar reported an error even though every file came
+  out right, so the updater stopped and opened the releases page
+  instead. Now, when tar reports an error, the updater checks every
+  file of the package against the download (its name and size) and
+  carries on if they're all there. Thanks to shadowflash for the report
+  (#76).
+
 ## 1.0.43 (2026-11)
 
 ### Fixes
