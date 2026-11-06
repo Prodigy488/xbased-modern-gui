@@ -1,5 +1,20 @@
 # xbased changelog
 
+## 1.0.46 (2026-11)
+
+### Fixes
+- Less audio stutter on Linux in games with a lot of sound going on,
+  like Forza Motorsport's races. The emulated sound chip's voices were
+  split between the audio thread and a helper thread, and on Linux
+  waking the helper and waiting for it 1500 times a second cost more
+  than the work it took over. In a Forza race the audio thread was busy
+  about three times as much on Linux as on Windows on the same machine,
+  and on slower laptops it couldn't keep up. On Linux the audio thread
+  now does the voices itself, which takes it from around 20% busy to
+  around 7% in that race. Windows keeps the helper, which pays off
+  there. Thanks to saultsomy-jpg for the report and the detailed log
+  (#82).
+
 ## 1.0.45 (2026-11)
 
 ### Fixes
