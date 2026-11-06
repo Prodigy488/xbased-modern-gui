@@ -1,5 +1,17 @@
 # xbased changelog
 
+## 1.0.36 (2026-11)
+
+### Fixes
+- Grand Theft Auto: San Andreas (European Classics release) crashed while
+  loading with its 60 FPS patch on. The shipped patches (60 FPS,
+  widescreen, 480p) were made for the USA releases and write bytes at fixed
+  places of the game's executable; given to other releases of the same game
+  they landed on other code (in San Andreas, half of a call). They now go
+  only to the USA release each one was made for: 45 copies on other
+  releases are gone, and an update deletes them from the mods folder at
+  start (only while they're unchanged, never a patch of your own).
+
 ## 1.0.35 (2026-11)
 
 ### Sound
