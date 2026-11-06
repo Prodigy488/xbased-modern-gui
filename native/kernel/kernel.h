@@ -124,7 +124,15 @@ typedef struct NcSeh {
     uint32_t nested;         /* dispatch: the frame a nested raise came from */
     uint32_t target;         /* unwind: TargetFrame */
 } NcSeh;
-#define NC_MAX_SEH 8
+/* Levels a thread may have in progress at once. NT has no limit but the
+ * stack. Unreal Engine 2 titles (XIII) catch and rethrow in each guarded
+ * function an error passes through, every rethrow inside the catch block of
+ * the last, its dispatch still on the stack: a failed package lookup at boot
+ * went 9 deep, past the 8 kept before, and the core stopped there (a black
+ * screen). The first NC_SEH_STORED are NcThread.seh (THRD v1), the rest
+ * seh_more (THRD v4). */
+#define NC_MAX_SEH 64
+#define NC_SEH_STORED 8
 
 typedef struct NcThread {
     enum NcThreadState state;
@@ -151,7 +159,8 @@ typedef struct NcThread {
     NcApcChain apc;          /* the chain running (apc.in_apc) */
     NcApcChain apc_outer[NC_MAX_APC_NEST]; /* chains an alertable wait in an APC interrupted */
     unsigned apc_nest;
-    NcSeh seh[NC_MAX_SEH];
+    NcSeh seh[NC_SEH_STORED];             /* seh.c level(): the first ones */
+    NcSeh seh_more[NC_MAX_SEH - NC_SEH_STORED]; /* ... and the deeper ones */
     unsigned nseh;
     bool fresh;              /* ctx was just set up (an ISR or DPC entry): the
                                 running frame must not be saved over it */

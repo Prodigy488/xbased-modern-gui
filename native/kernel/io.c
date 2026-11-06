@@ -760,12 +760,18 @@ void nc_io_set_device_time(bool on)
            g_dev_disc.req_us, g_dev_disc.kbps, g_dev_hdd.req_us, g_dev_hdd.kbps);
 }
 
-/* The drive's time for n bytes of nf (console timing on), in microseconds. */
+/* The drive's time for n bytes of nf, in microseconds. An overlapped read
+ * always takes it, console timing or not (a synchronous one only with it,
+ * NtReadFile): it lands a little later than the call, as on the Xbox, where
+ * the drive is never done before the title looks. Total Immersion Racing
+ * reads its first video's opening 80 KiB overlapped, creates the decoder's
+ * textures and polls once (GetOverlappedResult without waiting) before it
+ * makes the video's audio stream: done in 2 ms here, the poll found the
+ * data, the first frame decoded into the buffer the decoder shares with the
+ * track list, and the stream got a format of 0 channels (DirectSound
+ * divided by its voice count, the emulator gone at the first logo). */
 static uint32_t device_us(const NcFile *nf, uint32_t n)
 {
-    if (!g_devtime) {
-        return 0;
-    }
     const struct DevRate *r = nf->kind == F_DISC ? &g_dev_disc : &g_dev_hdd;
     return r->req_us + (r->kbps ? (uint32_t)((uint64_t)n * 1000 / r->kbps) : 0);
 }
@@ -1899,45 +1905,42 @@ static bool handle_can_write(const NcFile *nf, const char *what)
     return false;
 }
 
-/* NtWriteFile(FileHandle, Event, ApcRoutine, ApcContext, IoStatusBlock, Buffer, Length, ByteOffset) */
-static uint64_t NtWriteFile(NcKernel *k, NcFrame *f, const uint32_t *a)
+/* NtWriteFile's work for len bytes at src (the guest's, read already): a[]
+ * as NtWriteFile takes it, its Buffer and Length aside (va: the Buffer, for
+ * the trace). */
+static uint64_t write_data(NcKernel *k, const uint32_t *a, const uint8_t *src, uint32_t len, uint32_t va)
 {
     NcFile *nf = file_of(k, a[0]);
     if (!nf) {
         return NC_STATUS_INVALID_HANDLE;
     }
-    if (!nc_kernel_resident(k, a[5], a[6], false)) {
-        return 0;
-    }
     if (nf->kind == F_VOLUME) {
         if (nf->partition == 0) {
             const uint64_t off = io_offset(k, nf, a[7]);
-            nc_vm_will_read(a[5], a[6]);
-            raw_io(0, off, nc_vm_host(k->vm, a[5]), a[6], true);
-            io_moved(k, nf, a[7], off + a[6]);
+            raw_io(0, off, (uint8_t *)src, len, true);
+            io_moved(k, nf, a[7], off + len);
             if (g_trace_io) {
-                nc_log("hakuX-native-io", "write %s raw +%llx %u", nf->path, (unsigned long long)off, a[6]);
+                nc_log("hakuX-native-io", "write %s raw +%llx %u", nf->path, (unsigned long long)off, len);
             }
         }
-        return io_finish(k, nf, a, NC_STATUS_SUCCESS, a[6], true);
+        return io_finish(k, nf, a, NC_STATUS_SUCCESS, len, true);
     }
     if (nf->kind == F_HOST && nf->is_dir && partition_root(nf) >= 3) {
         /* A cache drive formatted raw (XMountUtilityDrive): the superblock
          * write empties the folder; the head of the partition is kept. */
         const uint64_t o = io_offset(k, nf, a[7]);
-        io_moved(k, nf, a[7], o + a[6]);
-        nc_vm_will_read(a[5], a[6]);
-        raw_io(partition_root(nf), o, nc_vm_host(k->vm, a[5]), a[6], true);
+        io_moved(k, nf, a[7], o + len);
+        raw_io(partition_root(nf), o, (uint8_t *)src, len, true);
         /* The FATX superblock: "FATX", volume id, sectors per cluster. */
-        const uint8_t *sb = nc_vm_host(k->vm, a[5]);
-        if (o == 0 && a[6] >= 12 && !memcmp(sb, "FATX", 4)) {
+        const uint8_t *sb = src;
+        if (o == 0 && len >= 12 && !memcmp(sb, "FATX", 4)) {
             const int part = partition_root(nf);
             g_cluster_sectors[part] = nc_rd32(sb + 8);
             nc_log("hakuX-native-io", "%s formatted (%u-sector clusters): emptied %s", nf->path,
                    g_cluster_sectors[part], nf->host);
             remove_tree(nf->host, false);
         }
-        return io_finish(k, nf, a, NC_STATUS_SUCCESS, a[6], true);
+        return io_finish(k, nf, a, NC_STATUS_SUCCESS, len, true);
     }
     if (nf->kind != F_HOST || nf->is_dir || !handle_can_write(nf, "write to")) {
         io_status(k, a[4], STATUS_ACCESS_DENIED, 0);
@@ -1958,20 +1961,69 @@ static uint64_t NtWriteFile(NcKernel *k, NcFrame *f, const uint32_t *a)
             regrow(nf, size, off); /* the gap a write past the end leaves */
         }
     }
-    nc_vm_will_read(a[5], a[6]);   /* pwrite from a page without access fails rather than faults */
-    ssize_t n = pwrite(nf->fd, nc_vm_host(k->vm, a[5]), a[6], (off_t)off);
-    uint32_t st = n == (ssize_t)a[6] ? NC_STATUS_SUCCESS : 0xC000007Fu; /* STATUS_DISK_FULL */
+    ssize_t n = pwrite(nf->fd, src, len, (off_t)off);
+    uint32_t st = n == (ssize_t)len ? NC_STATUS_SUCCESS : 0xC000007Fu; /* STATUS_DISK_FULL */
     nf->wrote |= n > 0;
     if (g_trace_io) {
         uint8_t b[8] = {0};
         if (n >= 8) {
-            memcpy(b, nc_vm_host(k->vm, a[5]), 8);
+            memcpy(b, src, 8);
         }
         nc_log("hakuX-native-io", "write %s +%llx %u from %08x -> %08x [%02x%02x%02x%02x %02x%02x%02x%02x]", nf->path,
-               (unsigned long long)off, a[6], a[5], st, b[0], b[1], b[2], b[3], b[4], b[5], b[6], b[7]);
+               (unsigned long long)off, len, va, st, b[0], b[1], b[2], b[3], b[4], b[5], b[6], b[7]);
     }
     io_moved(k, nf, a[7], off + (n > 0 ? (uint64_t)n : 0));
     return io_finish(k, nf, a, st, n > 0 ? (uint32_t)n : 0, nf->no_buffering);   /* cached: in the call */
+}
+
+/* NtWriteFile(FileHandle, Event, ApcRoutine, ApcContext, IoStatusBlock, Buffer, Length, ByteOffset) */
+static uint64_t NtWriteFile(NcKernel *k, NcFrame *f, const uint32_t *a)
+{
+    if (!file_of(k, a[0])) {
+        return NC_STATUS_INVALID_HANDLE;
+    }
+    if (!nc_kernel_resident(k, a[5], a[6], false)) {
+        return 0;
+    }
+    nc_vm_will_read(a[5], a[6]); /* pwrite from a page without access fails rather than faults */
+    return write_data(k, a, nc_vm_host(k->vm, a[5]), a[6], a[5]);
+}
+
+/* NtWriteFileGather(FileHandle, Event, ApcRoutine, ApcContext, IoStatusBlock,
+ * SegmentArray, Length, ByteOffset): NtWriteFile from pages, SegmentArray
+ * holding a page's address for each page of Length (NtReadFileScatter's
+ * other half), gathered here into one buffer. XAPI's WriteFileGather, for
+ * handles opened without the cache: Operation Flashpoint: Elite writes its
+ * cache files through it in 8 KiB pieces at boot, and the core stopped at
+ * the first (a black screen). */
+static uint64_t NtWriteFileGather(NcKernel *k, NcFrame *f, const uint32_t *a)
+{
+    const uint32_t len = a[6], pages = (uint32_t)(((uint64_t)len + NC_PAGE - 1) / NC_PAGE);
+    if (!file_of(k, a[0])) {
+        return NC_STATUS_INVALID_HANDLE;
+    }
+    if (!nc_kernel_resident(k, a[5], pages * 4, false)) {
+        return 0;
+    }
+    for (uint32_t i = 0; i < pages; i++) {
+        const uint32_t va = nc_vm_rd32(k->vm, a[5] + 4 * i) & ~(NC_PAGE - 1);
+        if (!nc_kernel_resident(k, va, len - i * NC_PAGE < NC_PAGE ? len - i * NC_PAGE : NC_PAGE, false)) {
+            return 0;
+        }
+    }
+    uint8_t *buf = malloc(len ? len : 1);
+    if (!buf) {
+        return NC_STATUS_INSUFFICIENT_RESOURCES;
+    }
+    for (uint32_t i = 0; i < pages; i++) {
+        const uint32_t va = nc_vm_rd32(k->vm, a[5] + 4 * i) & ~(NC_PAGE - 1);
+        const uint32_t n = len - i * NC_PAGE < NC_PAGE ? len - i * NC_PAGE : NC_PAGE;
+        nc_vm_will_read(va, n);
+        memcpy(buf + i * NC_PAGE, nc_vm_host(k->vm, va), n);
+    }
+    const uint64_t r = write_data(k, a, buf, len, pages ? nc_vm_rd32(k->vm, a[5]) : 0);
+    free(buf);
+    return r;
 }
 
 /* ---------------------------------------------------------- information */
@@ -2973,6 +3025,7 @@ void nc_io_register(NcKernel *k)
     nc_kernel_impl(k, "NtOpenFile", NtOpenFile);
     nc_kernel_impl(k, "NtReadFile", NtReadFile);
     nc_kernel_impl(k, "NtReadFileScatter", NtReadFileScatter);
+    nc_kernel_impl(k, "NtWriteFileGather", NtWriteFileGather);
     nc_kernel_impl(k, "NtWriteFile", NtWriteFile);
     nc_kernel_impl(k, "NtQueryInformationFile", NtQueryInformationFile);
     nc_kernel_impl(k, "NtSetInformationFile", NtSetInformationFile);

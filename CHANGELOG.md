@@ -1,5 +1,39 @@
 # xbased changelog
 
+## 1.0.40 (2026-11)
+
+### Fixes
+- XIII no longer goes to a black screen after the logos. Its engine
+  catches an error in every function it passes through and throws it
+  again from there, so one error at boot ends up nine exceptions deep,
+  each still being handled when the next starts. The emulator kept at
+  most eight per thread and stopped the game past that. It now keeps up
+  to 64, and XIII reaches its menus and plays. Savestates made with older
+  versions still load. Thanks to P1Login for the report (#64).
+- Operation Flashpoint: Elite no longer goes to a black screen at boot.
+  It writes its cache files with gathered writes (one write from many
+  separate memory pages), a kernel call the emulator didn't have yet.
+  It's in now, and the game reaches its menus and missions. Thanks to
+  P1Login for the report (#63).
+- Total Immersion Racing no longer closes the emulator at its first logo
+  video. Reads a game starts in the background (overlapped reads) now
+  take a little time, as the console's drive does, instead of finishing
+  almost at once. The game counts on its first video read still being
+  under way when it first checks, and when it wasn't, the video's sound
+  was set up with no channels and the game divided by zero. Background
+  reads still run four times faster than the console's DVD drive. The
+  game now plays its videos and reaches its races. Thanks to P1Login for
+  the report (#65).
+- Hitman 2: Silent Assassin no longer goes to a black screen at boot.
+  It edits the console's page tables to see its memory at a second
+  address, by copying the entries the console's kernel keeps for its
+  RAM. The emulator gave it page tables without those entries, so the
+  copy came out empty and the game's first use of that memory failed.
+  The page tables now start the way the console's do, and the game
+  reaches its menus and levels. Thanks to P1Login for the report (#69).
+- On Windows, a game dividing by zero now leaves a line in the log
+  saying where, instead of the emulator closing without a word.
+
 ## 1.0.39 (2026-11)
 
 ### Fixes
