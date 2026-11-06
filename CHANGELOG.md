@@ -1,5 +1,16 @@
 # xbased changelog
 
+## 1.0.39 (2026-11)
+
+### Fixes
+- Sniper Elite no longer stops on its first screen the first time it
+  runs. It copies its sound bank to the cache drive in writes that skip
+  the file system's cache, and waits for each one to be reported as
+  pending before it moves on. Those writes finished at once here, so the
+  game sent the same first block again and again forever. They now pend
+  as they do on the console's hard disk, the 135 MB copy finishes in a
+  few seconds, and the game plays. Thanks to P1Login for the report (#62).
+
 ## 1.0.38 (2026-11)
 
 ### The interface over the game

@@ -1581,7 +1581,12 @@ static int partition_root(const NcFile *nf);
  * reader (XDK 5455) counts the bytes only after ERROR_IO_PENDING, through
  * GetOverlappedResult, and took a disc read that succeeded at once as 0 bytes
  * read, a dirty disc. pend: a success may pend (not a read through the cache,
- * disc_cached). */
+ * disc_cached). A write that bypasses the cache (no_buffering) goes to the
+ * disk and pends the same way, with neither event nor APC too: Sniper Elite
+ * copies its sound bank to the cache drive in 128 KiB overlapped writes
+ * (FILE_FLAG_NO_BUFFERING) and moves on only after ERROR_IO_PENDING and
+ * GetOverlappedResult; a write that completed in the call was issued again,
+ * at the same offset, forever, and the game stayed on its first screen. */
 static uint32_t io_finish(NcKernel *k, const NcFile *nf, const uint32_t *a, uint32_t st, uint32_t n, bool pend)
 {
     if (nf->async && st >= 0xC0000000u) {
@@ -1589,7 +1594,8 @@ static uint32_t io_finish(NcKernel *k, const NcFile *nf, const uint32_t *a, uint
     }
     io_status(k, a[4], st, n);
     complete(k, a);
-    return pend && nf->async && (a[1] || a[2] || nf->kind == F_DISC) ? STATUS_PENDING : st;
+    const bool device = nf->kind == F_DISC || (nf->kind == F_HOST && nf->no_buffering);
+    return pend && nf->async && (a[1] || a[2] || device) ? STATUS_PENDING : st;
 }
 
 /* A disc read of part of a sector goes through the file system's cache, which
