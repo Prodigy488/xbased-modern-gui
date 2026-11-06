@@ -1,5 +1,21 @@
 # xbased changelog
 
+## 1.0.47 (2026-11)
+
+### New
+- Stick anti dead zone, in Settings, Controls, Stick range, and for each
+  game in its own Controls. Many Xbox games ignore the first part of a
+  stick's travel themselves (they were made for the original controller's
+  loose sticks), so even with the dead zone at 0 a small push does
+  nothing. In Chicago Enforcer, for example, the view doesn't turn at all
+  until the stick is about a third of the way over. The anti dead zone
+  makes the smallest push past the dead zone start at that amount, so
+  the game reacts straight away. Both stick boxes on the Stick range
+  screen draw it as a red disc, next to the dead zone's grey ring.
+- A game's Controls now have its own sticks (dead zone, anti dead zone,
+  range, shape) and triggers, so each game can be set apart from the
+  global settings. Thanks to crashmidnick25 for the report (#84).
+
 ## 1.0.46 (2026-11)
 
 ### Fixes

@@ -974,6 +974,35 @@ void scr_controls(void)
     List l;
     list_begin(&l, 74, 150, W - 148, H - 244, 52);
     if (D.editing_game) {
+        /* the game's own sticks (dead zone, anti dead zone, range, shape)
+         * and triggers, on the screens the global ones are set on */
+        char val[128];
+        const Config *dc = cfg_get(&D.game, "deadzone") ? &D.game : &D.global;
+        const Config *ac = cfg_get(&D.game, "stick.antidz") ? &D.game : &D.global;
+        const bool own = cfg_get(&D.game, "deadzone") || cfg_get(&D.game, "stick.antidz") ||
+                         cfg_get(&D.game, "stick.range") || cfg_get(&D.game, "stick.shape");
+        if (own) {
+            snprintf(val, sizeof(val), "%d%%  ·  %d%%", cfg_int(dc, "deadzone", 10), cfg_int(ac, "stick.antidz", 0));
+        } else {
+            snprintf(val, sizeof(val), "%s (%d%%  ·  %d%%)", T(S_DEFAULT_GLOBAL), cfg_int(dc, "deadzone", 10),
+                     cfg_int(ac, "stick.antidz", 0));
+        }
+        if (list_row(&l, T(S_STICK_ZONES), val, NULL)) {
+            dash_push(SCR_STICKS);
+        }
+        const Config *tc = cfg_get(&D.game, "trigger.deadzone") ? &D.game : &D.global;
+        const Config *fc = cfg_get(&D.game, "trigger.full") ? &D.game : &D.global;
+        const bool town = cfg_get(&D.game, "trigger.deadzone") || cfg_get(&D.game, "trigger.full");
+        if (town) {
+            snprintf(val, sizeof(val), "%d%%  ·  %d%%", cfg_int(tc, "trigger.deadzone", 10),
+                     cfg_int(fc, "trigger.full", 100));
+        } else {
+            snprintf(val, sizeof(val), "%s (%d%%  ·  %d%%)", T(S_DEFAULT_GLOBAL), cfg_int(tc, "trigger.deadzone", 10),
+                     cfg_int(fc, "trigger.full", 100));
+        }
+        if (list_row(&l, T(S_TRIGGERS), val, NULL)) {
+            dash_push(SCR_TRIGGERS);
+        }
         const bool custom = cfg_bool(&D.game, "map.custom", false);
         if (list_row(&l, T(S_CUSTOM_CONTROLS), custom ? T(S_ON) : T(S_OFF), NULL)) {
             if (custom) {
@@ -1030,7 +1059,8 @@ void scr_controls(void)
 static float g_reach[2][STICK_DIRS][2];
 static double g_sticks_seen;
 
-static void stick_box(int s, SDL_Gamepad *pad, float bx, float by, float S, float dz, float range, bool round)
+static void stick_box(int s, SDL_Gamepad *pad, float bx, float by, float S, float dz, float adz, float range,
+                      bool round)
 {
     const float cx = bx + S / 2, cy = by + S / 2, h = S / 2;
     ui_text(cx, by - 30, T(s ? S_IN_RSTICK : S_IN_LSTICK), 20, UI_FONT_BOLD, UI_WHITE, UI_ALIGN_CENTER);
@@ -1042,6 +1072,13 @@ static void stick_box(int s, SDL_Gamepad *pad, float bx, float by, float S, floa
     ui_line(bx, cy, bx + S, cy, 1, ui_alpha(UI_GREEN, 0.18f));
     if (dz > 0) {
         ui_ring(cx, cy, dz * h, dz * h, 0, 1.5f, ui_alpha(UI_GREY, 0.5f));
+    }
+    /* the anti dead zone: what the game gets at the least push past the
+     * dead zone, a disc it never sees inside of */
+    if (adz > 0) {
+        const float ar = adz * range * h;
+        ui_circle(cx, cy, ar, ui_alpha(UI_RED, 0.12f));
+        ui_ring(cx, cy, ar, ar, 0, 2, ui_alpha(UI_RED, 0.8f));
     }
     float x = 0, y = 0;
     if (pad) {
@@ -1070,7 +1107,7 @@ static void stick_box(int s, SDL_Gamepad *pad, float bx, float by, float S, floa
         const float *k = g_reach[s][i];
         got[i] = k[0] != 0 || k[1] != 0;
         if (got[i]) {
-            im_stick(k[0], k[1], dz, range, round, &out[i][0], &out[i][1]);
+            im_stick(k[0], k[1], dz, adz, range, round, &out[i][0], &out[i][1]);
             ngot++;
         }
     }
@@ -1121,7 +1158,7 @@ static void stick_box(int s, SDL_Gamepad *pad, float bx, float by, float S, floa
     reach /= STICK_DIRS;
     if (pad) {
         float ox, oy;
-        im_stick(x, y, dz, range, round, &ox, &oy);
+        im_stick(x, y, dz, adz, range, round, &ox, &oy);
         ui_circle(cx + x * h, cy - y * h, 5, ui_alpha(UI_GREY, 0.8f));      /* the stick itself */
         ui_glow(cx + ox * h, cy - oy * h, 22, ui_alpha(UI_GREEN_HI, 0.5f));
         ui_circle(cx + ox * h, cy - oy * h, 8, UI_GREEN_HI);                /* what the game gets */
@@ -1135,7 +1172,7 @@ static void stick_box(int s, SDL_Gamepad *pad, float bx, float by, float S, floa
 void scr_sticks(void)
 {
     const float W = ui_w(), H = ui_h();
-    draw_header(T(S_STICK_RANGE), NULL);
+    draw_header(T(S_STICK_RANGE), D.editing_game && D.cur ? D.cur->g.title : NULL);
     if (ui_time() - g_sticks_seen > 0.5) {
         memset(g_reach, 0, sizeof(g_reach));    /* a fresh look each time it opens */
     }
@@ -1145,34 +1182,56 @@ void scr_sticks(void)
     const bool round = shape && !strcmp(shape, "round");
     const Config *rc = cfg_get(c, "stick.range") ? c : &D.global;
     const Config *dc = cfg_get(c, "deadzone") ? c : &D.global;
+    const Config *ac = cfg_get(c, "stick.antidz") ? c : &D.global;
     const float range = cfg_int(rc, "stick.range", 100) / 100.0f, dz = cfg_int(dc, "deadzone", 10) / 100.0f;
+    const float adz = cfg_int(ac, "stick.antidz", 0) / 100.0f;
 
-    /* the legend: the square, the outline */
+    /* the legend: the square, the outline, the dead zone's ring and the
+     * anti dead zone's disc */
     const float ly = 128;
-    float lx = W / 2 - (ui_text_width(T(S_STICK_NEEDED), 18, UI_FONT_REGULAR) +
-                        ui_text_width(T(S_STICK_REACHED), 18, UI_FONT_REGULAR) + 92) / 2;
-    ui_round_outline(lx, ly + 3, 16, 16, 2, 2, UI_GREEN);
-    lx += 24;
-    lx += ui_text(lx, ly, T(S_STICK_NEEDED), 18, UI_FONT_REGULAR, UI_GREY, UI_ALIGN_LEFT) + 32;
-    ui_line(lx, ly + 11, lx + 22, ly + 11, 2.5f, UI_WHITE);
-    lx += 30;
-    ui_text(lx, ly, T(S_STICK_REACHED), 18, UI_FONT_REGULAR, UI_GREY, UI_ALIGN_LEFT);
+    const enum UiStr leg[4] = {S_STICK_NEEDED, S_STICK_REACHED, S_DEADZONE, S_ANTI_DEADZONE};
+    float lw = 0;
+    for (int i = 0; i < 4; i++) {
+        lw += ui_text_width(T(leg[i]), 16, UI_FONT_REGULAR) + (i ? 54 : 24);
+    }
+    float lx = W / 2 - lw / 2;
+    for (int i = 0; i < 4; i++) {
+        if (i) {
+            lx += 30;
+        }
+        if (i == 0) {
+            ui_round_outline(lx, ly + 2, 16, 16, 2, 2, UI_GREEN);
+        } else if (i == 1) {
+            ui_line(lx, ly + 10, lx + 18, ly + 10, 2.5f, UI_WHITE);
+        } else if (i == 2) {
+            ui_ring(lx + 8, ly + 10, 7, 7, 0, 1.5f, ui_alpha(UI_GREY, 0.8f));
+        } else {
+            ui_circle(lx + 8, ly + 10, 7, ui_alpha(UI_RED, 0.2f));
+            ui_ring(lx + 8, ly + 10, 7, 7, 0, 2, ui_alpha(UI_RED, 0.8f));
+        }
+        lx += 24;
+        lx += ui_text(lx, ly, T(leg[i]), 16, UI_FONT_REGULAR, UI_GREY, UI_ALIGN_LEFT);
+    }
 
     SDL_Gamepad *pad = dash_active_pad();
-    const float S = fminf(220, (W - 200) / 2 - 60), by = 196, gap = fminf(160, W - 2 * S - 200);
+    const float by = 196;
+    /* the boxes as large as the screen leaves above the four settings */
+    const float S = fminf(fminf(220, (W - 200) / 2 - 60), H - by - 96 - 4 * 44 - 70);
+    const float gap = fminf(160, W - 2 * S - 200);
     const float bx0 = W / 2 - S - gap / 2, bx1 = W / 2 + gap / 2;
-    stick_box(0, pad, bx0, by, S, dz, range, round);
-    stick_box(1, pad, bx1, by, S, dz, range, round);
+    stick_box(0, pad, bx0, by, S, dz, adz, range, round);
+    stick_box(1, pad, bx1, by, S, dz, adz, range, round);
     ui_text(W / 2, by + S + 52, T(pad ? S_STICK_ROTATE : S_STICK_NO_PAD), 18, UI_FONT_REGULAR,
             pad ? UI_GREY : UI_RED, UI_ALIGN_CENTER);
 
     List l;
-    list_begin(&l, 74, by + S + 96, W - 148, 3 * 44, 44);
+    list_begin(&l, 74, by + S + 96, W - 148, 4 * 44, 44);
     opt_int(&l, S_STICK_RANGE, "stick.range", 50, 150, 5, 100, "%");
     static const char *const sv[] = {"square", "round"};
     const char *sn[] = {T(S_SHAPE_SQUARE), T(S_SHAPE_ROUND)};
     opt_choice(&l, S_STICK_SHAPE, "stick.shape", sv, sn, 2, "square");
     opt_int(&l, S_DEADZONE, "deadzone", 0, 50, 5, 10, "%");
+    opt_int(&l, S_ANTI_DEADZONE, "stick.antidz", 0, 50, 5, 0, "%");
     list_end(&l);
     if (D.in.x) {
         memset(g_reach, 0, sizeof(g_reach));
@@ -1182,7 +1241,6 @@ void scr_sticks(void)
         dash_pop();
     }
     draw_hints(T(S_CHANGE), T(S_BACK), T(S_CLEAR), NULL);
-    (void)H;
 }
 
 /* ------------------------------------------------------------ the triggers */
@@ -1262,7 +1320,7 @@ static void trigger_bar(int t, SDL_Gamepad *pad, float cx, float by, float BH, f
 void scr_triggers(void)
 {
     const float W = ui_w();
-    draw_header(T(S_TRIGGERS), NULL);
+    draw_header(T(S_TRIGGERS), D.editing_game && D.cur ? D.cur->g.title : NULL);
     if (ui_time() - g_triggers_seen > 0.5) {
         memset(g_tpeak, 0, sizeof(g_tpeak));    /* a fresh look each time it opens */
     }
