@@ -1,5 +1,27 @@
 # xbased changelog
 
+## 1.0.42 (2026-11)
+
+### Fixes
+- The console's language and video settings are now kept in step with
+  the console's EEPROM (hdd/eeprom.bin), both ways. Before, the
+  emulator wrote its own settings over the EEPROM every time a game
+  started, so editing eeprom.bin (as you would in xemu) did nothing.
+  Now a change made in eeprom.bin, by hand or by a game saving its
+  settings, shows up in Settings, and a change made in Settings is
+  written to eeprom.bin. The file also no longer picks up what was only
+  meant for one game, like that game's own language. Thanks to joesan09
+  and ArhumMK for the reports (#43).
+- A game's own language (its Game settings) is now always kept. Games
+  whose disc has an English folder but none for the chosen language
+  still fall back to English when the language comes from the global
+  setting, because some of them break otherwise, but choosing the
+  language for the game itself now overrides that.
+- In Game settings the language is either the global setting or a
+  language of its own. The separate Auto there, which followed the
+  interface's language rather than the global setting, is gone. In
+  Settings, Auto now says which language it gives.
+
 ## 1.0.41 (2026-11)
 
 ### Fixes

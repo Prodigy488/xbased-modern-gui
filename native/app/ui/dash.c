@@ -4,6 +4,7 @@
  * are in dash_settings.c, dash_memory.c.
  */
 #include "native/app/ui/dash.h"
+#include "native/app/ui/console_cfg.h"
 #include "native/app/ui/dash_int.h"
 #include "native/app/ui/shortcut.h"
 #include "native/app/ui/sound.h"
@@ -19,7 +20,7 @@
 #endif
 
 #ifndef XBASED_VERSION
-#define XBASED_VERSION "1.0.41"
+#define XBASED_VERSION "1.0.42"
 #endif
 
 Dash D;
@@ -179,9 +180,16 @@ void dash_choose(const char *q, const char *const *choices, int n, void (*on_cho
     D.on_choice = on_choice;
 }
 
+/* the in-game menu's (dash_ingame): a game runs, its kernel the EEPROM's
+ * writer till it ends; the settings meet the EEPROM back in the dashboard */
+static bool g_game_running;
+
 void dash_save_cfg(void)
 {
     cfg_save(&D.global);
+    if (!g_game_running) {
+        cc_sync(&D.global); /* the console's language and video flags: the EEPROM's too */
+    }
     if (D.cur && D.game.path[0]) {
         if (D.game.n) {
             cfg_save(&D.game);
@@ -1062,6 +1070,7 @@ static void wait_child(void)
     SDL_SetHint(SDL_HINT_FORCE_RAISEWINDOW, "0");
     cfg_load(&D.global, D.global.path);     /* the game may have changed settings */
     upscale_migrate(&D.global);
+    cc_sync(&D.global);                     /* ... or its EEPROM (a title's own options) */
     g_auto_off = -1;    /* the scripted commands meanwhile were the game's */
 }
 
@@ -1622,6 +1631,7 @@ int dash_run(SDL_Window *win, const char *exe)
         cfg_save(&D.global);
     }
     i18n_set(cfg_get(&D.global, "ui.lang"));
+    cc_sync(&D.global);     /* the EEPROM changed by hand or by a title meanwhile */
     upd_cleanup();
     if (cfg_bool(&D.global, "update.check", true)) {
         upd_check_start(XBASED_VERSION);
@@ -1925,6 +1935,7 @@ int dash_ingame(SDL_Window *win, const char *key, const char *title, const char 
                 void (*live)(const struct Config *global, const struct Config *game))
 {
     memset(&D, 0, sizeof(D));
+    g_game_running = true;
     g_win = win;
     SDL_HideCursor();   /* it shows when the mouse moves (poll_input) */
     g_cursor_at = 0;

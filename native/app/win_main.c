@@ -28,6 +28,7 @@
  */
 #include "native/app/app.h"
 #include "native/app/ui/config.h"
+#include "native/app/ui/console_cfg.h"
 #include "native/app/ui/dash.h"
 #include "native/app/ui/i18n.h"
 #include "native/app/ui/input_map.h"
@@ -168,7 +169,7 @@ static bool want_fullscreen(void)
 
 /* The game's own options (games/<TITLE ID>.<version>.ini) after the global
  * ones and before the command line's (which come last and win); the
- * console's language from the interface's when none is set; the dashboard's
+ * console's language and video flags as console_cfg.c keeps them; the dashboard's
  * "uncap=1" as the flag the core takes, "fullscreen" (on unless "=0") once. */
 static void game_options(const char *disc)
 {
@@ -230,10 +231,30 @@ static void game_options(const char *disc)
         }
     }
     i18n_set(opt_value("ui.lang"));     /* the app's messages */
-    const char *lang = opt_value("lang");
-    if (!lang || !strcmp(lang, "auto")) {
-        char a[16];
-        snprintf(a, sizeof(a), "lang=%d", i18n_console_lang());
+    /* The console's language and video flags: what changed in the EEPROM
+     * taken into the global settings first (console_cfg.c), then the
+     * command line's, else the game's own, else the global ones (for "auto"
+     * or none, the interface's language). The game's own language, or the
+     * command line's, is kept even on a disc that seems to lack it. */
+    cc_sync(&global);
+    const char *cl_lang = NULL, *cl_video = NULL;
+    for (int i = 0; i < ncmd; i++) {
+        if (!strncmp(cmdline[i], "lang=", 5)) {
+            cl_lang = cmdline[i] + 5;
+        } else if (!strncmp(cmdline[i], "video=", 6)) {
+            cl_video = cmdline[i] + 6;
+        }
+    }
+    const int asked = cl_lang ? atoi(cl_lang) : cfg_get(&c, "lang") ? atoi(cfg_get(&c, "lang")) : 0;
+    const bool fixed = asked >= 1 && asked <= 9;
+    char a[32];
+    snprintf(a, sizeof(a), "lang=%d", fixed ? asked : cc_lang(&global));
+    add_arg(a);
+    if (fixed) {
+        add_arg("langfixed=1");
+    }
+    if (!cl_video && !cfg_get(&c, "video")) {
+        snprintf(a, sizeof(a), "video=0x%x", cc_video(&global));
         add_arg(a);
     }
 }
@@ -1069,7 +1090,7 @@ static const char *pick_disc(void)
 }
 
 #ifndef XBASED_VERSION
-#define XBASED_VERSION "1.0.41"
+#define XBASED_VERSION "1.0.42"
 #endif
 #ifdef _WIN32
 #define NC_PLATFORM_NAME "Windows"

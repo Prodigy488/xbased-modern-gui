@@ -11,6 +11,7 @@ set(NC_APP_SOURCES
   "${CMAKE_CURRENT_SOURCE_DIR}/app/ui/ui.c"
   "${CMAKE_CURRENT_SOURCE_DIR}/app/ui/i18n.c"
   "${CMAKE_CURRENT_SOURCE_DIR}/app/ui/config.c"
+  "${CMAKE_CURRENT_SOURCE_DIR}/app/ui/console_cfg.c"
   "${CMAKE_CURRENT_SOURCE_DIR}/app/ui/xbox_data.c"
   "${CMAKE_CURRENT_SOURCE_DIR}/app/ui/library.c"
   "${CMAKE_CURRENT_SOURCE_DIR}/app/ui/input_map.c"

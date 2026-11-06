@@ -3,6 +3,7 @@
  * game's, its mods and cheats, its save states, the controls and their
  * remapping, online play.
  */
+#include "native/app/ui/console_cfg.h"
 #include "native/app/ui/dash_int.h"
 #include "native/app/ui/input_map.h"
 #include "native/app/mod_fit.h"
@@ -66,12 +67,33 @@ static void rows_ram(List *l)
     opt_choice(l, S_RAM_SIZE, "ram", rv, rn, 2, "64");
 }
 
-static void rows_console(List *l)
+/* The console's language: "auto" (the interface's, named) or one; a game's
+ * without "auto", its first choice the global setting (opt_choice). */
+static void rows_language(List *l)
 {
     static const char *lv[] = {"auto", "1", "2", "3", "4", "5", "6", "7", "8", "9"};
-    const char *ln[] = {T(S_AUTO), "English", "日本語", "Deutsch", "Français", "Español", "Italiano", "한국어", "中文",
-                        "Português"};
-    opt_choice(l, S_CONSOLE_LANG, "lang", lv, ln, 10, "auto");
+    static const char *const names[] = {"English", "日本語", "Deutsch", "Français", "Español", "Italiano", "한국어",
+                                        "中文", "Português"};
+    static char auto_name[96];
+    snprintf(auto_name, sizeof(auto_name), "%s · %s", T(S_AUTO), names[i18n_console_lang() - 1]);
+    const char *ln[] = {auto_name, names[0], names[1], names[2], names[3], names[4], names[5], names[6], names[7],
+                        names[8]};
+    if (D.editing_game) {
+        const char *v = cfg_get(&D.game, "lang");
+        if (v && !strcmp(v, "auto")) {
+            cfg_unset(&D.game, "lang");         /* an earlier build's: the global setting */
+        }
+        static char global[4];      /* "global (X)": the language the global setting gives now */
+        snprintf(global, sizeof(global), "%d", cc_lang(&D.global));
+        opt_choice(l, S_CONSOLE_LANG, "lang", lv + 1, ln + 1, 9, global);
+    } else {
+        opt_choice(l, S_CONSOLE_LANG, "lang", lv, ln, 10, "auto");
+    }
+}
+
+static void rows_console(List *l)
+{
+    rows_language(l);
     opt_videoflag(l, S_WIDESCREEN, 0x10000);
 }
 
@@ -244,10 +266,7 @@ void scr_settings(void)
         break;
     }
     case 2: {
-        static const char *lv[] = {"auto", "1", "2", "3", "4", "5", "6", "7", "8", "9"};
-        const char *ln[] = {T(S_AUTO), "English", "日本語", "Deutsch", "Français", "Español", "Italiano", "한국어", "中文",
-                            "Português"};
-        opt_choice(&l, S_CONSOLE_LANG, "lang", lv, ln, 10, "auto");
+        rows_language(&l);
         opt_videoflag(&l, S_WIDESCREEN, 0x10000);
         opt_videoflag(&l, S_P480, 0x80000);
         opt_videoflag(&l, S_P720, 0x20000);
@@ -420,10 +439,7 @@ void scr_game_settings(void)
     List l;
     list_begin(&l, 74, 150, W - 148, H - 244, 58);
     rows_video(&l);
-    static const char *lv[] = {"auto", "1", "2", "3", "4", "5", "6", "7", "8", "9"};
-    const char *ln[] = {T(S_AUTO), "English", "日本語", "Deutsch", "Français", "Español", "Italiano", "한국어", "中文",
-                        "Português"};
-    opt_choice(&l, S_CONSOLE_LANG, "lang", lv, ln, 10, "auto");
+    rows_language(&l);
     opt_videoflag(&l, S_WIDESCREEN, 0x10000);
     rows_pal(&l);
     rows_ram(&l);

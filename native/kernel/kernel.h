@@ -419,6 +419,9 @@ void nc_kernel_set_video(int64_t flags, int av_pack);
  * 7 Korean, 8 Chinese (traditional), 9 Portuguese. Before the title starts;
  * any other value keeps the stored one. */
 void nc_kernel_set_language(int language);
+/* ... set for the game itself: kept on a disc whose folders seem to lack it
+ * (otherwise such a disc plays in English) */
+void nc_kernel_set_language_fixed(bool fixed);
 /* ex.c: the console's audio setting (XC_AUDIO_FLAGS): stereo, or Dolby
  * Digital on (the games mix six channels). Before the title starts. */
 void nc_kernel_set_audio(bool surround);

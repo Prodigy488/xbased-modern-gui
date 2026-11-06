@@ -1177,22 +1177,22 @@ static bool lang_fallback(const NcDisc *disc, const char *rel, char *out, size_t
 }
 
 /* Folder names for XC_LANGUAGE's values (1 English ... 9 Portuguese). */
-static const char *const k_lang_dirs[10][4] = {
+static const char *const k_lang_dirs[10][5] = {
     {NULL},
     {"english", "eng", "en", NULL},
-    {"japanese", "jpn", "jap", "ja"},
-    {"german", "ger", "deu", "de"},
-    {"french", "fre", "fra", "fr"},
-    {"spanish", "spa", "esp", "es"},
+    {"japanese", "jpn", "jap", "ja", "jp"},
+    {"german", "ger", "deu", "de", NULL},
+    {"french", "fre", "fra", "fr", NULL},
+    {"spanish", "spa", "esp", "es", NULL},
     {"italian", "ita", "it", NULL},
-    {"korean", "kor", "ko", NULL},
-    {"chinese", "chi", "zh", NULL},
+    {"korean", "kor", "ko", "kr", NULL},
+    {"chinese", "chi", "zh", "cn", NULL},
     {"portuguese", "por", "pt", NULL},
 };
 
 static bool lang_named(const uint8_t *e, int lang)
 {
-    for (int i = 0; i < 4 && k_lang_dirs[lang][i]; i++) {
+    for (int i = 0; i < 5 && k_lang_dirs[lang][i]; i++) {
         const size_t n = strlen(k_lang_dirs[lang][i]);
         if (e[13] == n && !strncasecmp((const char *)e + 14, k_lang_dirs[lang][i], n)) {
             return true;
