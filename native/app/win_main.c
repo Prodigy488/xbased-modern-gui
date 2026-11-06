@@ -72,7 +72,7 @@ void nc_dev_ohci_set_pads(unsigned mask);
 /* hw/xbox/hle/pb/pbmode.h */
 bool hle_pb_active(void);
 
-#define MAX_ARGS 64
+#define MAX_ARGS 512
 
 static NcCore g_core;
 static int g_disc_fd = -1;
@@ -81,8 +81,16 @@ static struct ANativeWindow g_nw;
 static char g_exe_dir[MAX_PATH];
 static char g_data_dir[MAX_PATH]; /* settings, saves, states, the log (cfg_data_dir) */
 static char g_disc[1024];
-static char *g_args[MAX_ARGS];     /* the options, for running again */
+static char *g_args[MAX_ARGS];     /* the options: xbased.ini's, the game's, the command line's */
 static int g_nargs;
+/* The command line's own options, which a run started again gets: the
+ * settings' and the game's are read again by the new run. Passing all of
+ * them on, each run added the settings again: a few relaunches or loaded
+ * states filled the list, and what came last (the state to load, the
+ * relaunch flag) was dropped, so a state loaded restarted the game, and a
+ * title that relaunches (Chicago Enforcer) did so over and over. */
+static char *g_cmdline[MAX_ARGS];
+static int g_ncmdline;
 static int g_ncfg_args;            /* how many of them xbased.ini gave */
 static ImMap g_map;     /* the controls: the game's file over xbased.ini (input_map.h) */
 static char g_key[24];  /* the game's "<TITLE ID>.<version>" */
@@ -102,8 +110,12 @@ static void exe_dir(void)
 
 static void add_arg(const char *a)
 {
+    static bool told;
     if (g_nargs < MAX_ARGS && a && a[0]) {
         g_args[g_nargs++] = strdup(a);
+    } else if (a && a[0] && !told) {
+        told = true;
+        nc_log("hakuX-app", "more than %d options: %s and those after it left out", MAX_ARGS, a);
     }
 }
 
@@ -340,15 +352,15 @@ static void run_again(const char *extra, bool hold)
     int n = snprintf(cmd, sizeof(cmd), "\"%s\" \"%s\"", exe, g_disc[0] ? g_disc : "none");
     const char *eq = extra ? strchr(extra, '=') : NULL;
     const size_t name_len = eq ? (size_t)(eq - extra) : extra ? strlen(extra) : 0;
-    for (int i = 0; i < g_nargs && n < (int)sizeof(cmd) - 8; i++) {
-        if (extra && !strncmp(g_args[i], extra, name_len) &&
-            (g_args[i][name_len] == '=' || g_args[i][name_len] == 0)) {
+    for (int i = 0; i < g_ncmdline && n < (int)sizeof(cmd) - 8; i++) {
+        const char *a = g_cmdline[i];
+        if (extra && !strncmp(a, extra, name_len) && (a[name_len] == '=' || a[name_len] == 0)) {
             continue;
         }
-        if (!strcmp(g_args[i], "relaunch") || !strncmp(g_args[i], "loadstate=", 10)) {
+        if (!a[0] || !strcmp(a, "relaunch") || !strncmp(a, "loadstate=", 10)) {
             continue; /* one run's */
         }
-        n += snprintf(cmd + n, sizeof(cmd) - (size_t)n, " \"%s\"", g_args[i]);
+        n += snprintf(cmd + n, sizeof(cmd) - (size_t)n, " \"%s\"", a);
     }
     if (extra) {
         n += snprintf(cmd + n, sizeof(cmd) - (size_t)n, " \"%s\"", extra);
@@ -396,14 +408,15 @@ static void run_again(const char *extra, bool hold)
     int k = 0;
     argv[k++] = exe;
     argv[k++] = g_disc[0] ? g_disc : (char *)"none";
-    for (int i = 0; i < g_nargs; i++) {
-        if (extra && !strncmp(g_args[i], extra, name_len) && (g_args[i][name_len] == '=' || g_args[i][name_len] == 0)) {
+    for (int i = 0; i < g_ncmdline; i++) {
+        char *a = g_cmdline[i];
+        if (extra && !strncmp(a, extra, name_len) && (a[name_len] == '=' || a[name_len] == 0)) {
             continue;
         }
-        if (!strcmp(g_args[i], "relaunch") || !strncmp(g_args[i], "loadstate=", 10) || !g_args[i][0]) {
+        if (!a[0] || !strcmp(a, "relaunch") || !strncmp(a, "loadstate=", 10)) {
             continue;
         }
-        argv[k++] = g_args[i];
+        argv[k++] = a;
     }
     if (extra) {
         argv[k++] = (char *)extra;
@@ -1090,7 +1103,7 @@ static const char *pick_disc(void)
 }
 
 #ifndef XBASED_VERSION
-#define XBASED_VERSION "1.0.47"
+#define XBASED_VERSION "1.0.48"
 #endif
 #ifdef _WIN32
 #define NC_PLATFORM_NAME "Windows"
@@ -1110,6 +1123,9 @@ int main(int argc, char *argv[])
             disc = argv[i];
         } else {
             add_arg(argv[i]);
+            if (g_ncmdline < MAX_ARGS && argv[i][0]) {
+                g_cmdline[g_ncmdline++] = strdup(argv[i]);
+            }
         }
     }
     bool again = opt_flag("relaunch");

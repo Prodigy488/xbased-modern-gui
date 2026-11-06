@@ -1,5 +1,20 @@
 # xbased changelog
 
+## 1.0.48 (2026-11)
+
+### Fixes
+- Loading a savestate no longer restarts the game after a few loads.
+  Every time xbased restarts itself (to load a state, or when a game
+  switches to another of its executables) it handed the new run all of
+  its settings again on top of the ones the new run reads anyway, so the
+  list kept growing until it was full and the last entries were lost,
+  among them the state to load. Some games that switch executables, like
+  Chicago Enforcer, could even end up restarting over and over. Now only
+  the options given on the command line are passed on, and loading the
+  same state five times in a row goes back to it every time. This also
+  covers loading from the in-game menu (F1). Thanks to antonio3687 for
+  the report (#81).
+
 ## 1.0.47 (2026-11)
 
 ### New
