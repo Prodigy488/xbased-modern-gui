@@ -1,5 +1,31 @@
 # xbased changelog
 
+## 1.0.37 (2026-11)
+
+### Patches and cheats only for the build they were made for
+A game's releases can share a title ID and still have executables built
+apart (another region, a later printing), and a patch or cheat writes to
+fixed places of the one it was made for. xbased now tells them apart by
+the executable itself: its certificate's regions and its build time.
+
+- The shipped IPS patches (60 FPS, widescreen, 480p) were made and tested
+  on the North American releases. They're offered only on an executable
+  sold there, and only where each record fits its code. Grand Theft Auto:
+  Vice City's European release crashed with its 60 FPS patch, which cut
+  an instruction in half; it's no longer offered there. Patches you add
+  yourself are offered as before.
+- Cheat files: nearly all compare the build they were made for before
+  they patch anything. xbased reads those builds from each file (plain or
+  XOR-obscured) and lists a file only on its own build. Burnout 3's USA
+  disc lists its four trainers and none of the three for the later
+  printing. 36 files that patch without checking the build are out of the
+  collection, and an update deletes them while they're unchanged.
+
+Checked in game with the frame rate at Original: the 60 FPS patches of
+Driv3r, Rainbow Six 3, Prince of Persia: The Sands of Time and The Thing
+go from 30 to 60, and the widescreen patches of Conker and The Sands of
+Time widen the view.
+
 ## 1.0.36 (2026-11)
 
 ### Fixes

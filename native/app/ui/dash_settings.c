@@ -5,13 +5,20 @@
  */
 #include "native/app/ui/dash_int.h"
 #include "native/app/ui/input_map.h"
+#include "native/app/mod_fit.h"
+#include "native/app/win_mods.h"
 #include "native/core/xcheat.h"
 
 #include <ctype.h>
+#include <fcntl.h>
 #include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <unistd.h>
+#ifndef O_BINARY
+#define O_BINARY 0
+#endif
 
 /* ------------------------------------------------------------ shared rows */
 
@@ -450,7 +457,7 @@ typedef struct {
 static XOpt g_xopts[256];
 static int g_nxopts;
 
-static void xcheats_scan(const char *root)
+static void xcheats_scan(const char *root, const FitXbe *xbe)
 {
     char dir[1400];
     snprintf(dir, sizeof(dir), "%scheats/%08X", root, D.cur->g.title_id);
@@ -468,7 +475,10 @@ static void xcheats_scan(const char *root)
         if (dup || !nc_xcheat_load(full, &x)) {
             continue;
         }
-        if (nc_xcheat_for_title(&x, D.cur->g.title_id)) {
+        /* one made for another build (most name theirs) would patch
+         * nothing here: left out */
+        const bool other_build = xbe && !fit_cheat_for_build(x.data, x.size, xbe->time);
+        if (nc_xcheat_for_title(&x, D.cur->g.title_id) && !other_build) {
             for (int o = 0; o < x.nopts && g_nxopts < 256; o++) {
                 XOpt *e = &g_xopts[g_nxopts++];
                 snprintf(e->file, sizeof(e->file), "%s", rel);
@@ -486,9 +496,16 @@ static void xcheats_scan(const char *root)
 static void xcheats_load(void)
 {
     g_nxopts = 0;
-    xcheats_scan(cfg_data_dir());           /* the user's first */
+    /* the disc's executable: its build, for the cheats that check theirs */
+    FitXbe xbe;
+    const int fd = open(D.cur->g.path, O_RDONLY | O_BINARY);
+    const bool have = fd >= 0 && fit_read_xbe(fd, &xbe);
+    if (fd >= 0) {
+        close(fd);
+    }
+    xcheats_scan(cfg_data_dir(), have ? &xbe : NULL);     /* the user's first */
     if (strcmp(cfg_data_dir(), cfg_exe_dir())) {
-        xcheats_scan(cfg_exe_dir());
+        xcheats_scan(cfg_exe_dir(), have ? &xbe : NULL);
     }
 }
 
@@ -548,6 +565,8 @@ static void mods_load(void)
     snprintf(dirs[3], sizeof(dirs[3]), "%smods/%.8s", cfg_data_dir(), D.cur->g.key);
     const char *dir = dirs[0];
     const int ndirs = strcmp(cfg_data_dir(), cfg_exe_dir()) ? 4 : 2;
+    /* the disc, for whether the database's patches fit its executable */
+    const int disc_fd = open(D.cur->g.path, O_RDONLY | O_BINARY);
     for (int di = 0; di < ndirs; di++) {
     int n = 0;
     char **names = SDL_GlobDirectory(dirs[di], NULL, 0, &n);
@@ -563,6 +582,10 @@ static void mods_load(void)
         }
         if (dup) {
             continue;
+        }
+        char why[160] = "";
+        if (ips && !nc_win_mods_ips_fits(cfg_exe_dir(), disc_fd, dirs[di], id, why, sizeof(why))) {
+            continue;       /* made for another release's executable */
         }
         if (ips) {
             /* an IPS patch: its name the file's, underscores as spaces */
@@ -603,6 +626,9 @@ static void mods_load(void)
         SDL_free(t);
     }
     SDL_free(names);
+    }
+    if (disc_fd >= 0) {
+        close(disc_fd);
     }
     /* cheats.txt: its [names] */
     char p[1400];

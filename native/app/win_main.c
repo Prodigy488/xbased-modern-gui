@@ -744,7 +744,7 @@ static const char *pick_disc(void)
 }
 
 #ifndef XBASED_VERSION
-#define XBASED_VERSION "1.0.36"
+#define XBASED_VERSION "1.0.37"
 #endif
 #ifdef _WIN32
 #define NC_PLATFORM_NAME "Windows"
@@ -755,7 +755,6 @@ static const char *pick_disc(void)
 int main(int argc, char *argv[])
 {
     exe_dir();
-    nc_win_mods_cleanup(g_exe_dir);
     read_ini();
     g_ncfg_args = g_nargs;
     const char *disc = NULL;
@@ -776,6 +775,7 @@ int main(int argc, char *argv[])
         nc_log("hakuX-app", "---- started again (%s)", opt_flag("relaunch") ? "the title's relaunch" : "a state loaded");
     }
     nc_log("hakuX-app", "xbased " XBASED_VERSION " (an original Xbox emulator by crazyriddler, based on hakuX), " NC_PLATFORM_NAME);
+    nc_win_mods_cleanup(g_exe_dir);     /* what an update took away (win_mods.h) */
 
     SDL_SetHint(SDL_HINT_JOYSTICK_ALLOW_BACKGROUND_EVENTS, "1");
 #ifndef _WIN32
