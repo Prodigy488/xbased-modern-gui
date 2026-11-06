@@ -347,6 +347,15 @@ uint32_t nc_ob_handle(NcKernel *k, uint32_t object, enum NcObType type);
 uint32_t nc_ob_lookup(NcKernel *k, uint32_t handle, enum NcObType *type);
 bool nc_ob_close(NcKernel *k, uint32_t handle);
 void nc_ob_register(NcKernel *k);
+/* Named objects (ob.c): an OBJECT_ATTRIBUTES' name (its length; "" none),
+ * a new object's name kept, and a create of a name that exists: true with
+ * the status (OBJ_OPENIF: a handle to it, STATUS_OBJECT_NAME_EXISTS). */
+size_t nc_ob_attr_name(NcKernel *k, uint32_t attrs, char *out, size_t n);
+void nc_ob_name(NcKernel *k, uint32_t object, enum NcObType type, const char *name);
+/* ... and dropped with the object's last handle */
+void nc_ob_unname(NcKernel *k, uint32_t object);
+bool nc_ob_create_named(NcKernel *k, uint32_t attrs, const char *name, enum NcObType type, uint32_t handle_out,
+                        uint32_t *status);
 
 void nc_ps_register(NcKernel *k);
 NcThread *nc_ps_thread_of(NcKernel *k, uint32_t ethread);

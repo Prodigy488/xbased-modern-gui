@@ -1,5 +1,16 @@
 # xbased changelog
 
+## 1.0.45 (2026-11)
+
+### Fixes
+- Chicago Enforcer no longer freezes when starting a new game. Its
+  loading screen works with events it opens by name, and the emulator
+  had no way to open an object by name, so it stopped right there. Named
+  events, semaphores and mutants are now supported, and a name goes away
+  with the last handle to it, as on the console, since the next loading
+  screen waits for exactly that. The game now gets through both loads
+  of the first chapter and plays. Thanks to P1Login for the report (#56).
+
 ## 1.0.44 (2026-11)
 
 ### Fixes
