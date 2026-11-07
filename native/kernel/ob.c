@@ -80,9 +80,19 @@ uint32_t nc_ob_create(NcKernel *k, enum NcObType type, uint32_t body_size)
     return h + OB_HEADER;
 }
 
+/* Handles are taken round the table from the one after the last given, so
+ * a handle just closed isn't the next one opened. Test Drive closes the
+ * file handle its archive slots keep (closed already, after their headers
+ * were read) a second time as it frees them; taking the lowest free handle,
+ * that number was its loader thread's by then, the thread's handle went,
+ * the next thread got the number, and the game resumed that one forever
+ * waiting for the loader (a hang at its race's loading screen). */
 uint32_t nc_ob_handle(NcKernel *k, uint32_t object, enum NcObType type)
 {
-    for (unsigned i = 1; i < NC_MAX_HANDLES; i++) {
+    static unsigned s_next = 1;
+    for (unsigned n = 1; n < NC_MAX_HANDLES; n++) {
+        const unsigned i = s_next >= NC_MAX_HANDLES ? 1 : s_next;
+        s_next = i + 1;
         if (!k->handle_table[i].object) {
             k->handle_table[i] = (NcHandle){object, type};
             uint32_t hdr = object - OB_HEADER;

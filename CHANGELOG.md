@@ -1,5 +1,27 @@
 # xbased changelog
 
+## 1.0.53 (2026-11)
+
+### Fixes
+- Test Drive no longer hangs on its loading screen before a race. The
+  race executable keeps a slot for each of its data archives, and after
+  reading an archive's header it closes the file but keeps the handle in
+  the slot, then closes that same handle again when it frees the slot.
+  xbased always gave out the lowest free handle number, so by then the
+  number belonged to the game's loader thread, and the game lost its
+  loader and waited for it forever while it filled up memory. Handles
+  are now given out in turn around the table, so a number that was just
+  closed isn't handed out again straight away.
+- Test Drive's loading screen shows its Pong inside the dashboard screen
+  again instead of on black. The game draws it over the menu's last frame
+  without clearing it, relying on the console keeping its memory when it
+  reboots into the race executable. xbased started each executable with
+  clean memory; what the last one left in memory is now carried over, and
+  a block the next one allocates there gets it back, as on the console.
+- The frame a game keeps on screen for its next executable is now also
+  saved when the game has shut its GPU channel down before the reboot.
+  Thanks to BloodRaynare for the report (#88).
+
 ## 1.0.52 (2026-11)
 
 ### Fixes

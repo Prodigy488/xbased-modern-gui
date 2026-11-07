@@ -594,9 +594,9 @@ static uint64_t PsCreateSystemThreadEx(NcKernel *k, NcFrame *f, const uint32_t *
     }
     t->state = NC_T_READY;
     t->suspend = (a[7] & 0xff) ? 1 : 0;
-    nc_log("hakuX-native", "ps: thread %u created: start %08x (%s), stack %08x-%08x, tls %u%s", t->id,
+    nc_log("hakuX-native", "ps: thread %u created: start %08x (%s), stack %08x-%08x, tls %u%s, handle %x", t->id,
            a[5], a[9] ? "via system routine" : "direct", t->stack_limit, t->stack_base, a[3],
-           t->suspend ? ", suspended" : "");
+           t->suspend ? ", suspended" : "", h);
     return NC_STATUS_SUCCESS;
 }
 
