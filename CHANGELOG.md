@@ -1,5 +1,16 @@
 # xbased changelog
 
+## 1.0.59 (2026-11)
+
+### Fixes
+- AMD FSR 1 filled the picture with noise and a diagonal seam on AMD
+  graphics cards at 1x and 2x internal resolution (the sizes FSR scales
+  up from), with FXAA on. Two of the passes that draw the picture into
+  the window shared one set of inputs, and AMD's driver read the later
+  one for both, so FXAA sampled the image it was drawing into. Each pass
+  has its own now (the Vulkan validation layer reported the old way as an
+  error, and reports nothing now).
+
 ## 1.0.58 (2026-11)
 
 ### Fixes
