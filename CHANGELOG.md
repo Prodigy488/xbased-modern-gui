@@ -1,5 +1,15 @@
 # xbased changelog
 
+## 1.0.67 (2026-11)
+
+### Fixes
+- Chase: Hollywood Stunt Driver froze on the last frame of its intro: as
+  its menu comes up it resets the processor's time stamp counter (WRMSR),
+  an instruction xbased didn't take, and the emulation stopped there. The
+  model-specific registers are written and read now, the time stamp
+  counter counting from 0 again when zeroed as on the console. The game
+  reaches its menu and plays.
+
 ## 1.0.66 (2026-11)
 
 ### Fixes
