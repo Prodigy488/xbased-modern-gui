@@ -1,5 +1,14 @@
 # xbased changelog
 
+## 1.0.64 (2026-11)
+
+### Fixes
+- CHD images made with `chdman createcd` (what most guides use, even for
+  DVD games) said the game's file wasn't an Xbox disc image: only
+  `createdvd`'s were read, and a CD's CHD keeps each 2048-byte sector in a
+  bigger CD frame. Both are read now, from an ISO or a raw .cue/.bin, the
+  same bytes as the image they were made from.
+
 ## 1.0.63 (2026-11)
 
 ### Fixes
