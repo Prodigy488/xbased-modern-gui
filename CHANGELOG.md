@@ -1,5 +1,15 @@
 # xbased changelog
 
+## 1.0.66 (2026-11)
+
+### Fixes
+- Linux: crackling sound, with the emulator never short of it. xbased asked
+  the sound server (PulseAudio, or PipeWire's) for a 512-sample buffer, and
+  it ran the stream every 128 samples (2.7 ms): the audio thread a little
+  late and the server ran dry for a moment. The buffer is 2048 samples on
+  Linux now, which took Forza Motorsport's crackles away on the machine
+  that had them. Still crackling: NC_APU_SAMPLES=4096 (more delay).
+
 ## 1.0.65 (2026-11)
 
 ### Fixes
