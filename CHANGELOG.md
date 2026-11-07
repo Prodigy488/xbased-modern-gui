@@ -1,5 +1,20 @@
 # xbased changelog
 
+## 1.0.63 (2026-11)
+
+### Fixes
+- Forza Motorsport stalled while loading from a slow drive (a USB hard
+  disk): it sets the size of each of its cache files before filling them,
+  and on Windows that wrote every one of the new bytes as zeros, the whole
+  console waiting meanwhile (up to 23 seconds at a time, 70 in all). A
+  file now takes its new size at once on any drive, its new part reading
+  back as zeros as before.
+
+### Other
+- The log says which audio driver plays the sound and the period the
+  device really runs at (PipeWire can run every app at a shorter period
+  than xbased asks for).
+
 ## 1.0.62 (2026-11)
 
 ### Fixes
