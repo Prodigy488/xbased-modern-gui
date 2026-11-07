@@ -1,5 +1,15 @@
 # xbased changelog
 
+## 1.0.69 (2026-11)
+
+### Fixes
+- Games that share a title ID and version with another one (prototypes,
+  homebrew, modded discs: He-Man with an Aliens vs Predator homebrew) were
+  one game to the library: hiding one hid both, and only one of them was
+  listed. Two discs are the same game now only if their names match too;
+  each one is hidden, renamed or made a favorite on its own. What was set
+  before still applies until it's changed.
+
 ## 1.0.68 (2026-11)
 
 ### Fixes
