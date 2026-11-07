@@ -1,5 +1,16 @@
 # xbased changelog
 
+## 1.0.58 (2026-11)
+
+### Fixes
+- Games never saw the component (HDTV) cable xbased reports: the value
+  Xbox games read for the cable plugged in at boot was left empty, which
+  means SCART. So the 480p, 720p and 1080i settings were dropped before
+  games saw them, and a game that only goes widescreen in those modes
+  stayed 4:3 and got stretched. X-Men Legends now runs at 720p in
+  widescreen (or 720x480 widescreen with only 480p on), as on an Xbox,
+  and other games now use the HD modes turned on in Settings.
+
 ## 1.0.57 (2026-11)
 
 ### Fixes
