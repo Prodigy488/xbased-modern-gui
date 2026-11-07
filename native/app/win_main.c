@@ -1103,7 +1103,7 @@ static const char *pick_disc(void)
 }
 
 #ifndef XBASED_VERSION
-#define XBASED_VERSION "1.0.69"
+#define XBASED_VERSION "1.0.70"
 #endif
 #ifdef _WIN32
 #define NC_PLATFORM_NAME "Windows"
@@ -1465,6 +1465,14 @@ int main(int argc, char *argv[])
         update_pads(focused);
         state_request_poll();
 
+        /* the GPU can't draw the game (no Vulkan device, a driver lacking
+         * what it needs): the game ran on with its sound over a black
+         * window, the reason only in the log */
+        if (!told && nc_hle_fatal_kind() == NC_FATAL_DRIVER) {
+            told = true;
+            fatal_box("xbased", nc_hle_fatal());
+            break;
+        }
         const int state = SDL_GetAtomicInt(&g_core_state);
         if (state < 0) {
             if (g_core.kernel.relaunch) {

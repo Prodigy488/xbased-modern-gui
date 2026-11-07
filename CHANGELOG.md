@@ -1,5 +1,12 @@
 # xbased changelog
 
+## 1.0.70 (2026-11)
+
+### Fixes
+- A PC whose graphics card has no Vulkan driver (or one too old) ran every
+  game with its sound over a black screen, the reason only in the log. It's
+  said at once now, in a message that tells what to update.
+
 ## 1.0.69 (2026-11)
 
 ### Fixes
