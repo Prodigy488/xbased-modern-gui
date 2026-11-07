@@ -1185,7 +1185,7 @@ static uint64_t KeDelayExecutionThread(NcKernel *k, NcFrame *f, const uint32_t *
 /* NtYieldExecution() */
 static uint64_t NtYieldExecution(NcKernel *k, NcFrame *f, const uint32_t *a)
 {
-    nc_ps_yield(k);         /* behind the ready threads of its priority */
+    nc_ps_yield(k);         /* to any ready thread, a lower priority one too */
     return NC_STATUS_SUCCESS;
 }
 

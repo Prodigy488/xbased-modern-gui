@@ -1425,6 +1425,9 @@ static uint32_t do_open(NcKernel *k, uint32_t access, uint32_t share, uint32_t a
             return STATUS_DELETE_PENDING;
         }
         if (exists && disposition == FILE_CREATE) {
+            if (g_trace_io) {
+                nc_log("hakuX-native-io", "open %s: exists (a new one asked)%s", path, is_dir ? ", a folder" : "");
+            }
             return STATUS_OBJECT_NAME_COLLISION;
         }
         if (exists && !is_dir && share_conflict(host, share_granted(access), (uint8_t)(share & 7))) {

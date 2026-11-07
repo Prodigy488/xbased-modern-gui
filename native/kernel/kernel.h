@@ -279,6 +279,9 @@ struct NcKernel {
     uint8_t isr_saved_irql;
     NcThread *isr_interrupted; /* the thread an ISR interrupted */
     NcThread *resume_first;    /* resumes before anything else (was above DISPATCH_LEVEL) */
+    /* NtYieldExecution to a lower priority thread (nc_ps_yield): yield_from
+     * stays out of the scheduler's pick while yield_to runs its quantum. */
+    NcThread *yield_from, *yield_to;
     bool force_switch;         /* switch threads even though the IRQL is raised (ISR entry) */
     uint64_t interrupts;
 

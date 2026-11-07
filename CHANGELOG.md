@@ -1,5 +1,19 @@
 # xbased changelog
 
+## 1.0.51 (2026-11)
+
+### Fixes
+- FIFA World Cup: Germany 2006 no longer freezes at start on every boot
+  after the first. On its first boot the game copies its data to a cache
+  drive, and from then on a helper thread checks that cache while the
+  game starts. The game pauses that helper by waiting for it to reach a
+  safe point, giving up the CPU in the meantime, but the helper runs at a
+  lower priority and the emulator only ever handed the CPU to threads of
+  the same priority or higher, so it never got to run and the game waited
+  forever. Giving up the CPU now lets a lower priority thread run, as on
+  the console. Checked over five boots in a row with the cache in place,
+  each reaching the intro. Thanks to RiasatSalminSami for the report (#89).
+
 ## 1.0.50 (2026-11)
 
 ### Fixes
