@@ -29,6 +29,7 @@
 #include <unistd.h>
 #if defined(__ANDROID__) || defined(_WIN32) || defined(NC_DESKTOP)
 #include "hw/xbox/hle/prop.h"
+
 #endif
 
 #define STATUS_NO_MORE_FILES          0x80000006u
@@ -539,27 +540,40 @@ static NcFile *file_of(NcKernel *k, uint32_t handle)
  * wrote its caches and replays. Reopening the path meanwhile reads the same
  * data (the page cache). A full queue closes in place. */
 typedef struct CloseJob {
-    int fd;
+    int fd;              /* -1: only old_path to remove */
+    bool sync;           /* to the disk first (the saves' partitions; a cache drive's files aren't) */
+    bool tree;           /* old_path a folder, removed whole (a cache drive formatted) */
     char path[64];       /* for the log */
     char old_path[320];
 } CloseJob;
 
+/* The queue grows as it must: a full one closed in place, on the guest's
+ * CPU, and a sync on a slow drive (a USB hard disk, an SD card) held the
+ * whole console for seconds while a game filled its cache. */
 static struct {
     pthread_mutex_t mu;
     pthread_cond_t cv;
-    CloseJob q[64];
-    unsigned head, n;
+    CloseJob *q;
+    unsigned cap, head, n;
     bool started;
 } g_closer = {PTHREAD_MUTEX_INITIALIZER, PTHREAD_COND_INITIALIZER};
 
+static void remove_tree(const char *path, bool self);
+
 static void close_now(const CloseJob *j)
 {
-    if (fsync(j->fd) != 0) {
-        nc_log("hakuX-native-io", "sync %s: %s", j->path, strerror(errno));
+    if (j->fd >= 0) {
+        if (j->sync && fsync(j->fd) != 0) {
+            nc_log("hakuX-native-io", "sync %s: %s", j->path, strerror(errno));
+        }
+        close(j->fd);
     }
-    close(j->fd);
     if (j->old_path[0]) {
-        unlink(j->old_path);
+        if (j->tree) {
+            remove_tree(j->old_path, true);
+        } else {
+            unlink(j->old_path);
+        }
     }
 }
 
@@ -571,7 +585,7 @@ static void *closer_thread(void *arg)
             pthread_cond_wait(&g_closer.cv, &g_closer.mu);
         }
         const CloseJob j = g_closer.q[g_closer.head];
-        g_closer.head = (g_closer.head + 1) % 64u;
+        g_closer.head = (g_closer.head + 1) % g_closer.cap;
         g_closer.n--;
         pthread_mutex_unlock(&g_closer.mu);
         close_now(&j);
@@ -580,11 +594,11 @@ static void *closer_thread(void *arg)
     return NULL;
 }
 
-static void close_later(const NcFile *nf)
+static int file_partition(const NcFile *nf);
+
+static void closer_queue(const CloseJob *job)
 {
-    CloseJob j = {.fd = nf->fd};
-    snprintf(j.path, sizeof(j.path), "%s", nf->path);
-    snprintf(j.old_path, sizeof(j.old_path), "%s", nf->old_path);
+    CloseJob j = *job;
     pthread_mutex_lock(&g_closer.mu);
     if (!g_closer.started) {
         pthread_t t;
@@ -593,15 +607,41 @@ static void close_later(const NcFile *nf)
             pthread_detach(t);
         }
     }
-    const bool queued = g_closer.started && g_closer.n < 64u;
+    if (g_closer.started && g_closer.n == g_closer.cap) {
+        const unsigned cap = g_closer.cap ? g_closer.cap * 2 : 64;
+        CloseJob *q = malloc(sizeof(*q) * cap);
+        if (q) {
+            for (unsigned i = 0; i < g_closer.n; i++) {
+                q[i] = g_closer.q[(g_closer.head + i) % g_closer.cap];
+            }
+            free(g_closer.q);
+            g_closer.q = q;
+            g_closer.cap = cap;
+            g_closer.head = 0;
+        }
+    }
+    const bool queued = g_closer.started && g_closer.n < g_closer.cap;
     if (queued) {
-        g_closer.q[(g_closer.head + g_closer.n++) % 64u] = j;
+        g_closer.q[(g_closer.head + g_closer.n++) % g_closer.cap] = j;
         pthread_cond_signal(&g_closer.cv);
     }
     pthread_mutex_unlock(&g_closer.mu);
     if (!queued) {
         close_now(&j);
     }
+}
+
+/* A file the title wrote, closed: synced to the disk on the closer thread
+ * first if it's on the saves' partitions. A cache drive's (X Y Z, the
+ * partitions 3 to 5) isn't: the console wipes them as it likes, and a game
+ * filling one (Project Gotham Racing 2's cars) synced file after file. */
+static void close_later(const NcFile *nf)
+{
+    const int part = file_partition(nf);
+    CloseJob j = {.fd = nf->fd, .sync = part < 3 || part > 5};
+    snprintf(j.path, sizeof(j.path), "%s", nf->path);
+    snprintf(j.old_path, sizeof(j.old_path), "%s", nf->old_path);
+    closer_queue(&j);
 }
 
 /* NtFlushBuffersFile: the same sync on the closer thread, of a duplicate of
@@ -617,7 +657,9 @@ static void flush_later(const NcFile *nf)
         return;
     }
     d.old_path[0] = 0;          /* the overwritten contents go at the close */
-    close_later(&d);
+    CloseJob j = {.fd = d.fd, .sync = true};
+    snprintf(j.path, sizeof(j.path), "%s", nf->path);
+    closer_queue(&j);
 }
 
 void nc_io_close(NcKernel *k, uint32_t object)
@@ -800,12 +842,17 @@ typedef struct DiscJob {
     NcThread *thread;
     uint32_t thread_id;      /* its id then: the slot may hold another thread by the end */
     bool sync;               /* a synchronous handle's: the thread waits for it (nc_ke_block) */
+    bool write;              /* a hard disk file's write from the buffer (write_data), not a read */
     bool ok;
     int err;
     char path[64]; /* for the log */
 } DiscJob;
 
-static struct {
+/* A drive's worker: the DVD drive's (disc reads), and the hard disk's
+ * (its files' reads and writes), each on its own thread as the console's
+ * two drives work side by side: a slow hard disk's writes (a USB drive, an
+ * SD card) don't hold the disc's reads up, nor its drive time the writes. */
+typedef struct Reader {
     pthread_mutex_t mu;
     pthread_cond_t cv;
     DiscJob q[DISC_JOBS];    /* for the reader */
@@ -814,8 +861,11 @@ static struct {
     unsigned ndone;
     unsigned busy;           /* queued, reading or done: at most DISC_JOBS */
     bool started;
-    bool hurry;              /* a savestate's drain: no drive time left to wait (atomic) */
-} g_reader = {PTHREAD_MUTEX_INITIALIZER, PTHREAD_COND_INITIALIZER};
+} Reader;
+
+static Reader g_readers[2] = {{PTHREAD_MUTEX_INITIALIZER, PTHREAD_COND_INITIALIZER},
+                              {PTHREAD_MUTEX_INITIALIZER, PTHREAD_COND_INITIALIZER}};
+static bool g_io_hurry;      /* a savestate's drain: no drive time left to wait (atomic) */
 
 static uint64_t mono_ns(void)
 {
@@ -829,7 +879,7 @@ static uint64_t mono_ns(void)
  * on. The next request waits for it too, as the drive's. */
 static void drive_wait(uint64_t due)
 {
-    for (uint64_t now; !__atomic_load_n(&g_reader.hurry, __ATOMIC_ACQUIRE) && (now = mono_ns()) < due;) {
+    for (uint64_t now; !__atomic_load_n(&g_io_hurry, __ATOMIC_ACQUIRE) && (now = mono_ns()) < due;) {
         const uint64_t left = due - now;
         const struct timespec ts = {0, (long)(left < 1000000 ? left : 1000000)};
         nanosleep(&ts, NULL);
@@ -838,15 +888,16 @@ static void drive_wait(uint64_t due)
 
 static void *reader_thread(void *arg)
 {
-    pthread_mutex_lock(&g_reader.mu);
+    Reader *const r = arg;
+    pthread_mutex_lock(&r->mu);
     for (;;) {
-        while (!g_reader.n) {
-            pthread_cond_wait(&g_reader.cv, &g_reader.mu);
+        while (!r->n) {
+            pthread_cond_wait(&r->cv, &r->mu);
         }
-        DiscJob j = g_reader.q[g_reader.head];
-        g_reader.head = (g_reader.head + 1) % DISC_JOBS;
-        g_reader.n--;
-        pthread_mutex_unlock(&g_reader.mu);
+        DiscJob j = r->q[r->head];
+        r->head = (r->head + 1) % DISC_JOBS;
+        r->n--;
+        pthread_mutex_unlock(&r->mu);
         const uint64_t due = mono_ns() + (uint64_t)j.dev_us * 1000;
         if (j.gpu && nc_vm_dma.wait) {
             nc_vm_dma.wait(j.gpu);
@@ -854,21 +905,34 @@ static void *reader_thread(void *arg)
         errno = 0;
         j.ok = true;
         uint64_t o = j.off;
-        for (unsigned i = 0; j.ok && i < j.nseg; i++) {
+        /* a write in one piece: the buffer's runs are its pages, and a drive
+         * that writes each call through (a USB disk) took one per page */
+        uint8_t *whole = j.write && j.nseg > 1 ? malloc(j.n) : NULL;
+        if (whole) {
+            uint32_t at = 0;
+            for (unsigned i = 0; i < j.nseg; i++) {
+                memcpy(whole + at, j.seg[i].host, j.seg[i].len);
+                at += j.seg[i].len;
+            }
+            j.ok = pwrite(j.fd, whole, at, (off_t)o) == (ssize_t)at;
+            free(whole);
+        }
+        for (unsigned i = 0; !whole && j.ok && i < j.nseg; i++) {
             const struct DmaSeg *g = &j.seg[i];
-            j.ok = j.fd >= 0 ? pread(j.fd, g->host, g->len, (off_t)o) == (ssize_t)g->len
-                             : nc_disc_read_file(j.disc, &j.file, o, g->host, g->len);
+            j.ok = j.write    ? pwrite(j.fd, g->host, g->len, (off_t)o) == (ssize_t)g->len
+                   : j.fd >= 0 ? pread(j.fd, g->host, g->len, (off_t)o) == (ssize_t)g->len
+                               : nc_disc_read_file(j.disc, &j.file, o, g->host, g->len);
             o += g->len;
         }
         j.err = j.ok ? 0 : errno;
         if (j.dev_us) {
             drive_wait(due);
         }
-        pthread_mutex_lock(&g_reader.mu);
-        g_reader.done[g_reader.ndone++] = j;
-        pthread_mutex_unlock(&g_reader.mu);
+        pthread_mutex_lock(&r->mu);
+        r->done[r->ndone++] = j;
+        pthread_mutex_unlock(&r->mu);
         nc_irq_post_work();
-        pthread_mutex_lock(&g_reader.mu);
+        pthread_mutex_lock(&r->mu);
     }
     return NULL;
 }
@@ -891,7 +955,7 @@ static void pin_buffer(NcKernel *k, const DiscJob *j, int lock)
  * writable); false when it must happen in place. sync: the calling thread
  * waits for it, every other one runs on. dev_us: the drive's time for it. */
 static bool disc_read_later(NcKernel *k, const NcFile *nf, const uint32_t *a, const IoRun *run, unsigned nrun,
-                            uint64_t off, uint32_t n, bool sync, uint32_t dev_us)
+                            uint64_t off, uint32_t n, bool sync, uint32_t dev_us, bool write)
 {
     static int in_place = -1; /* NC_DISC_SYNC: every disc read in place, as before */
     if (in_place < 0) {
@@ -915,7 +979,8 @@ static bool disc_read_later(NcKernel *k, const NcFile *nf, const uint32_t *a, co
     }
     DiscJob j = {.disc = k->disc, .file = nf->disc, .fd = -1, .off = off, .va = run[0].va, .n = n,
                  .dev_us = dev_us, .iosb = a[4], .event = event, .apc = a[2], .apc_ctx = a[3],
-                 .thread = k->current, .thread_id = k->current ? k->current->id : 0, .sync = sync};
+                 .thread = k->current, .thread_id = k->current ? k->current->id : 0, .sync = sync,
+                 .write = write};
     snprintf(j.path, sizeof(j.path), "%s", nf->path);
     const struct FilePort *fp = file_port(k, a);
     if (fp) {
@@ -956,22 +1021,23 @@ static bool disc_read_later(NcKernel *k, const NcFile *nf, const uint32_t *a, co
         const uint64_t v = nc_vm_dma.fence(j.seg[i].pa, j.seg[i].len);
         j.gpu = v > j.gpu ? v : j.gpu;
     }
-    pthread_mutex_lock(&g_reader.mu);
-    if (!g_reader.started) {
+    Reader *const r = &g_readers[j.fd >= 0];
+    pthread_mutex_lock(&r->mu);
+    if (!r->started) {
         pthread_t t;
-        g_reader.started = pthread_create(&t, NULL, reader_thread, NULL) == 0;
-        if (g_reader.started) {
+        r->started = pthread_create(&t, NULL, reader_thread, r) == 0;
+        if (r->started) {
             pthread_detach(t);
         }
     }
-    const bool queued = g_reader.started && g_reader.busy < DISC_JOBS;
+    const bool queued = r->started && r->busy < DISC_JOBS;
     if (queued) {
         pin_buffer(k, &j, 1);
-        g_reader.q[(g_reader.head + g_reader.n++) % DISC_JOBS] = j;
-        g_reader.busy++;
-        pthread_cond_signal(&g_reader.cv);
+        r->q[(r->head + r->n++) % DISC_JOBS] = j;
+        r->busy++;
+        pthread_cond_signal(&r->cv);
     }
-    pthread_mutex_unlock(&g_reader.mu);
+    pthread_mutex_unlock(&r->mu);
     if (!queued) {
         if (j.fd >= 0) {
             close(j.fd);
@@ -989,7 +1055,7 @@ static void disc_read_done(NcKernel *k, const DiscJob *j)
     pin_buffer(k, j, -1);
     const bool ok = j->ok;
     const int err = j->err;
-    for (unsigned i = 0; i < j->nseg; i++) {
+    for (unsigned i = 0; !j->write && i < j->nseg; i++) {
         if (nc_vm_dma.wrote) {
             nc_vm_dma.wrote(j->seg[i].pa, j->seg[i].len);    /* what a guest store would mark */
         }
@@ -1000,9 +1066,9 @@ static void disc_read_done(NcKernel *k, const DiscJob *j)
     }
     uint32_t st = NC_STATUS_SUCCESS, n = j->n;
     if (!ok) {
-        nc_log("hakuX-native-io", "read %s +%llx (%u) into %08x failed: %s", j->path, (unsigned long long)j->off,
-               j->n, j->va, strerror(err));
-        st = 0xC000009Cu; /* STATUS_DEVICE_DATA_ERROR */
+        nc_log("hakuX-native-io", "%s %s +%llx (%u) %s %08x failed: %s", j->write ? "write" : "read", j->path,
+               (unsigned long long)j->off, j->n, j->write ? "from" : "into", j->va, strerror(err));
+        st = j->write ? 0xC000007Fu /* STATUS_DISK_FULL */ : 0xC000009Cu; /* STATUS_DEVICE_DATA_ERROR */
         n = 0;
     }
     io_status(k, j->iosb, st, n);
@@ -1028,14 +1094,17 @@ void nc_io_poll(NcKernel *k)
         return;
     }
     static DiscJob done[DISC_JOBS]; /* the guest CPU's thread only */
-    pthread_mutex_lock(&g_reader.mu);
-    const unsigned n = g_reader.ndone;
-    memcpy(done, g_reader.done, n * sizeof(done[0]));
-    g_reader.ndone = 0;
-    g_reader.busy -= n;
-    pthread_mutex_unlock(&g_reader.mu);
-    for (unsigned i = 0; i < n; i++) {
-        disc_read_done(k, &done[i]);
+    for (unsigned d = 0; d < 2; d++) {
+        Reader *const r = &g_readers[d];
+        pthread_mutex_lock(&r->mu);
+        const unsigned n = r->ndone;
+        memcpy(done, r->done, n * sizeof(done[0]));
+        r->ndone = 0;
+        r->busy -= n;
+        pthread_mutex_unlock(&r->mu);
+        for (unsigned i = 0; i < n; i++) {
+            disc_read_done(k, &done[i]);
+        }
     }
 }
 
@@ -1768,7 +1837,7 @@ static uint64_t read_runs(NcKernel *k, const uint32_t *a, IoRun *run, unsigned n
         const bool later = async || drive || (n >= SYNC_LATER_MIN && can_block(k));
         const uint32_t dev_us = async ? device_us(nf, n) : drive ? device_us(nf, fs_cache_fill(nf, off, n)) : 0;
         if ((nf->kind == F_DISC || (nf->kind == F_HOST && nf->fd >= 0)) && later &&
-            disc_read_later(k, nf, a, run, nrun, off, n, !async, dev_us)) {
+            disc_read_later(k, nf, a, run, nrun, off, n, !async, dev_us, false)) {
             io_moved(k, nf, a[7], off + n);
             if (g_trace_io) {
                 nc_log("hakuX-native-io", "read %s +%llx %u into %08x%s %s%s%s", nf->path, (unsigned long long)off,
@@ -1859,6 +1928,35 @@ static int partition_root(const NcFile *nf)
     return dev >= 0 && !*rel ? dev : -1;
 }
 
+/* The hard disk partition a file is on, else -1. */
+static int file_partition(const NcFile *nf)
+{
+    const char *rel;
+    const int dev = device_of(nf->path, &rel);
+    return dev >= 0 ? dev : -1;
+}
+
+/* A folder emptied at once: its contents moved aside (<hdd>/.overwrite)
+ * whole, and deleted there on the closer thread. Deleted in place, file by
+ * file, a cache drive's format (Project Gotham Racing 2's, as it starts)
+ * held the console as long as a slow drive took. In place if the move
+ * fails. */
+static void empty_later(const char *host)
+{
+    static unsigned serial;
+    char dir[300], aside[320];
+    snprintf(dir, sizeof(dir), "%s/.overwrite", g_hdd_root);
+    mkdir(dir, 0775);
+    snprintf(aside, sizeof(aside), "%s/format-%u-%u", dir, (unsigned)getpid(), serial++);
+    if (rename(host, aside) != 0 || mkdir(host, 0775) != 0) {
+        remove_tree(host, false);
+        return;
+    }
+    CloseJob j = {.fd = -1, .tree = true};
+    snprintf(j.old_path, sizeof(j.old_path), "%s", aside);
+    closer_queue(&j);
+}
+
 /* Deletes everything under path (and path itself if self). */
 static void remove_tree(const char *path, bool self)
 {
@@ -1908,7 +2006,8 @@ static bool handle_can_write(const NcFile *nf, const char *what)
 /* NtWriteFile's work for len bytes at src (the guest's, read already): a[]
  * as NtWriteFile takes it, its Buffer and Length aside (va: the Buffer, for
  * the trace). */
-static uint64_t write_data(NcKernel *k, const uint32_t *a, const uint8_t *src, uint32_t len, uint32_t va)
+static uint64_t write_data(NcKernel *k, const uint32_t *a, const uint8_t *src, uint32_t len, uint32_t va,
+                           bool later)
 {
     NcFile *nf = file_of(k, a[0]);
     if (!nf) {
@@ -1938,7 +2037,7 @@ static uint64_t write_data(NcKernel *k, const uint32_t *a, const uint8_t *src, u
             g_cluster_sectors[part] = nc_rd32(sb + 8);
             nc_log("hakuX-native-io", "%s formatted (%u-sector clusters): emptied %s", nf->path,
                    g_cluster_sectors[part], nf->host);
-            remove_tree(nf->host, false);
+            empty_later(nf->host);
         }
         return io_finish(k, nf, a, NC_STATUS_SUCCESS, len, true);
     }
@@ -1959,6 +2058,26 @@ static uint64_t write_data(NcKernel *k, const uint32_t *a, const uint8_t *src, u
         const uint64_t size = file_size(nf);
         if (off > size) {
             regrow(nf, size, off); /* the gap a write past the end leaves */
+        }
+    }
+    /* On the reader thread, as a read is: the writing thread waits there (a
+     * synchronous handle's) and the rest of the title runs on. In place, a
+     * slow drive (a USB hard disk, an SD card) held the whole console:
+     * Project Gotham Racing 2's intro video stood still for minutes while
+     * it copied its cars to its cache. */
+    if (later && len && va && (nf->async || can_block(k))) {
+        const IoRun run = {va, len};
+        if (disc_read_later(k, nf, a, &run, 1, off, len, !nf->async, 0, true)) {
+            nf->wrote = true;
+            io_moved(k, nf, a[7], off + len);
+            if (g_trace_io) {
+                nc_log("hakuX-native-io", "write %s +%llx %u from %08x %s", nf->path, (unsigned long long)off, len, va,
+                       nf->async ? "pending" : "waited for");
+            }
+            if (!nf->async) {
+                nc_ke_block(k);         /* the write's status replaces this when it completes */
+            }
+            return STATUS_PENDING;
         }
     }
     ssize_t n = pwrite(nf->fd, src, len, (off_t)off);
@@ -1986,7 +2105,7 @@ static uint64_t NtWriteFile(NcKernel *k, NcFrame *f, const uint32_t *a)
         return 0;
     }
     nc_vm_will_read(a[5], a[6]); /* pwrite from a page without access fails rather than faults */
-    return write_data(k, a, nc_vm_host(k->vm, a[5]), a[6], a[5]);
+    return write_data(k, a, nc_vm_host(k->vm, a[5]), a[6], a[5], true);
 }
 
 /* NtWriteFileGather(FileHandle, Event, ApcRoutine, ApcContext, IoStatusBlock,
@@ -2021,7 +2140,7 @@ static uint64_t NtWriteFileGather(NcKernel *k, NcFrame *f, const uint32_t *a)
         nc_vm_will_read(va, n);
         memcpy(buf + i * NC_PAGE, nc_vm_host(k->vm, va), n);
     }
-    const uint64_t r = write_data(k, a, buf, len, pages ? nc_vm_rd32(k->vm, a[5]) : 0);
+    const uint64_t r = write_data(k, a, buf, len, pages ? nc_vm_rd32(k->vm, a[5]) : 0, false);
     free(buf);
     return r;
 }
@@ -3096,21 +3215,24 @@ const char *nc_io_state_drain(NcKernel *k, uint64_t timeout_ns)
     }
     /* the reads in flight land, and the kernel completes them (the host's
      * clock: the guest's stands still), the drive's time not waited out */
-    __atomic_store_n(&g_reader.hurry, true, __ATOMIC_RELEASE);
+    __atomic_store_n(&g_io_hurry, true, __ATOMIC_RELEASE);
     for (uint64_t waited = 0;; waited += 1000000) {
-        pthread_mutex_lock(&g_reader.mu);
-        const bool idle = g_reader.busy == g_reader.ndone;
-        pthread_mutex_unlock(&g_reader.mu);
+        bool idle = true;
+        for (unsigned d = 0; d < 2; d++) {
+            pthread_mutex_lock(&g_readers[d].mu);
+            idle &= g_readers[d].busy == g_readers[d].ndone;
+            pthread_mutex_unlock(&g_readers[d].mu);
+        }
         if (idle) {
             break;
         }
         if (waited > timeout_ns) {
-            __atomic_store_n(&g_reader.hurry, false, __ATOMIC_RELEASE);
+            __atomic_store_n(&g_io_hurry, false, __ATOMIC_RELEASE);
             return "a disc read did not finish";
         }
         usleep(1000);
     }
-    __atomic_store_n(&g_reader.hurry, false, __ATOMIC_RELEASE);
+    __atomic_store_n(&g_io_hurry, false, __ATOMIC_RELEASE);
     nc_irq_post_work();
     nc_io_poll(k);
     return NULL;

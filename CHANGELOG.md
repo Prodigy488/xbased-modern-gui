@@ -1,5 +1,22 @@
 # xbased changelog
 
+## 1.0.49 (2026-11)
+
+### Fixes
+- xbased now copes much better with slow drives, like external USB hard
+  disks and SD cards. Everything the emulated hard disk did on the host
+  ran on the emulated console's own CPU, so a slow drive held the whole
+  console while a game wrote to it. That's what froze Project Gotham
+  Racing 2's intro for minutes while it filled its cache. Now writes go
+  to a background thread like reads already did, so the game thread that
+  writes waits and the rest of the game keeps running. The hard disk also
+  has its own thread next to the DVD drive's, each write is a single
+  request instead of one per memory page, and wiping a cache drive
+  happens in the background. Files on the cache drives (X, Y and Z) are
+  also no longer forced to disk one by one as they're closed, since the
+  console treats those as disposable anyway. Saves still are. Thanks to
+  shadowflash for the report (#83).
+
 ## 1.0.48 (2026-11)
 
 ### Fixes
