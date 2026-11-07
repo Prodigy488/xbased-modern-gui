@@ -26,6 +26,10 @@ extern "C" {
 #define NC_KERNEL_VA     0x80010000u
 #define NC_KERNEL_PA     0x00010000u
 #define NC_KERNEL_SIZE   0x00040000u
+/* The top of RAM kept from boot: the GPU's instance memory (D3D's 20 KiB)
+ * and the 64 KiB pad above it (kernel.c, MmClaimGpuInstanceMemory) */
+#define NC_GPU_PAD       0x00010000u
+#define NC_GPU_TOP       (0x00005000u + NC_GPU_PAD)
 #define NC_KCALL_VECTOR  0x3Fu
 /* In the KPCR's page, past its fields (guest code reads it at fs:): 1 while
  * DPCs are queued (timer.c), for the guest-code KfLowerIrql (kernel.c). */

@@ -1,5 +1,16 @@
 # xbased changelog
 
+## 1.0.60 (2026-11)
+
+### Fixes
+- Conflict: Desert Storm and Conflict: Desert Storm II crashed before
+  showing anything. Both ask for a block of memory before the graphics
+  start and write a marker just past its end. xbased handed out the very
+  last bytes of the console's memory for it, so that marker landed
+  outside it. The Xbox keeps the top 84 KiB of its memory for the
+  graphics chip from the moment it boots, and now xbased does too: both
+  games boot, reach their menus and play.
+
 ## 1.0.59 (2026-11)
 
 ### Fixes

@@ -441,6 +441,14 @@ bool nc_kernel_init(NcKernel *k, NcVm *vm)
                NC_KERNEL_PA + K_CLAIMED);
         return false;
     }
+    /* The top of RAM the console's kernel keeps from its boot on: the GPU's
+     * instance memory (D3D claims 20 KiB of it, MmClaimGpuInstanceMemory)
+     * under a 64 KiB pad. Left free until D3D started, a title's contiguous
+     * block asked for before took the last pages: Conflict: Desert Storm (and
+     * II) asks for 128 KiB first, got 0x83FE0000, and writes its heap's guard
+     * just past the end, at 0x84000000, where no RAM is (on the console the
+     * block ends 84 KiB lower and the guard lands in those kept pages). */
+    nc_vm_claim_phys(vm, vm->ram_size - NC_GPU_TOP, NC_GPU_TOP);
     /* A development kit's top 20 KiB stay out of every allocation: D3D's DMA
      * objects end below them (limit 0x07FFAFFF, its every build's, the GPU's
      * instance memory above), so a push buffer there runs past its object's
