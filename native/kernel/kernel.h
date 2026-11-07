@@ -207,6 +207,7 @@ struct NcKernel {
     uint32_t xbe_base;
     uint32_t xbe_size;                    /* SizeOfImage */
     uint32_t game_region;                 /* from the XBE certificate: 1 NA, 2 JP, 4 elsewhere */
+    uint32_t game_regions;                /* the certificate's: every region the disc plays in */
     uint32_t kprocess;                    /* the one KPROCESS, every thread's ApcState.Process */
     uint32_t tramp_va[NC_KORDINAL_MAX];
     uint32_t data_va[NC_KORDINAL_MAX];

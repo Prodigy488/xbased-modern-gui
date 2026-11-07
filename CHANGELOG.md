@@ -1,5 +1,15 @@
 # xbased changelog
 
+## 1.0.65 (2026-11)
+
+### Fixes
+- A disc for North America and Japan both (a World release) always played
+  as on a North American console, whatever the language: Capcom Fighting
+  Evolution's World disc stayed Capcom Fighting Evolution in Japanese,
+  where a Japanese console has it Capcom Fighting Jam (the game reads the
+  console's region, not its language). With the language set to Japanese,
+  Korean or Chinese, such a disc now plays as on a Japanese console.
+
 ## 1.0.64 (2026-11)
 
 ### Fixes
