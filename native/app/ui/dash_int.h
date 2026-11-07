@@ -14,6 +14,9 @@
 
 typedef struct In {
     bool up, down, left, right, ok, back, x, y, lb, rb, start;
+    bool lt, rt;            /* the triggers pulled (Z, C) */
+    bool view;              /* the gamepad's View button (V) */
+    bool find;              /* F3, Ctrl+F */
     float mx, my, wheel;    /* the mouse, in 720p units */
     bool click, moved, rclick;
     bool any;               /* something was pressed (screensaver, hints) */
@@ -28,7 +31,7 @@ typedef struct In {
 enum Screen {
     SCR_MAIN, SCR_GAMES, SCR_GAME, SCR_GAME_SETTINGS, SCR_MODS, SCR_STATES, SCR_SETTINGS, SCR_CONTROLS,
     SCR_REMAP, SCR_MEMORY, SCR_MEMORY_TITLE, SCR_ONLINE, SCR_ABOUT, SCR_INGAME, SCR_INGAME_SLOTS, SCR_STICKS,
-    SCR_TRIGGERS, SCR_BROWSE, SCR_COUNT
+    SCR_TRIGGERS, SCR_BROWSE, SCR_FIND, SCR_COUNT
 };
 
 typedef struct Dash {
@@ -61,6 +64,7 @@ typedef struct Dash {
     size_t edit_cap;
     const char *edit_key;
     char edit_tmp[256];
+    bool typing;                /* a text field takes the letters: they don't move or press */
 } Dash;
 
 extern Dash D;
@@ -105,8 +109,12 @@ void opt_videoflag(List *l, enum UiStr label, unsigned bit);
 
 /* drawing helpers */
 void draw_header(const char *title, const char *sub);
-void draw_hints(const char *a, const char *b, const char *x, const char *y);
-void draw_button_glyph(float x, float y, int which, float size);   /* 0 A, 1 B, 2 X, 3 Y */
+/* the hints' row: A, B, X, Y (NULL: left out); its end's x */
+float draw_hints(const char *a, const char *b, const char *x, const char *y);
+/* one more hint at px (which: as draw_button_glyph's); its end's x */
+float draw_hint_at(float px, int which, const char *text);
+/* 0 A, 1 B, 2 X, 3 Y, 4 the triggers (LT RT), 5 View */
+void draw_button_glyph(float x, float y, int which, float size);
 float ease(float t);
 
 /* the screens */
@@ -121,6 +129,21 @@ void scr_online(void);
 void scr_game_settings(void);
 void scr_mods(void);
 void scr_states(void);
+/* The Games screen's search, filters, order and view (dash_find.c):
+ * dash_find_list fills out with the games they let through, in order;
+ * dash_find_group is a game's group in that order (the triggers jump
+ * between groups), dash_find_group_name its name; dash_find_desc the
+ * search and filters in a few words ("" for none). */
+int dash_find_list(LibGame **out, int max);
+int dash_find_group(const LibGame *g);
+const char *dash_find_group_name(const LibGame *g);
+const char *dash_find_desc(void);
+int dash_find_view(void);   /* 0 large covers, 1 small covers, 2 icons and names */
+void dash_find_next_view(void);
+/* The search screen pushed; typing: the keyboard up at once */
+void dash_find_open(bool typing);
+void dash_find_clear(void);    /* no search, no filters */
+void scr_find(void);
 /* The file browser (dash_browse.c), the dashboard's own for the gamepad,
  * the keyboard and the mouse: dash_browse_games adds folders and game
  * files to the library; dash_browse_file has one file chosen (exts:

@@ -21,6 +21,16 @@
 #define O_BINARY 0
 #endif
 
+/* a game folder (or file) to take out of the library, once the user says so */
+static char g_unlist[1024], g_unlist_q[1200];
+static bool g_unlist_file;
+
+static void unlist_yes(Dash *d)
+{
+    cfg_remove_value(&d->global, g_unlist_file ? "gamefile" : "gamedir", g_unlist);
+    cfg_save(&d->global);
+}
+
 /* ------------------------------------------------------------ shared rows */
 
 static void rows_video(List *l)
@@ -245,16 +255,19 @@ void scr_settings(void)
         opt_bool(&l, S_CHECK_UPDATES, "update.check", true, false);
         opt_bool(&l, S_SHOW_HIDDEN, "ui.showhidden", false, false);
         opt_bool(&l, S_CLOCK_12H, "ui.clock12", false, false);
+        opt_bool(&l, S_FAV_FIRST, "ui.favfirst", true, false);
+        opt_bool(&l, S_LAST_FIRST, "ui.lastfirst", true, false);
         const char *dirs[16];
         const int nd = cfg_all(&D.global, "gamedir", dirs, 16);
         for (int i = 0; i < nd; i++) {
             char label[64];
             snprintf(label, sizeof(label), "%s %d", T(S_GAME_FOLDERS), i + 1);
             if (list_row(&l, label, dirs[i], NULL) || (list_selected(&l) && D.in.x)) {
-                char d[512];
-                snprintf(d, sizeof(d), "%s", dirs[i]);
-                cfg_remove_value(&D.global, "gamedir", d);
-                cfg_save(&D.global);
+                /* out of the library, once asked (a press on it alone used to take it out) */
+                snprintf(g_unlist, sizeof(g_unlist), "%s", dirs[i]);
+                snprintf(g_unlist_q, sizeof(g_unlist_q), T(S_REMOVE_FOLDER_Q), dirs[i]);
+                g_unlist_file = false;
+                dash_ask(g_unlist_q, unlist_yes);
                 break;
             }
         }
@@ -267,10 +280,10 @@ void scr_settings(void)
             char label[64];
             snprintf(label, sizeof(label), "%s %d", T(S_GAME_FILE), i + 1);
             if (list_row(&l, label, files[i], NULL) || (list_selected(&l) && D.in.x)) {
-                char f[1024];
-                snprintf(f, sizeof(f), "%s", files[i]);
-                cfg_remove_value(&D.global, "gamefile", f);
-                cfg_save(&D.global);
+                snprintf(g_unlist, sizeof(g_unlist), "%s", files[i]);
+                snprintf(g_unlist_q, sizeof(g_unlist_q), T(S_REMOVE_FILE_Q), files[i]);
+                g_unlist_file = true;
+                dash_ask(g_unlist_q, unlist_yes);
                 break;
             }
         }

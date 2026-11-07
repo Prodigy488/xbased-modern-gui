@@ -1,5 +1,51 @@
 # xbased changelog
 
+## 1.0.55 (2026-11)
+
+### Fixes
+- A folder added while the library was still being read was never read
+  at all until xbased started again. It's read now, whenever it's added.
+  The same went for swapping one folder for another in Settings.
+- A game whose file was moved or renamed (and the second copy of a game,
+  when the copy that was shown went away) vanished from the library until
+  xbased started again. Now the library follows the file.
+- Reading a big library is much faster: each game's executable is no
+  longer read whole for its name and icon, only the few kilobytes those
+  are in. On a hard disk that took minutes for a few hundred games.
+- Pressing A on one of the game folders in Settings, Interface took it
+  out of the library at once. Taking a folder (or a game file) out now
+  asks first.
+- Games in subfolders were read once for each folder level they were
+  under (a library with a folder a game read every game twice).
+- Changing xbased.ini by hand while xbased was open was undone when it
+  closed, as it wrote its own copy over the file. It reads the file again
+  when it changes now, and a folder added there is scanned at once.
+
+### New
+- The library loads in the background and is playable meanwhile: a
+  counter in the corner says how many games are in so far, and the
+  selection stays on its game as others come in. A game started while it
+  loads plays as usual (the library reads gently meanwhile).
+- The library is kept: the next time xbased starts, every game shows at
+  once, before the folders are checked again. A disk that isn't plugged
+  in keeps its games for when it is.
+- Search: Y (Tab, F3 or Ctrl+F) on the Games screen. Type the name with
+  the keyboard or, with a gamepad, on the on-screen keyboard. It matches
+  the game's name and its file's. The same screen filters by publisher,
+  year and region, and sets the order and the view. B on the Games screen
+  clears the search.
+- Order by name (numbers first, then A to Z), by publisher or by year.
+  The triggers (Z and C on the keyboard) jump to the next letter,
+  publisher or year, which shows big for a moment.
+- Three views: large covers (as before), small covers (about four times
+  as many on the screen) and icons with names, publishers and years. The
+  View button (V) switches between them.
+- Favorites: Add to favorites on a game's page. They come first, A to Z,
+  with a star.
+- The last game played comes first.
+- Both can be turned off, in the search screen or Settings, Interface.
+- A game's page shows its publisher and year.
+
 ## 1.0.54 (2026-11)
 
 ### New

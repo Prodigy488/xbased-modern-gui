@@ -20,7 +20,7 @@
 #endif
 
 #ifndef XBASED_VERSION
-#define XBASED_VERSION "1.0.54"
+#define XBASED_VERSION "1.0.55"
 #endif
 
 Dash D;
@@ -68,8 +68,19 @@ static bool upscale_migrate(Config *c)
     return false;
 }
 
+/* a text field's typing ends with its screen (B can leave one mid-word) */
+static void typing_off(void)
+{
+    if (D.typing) {
+        D.typing = false;
+        D.edit_key = NULL;
+        SDL_StopTextInput(SDL_GetKeyboardFocus());
+    }
+}
+
 void dash_push(enum Screen s)
 {
+    typing_off();
     if (D.sp < 15) {
         D.stack[++D.sp] = s;
         D.anim = 0;
@@ -78,6 +89,7 @@ void dash_push(enum Screen s)
 
 void dash_pop(void)
 {
+    typing_off();
     if (D.ask) {
         D.ask = NULL;
         return;
@@ -160,6 +172,22 @@ static void draw_toast(void)
     for (int i = 0; i < nl; i++) {
         ui_text(W / 2, y + 10 + 30.0f * (float)i, lines[i], 22, UI_FONT_REGULAR, UI_WHITE, UI_ALIGN_CENTER);
     }
+}
+
+/* While the library is read: the games so far, in a corner (under the
+ * clock), on every screen; what's there can be played meanwhile. */
+static void draw_scan_badge(void)
+{
+    const float W = ui_w(), y = 78, h = 28;
+    char t[96];
+    snprintf(t, sizeof(t), T(S_LOADING_GAMES), lib_count());
+    const float tw = ui_text_width(t, 18, UI_FONT_REGULAR), w = tw + 58, x = W - 60 - w;
+    ui_round(x, y, w, h, h / 2, (UiColor){0x10, 0x30, 0x08, 0xE0});
+    ui_round_outline(x, y, w, h, h / 2, 1, UI_GREEN_DIM);
+    /* an orbit turning, as the menu's orb's: it's working */
+    ui_ring(x + 19, y + h / 2, 9, 3.5f, (float)ui_time() * 4.0f, 2, UI_GREEN_HI);
+    ui_circle(x + 19, y + h / 2, 3, UI_GREEN_HI);
+    ui_text(x + 36, y + 4, t, 18, UI_FONT_REGULAR, UI_WHITE, UI_ALIGN_LEFT);
 }
 
 void dash_ask(const char *q, void (*on_yes)(Dash *))
@@ -265,7 +293,19 @@ static void poll_input(void)
             in->repeat |= e.key.repeat;
             in->any = true;
             const SDL_Keycode k = e.key.key;
-            if (k == SDLK_UP || k == SDLK_W) {
+            if (D.typing && ((k >= SDLK_A && k <= SDLK_Z) || (k >= SDLK_0 && k <= SDLK_9) || k == SDLK_SPACE ||
+                             k == SDLK_BACKSPACE || k == SDLK_DELETE || k == SDLK_TAB)) {
+                break;  /* a letter for the text field (in->key, in->text) */
+            }
+            if (k == SDLK_F3 || (k == SDLK_F && (e.key.mod & SDL_KMOD_CTRL))) {
+                in->find = true;
+            } else if (k == SDLK_Z) {
+                in->lt = true;
+            } else if (k == SDLK_C) {
+                in->rt = true;
+            } else if (k == SDLK_V) {
+                in->view = true;
+            } else if (k == SDLK_UP || k == SDLK_W) {
                 press(1);
             } else if (k == SDLK_DOWN || k == SDLK_S) {
                 press(2);
@@ -361,6 +401,7 @@ static void poll_input(void)
             case SDL_GAMEPAD_BUTTON_LEFT_SHOULDER: in->lb |= down; break;
             case SDL_GAMEPAD_BUTTON_RIGHT_SHOULDER: in->rb |= down; break;
             case SDL_GAMEPAD_BUTTON_START: in->start |= down; break;
+            case SDL_GAMEPAD_BUTTON_BACK: in->view |= down; break;
             default: break;
             }
             break;
@@ -371,7 +412,19 @@ static void poll_input(void)
                 in->pad_axis = (e.gaxis.axis + 1) * (v < 0 ? -1 : 1);
             }
             g_last_pad = e.gaxis.which;
-            in->pad |= (dash_top() == SCR_STICKS || dash_top() == SCR_TRIGGERS) && fabsf(v) > 0.5f; /* its hints: the gamepad's */
+            if (e.gaxis.axis == SDL_GAMEPAD_AXIS_LEFT_TRIGGER || e.gaxis.axis == SDL_GAMEPAD_AXIS_RIGHT_TRIGGER) {
+                /* a trigger pulled past half (once a pull) */
+                static bool pulled[2];
+                const int t = e.gaxis.axis == SDL_GAMEPAD_AXIS_RIGHT_TRIGGER;
+                if (v > 0.5f && !pulled[t]) {
+                    pulled[t] = true;
+                    *(t ? &in->rt : &in->lt) = true;
+                    in->any = in->pad = true;
+                } else if (v < 0.3f) {
+                    pulled[t] = false;
+                }
+            }
+            in->pad |=(dash_top() == SCR_STICKS || dash_top() == SCR_TRIGGERS) && fabsf(v) > 0.5f; /* its hints: the gamepad's */
             /* the sticks' screen: the stick is being looked at, not steering */
             if (dash_top() != SCR_STICKS &&
                 (e.gaxis.axis == SDL_GAMEPAD_AXIS_LEFTX || e.gaxis.axis == SDL_GAMEPAD_AXIS_LEFTY)) {
@@ -505,6 +558,11 @@ static void auto_poll(void)
                 SDL_SetWindowFullscreen(g_win, false);
                 SDL_SetWindowSize(g_win, w, h);
             }
+        } else if (!strncmp(line, "TEXT ", 5)) {
+            /* text typed into a text field, as the keyboard sends it */
+            static char typed[256];
+            snprintf(typed, sizeof(typed), "%s", line + 5);
+            in->text = typed;
         } else if (!strncmp(line, "KEY ", 4)) {
             /* a key as the keyboard sends it (its SDL name: Return, Backspace, Down, X) */
             SDL_Event e = {0};
@@ -569,13 +627,20 @@ static void auto_shot(void)
 
 /* ------------------------------------------------------------ drawing helpers */
 
+static const char *const k_key[6] = {"Enter", "Esc", "Del", "Tab", "Z / C", "V"};
+static const char *const k_pad_wide[6] = {NULL, NULL, NULL, NULL, "LT / RT", "View"};
+
 void draw_button_glyph(float x, float y, int which, float size)
 {
     static const UiColor k_col[4] = {{0x5E, 0xC8, 0x2C, 0xFF}, {0xE0, 0x3A, 0x30, 0xFF},
                                      {0x30, 0x7C, 0xE8, 0xFF}, {0xF0, 0xC0, 0x20, 0xFF}};
     static const char *const k_pad[4] = {"A", "B", "X", "Y"};
-    static const char *const k_key[4] = {"Enter", "Esc", "Del", "Tab"};
-    if (D.in.pad) {
+    if (D.in.pad && which >= 4) {
+        /* the triggers, the View button: their names on a dark key */
+        const float w = ui_text_width(k_pad_wide[which], size * 0.56f, UI_FONT_BOLD) + size * 0.7f;
+        ui_round(x, y + size * 0.08f, w, size * 0.84f, size * 0.42f, ui_alpha((UiColor){0x30, 0x34, 0x30, 0xFF}, 0.95f));
+        ui_text(x + w / 2, y + size * 0.19f, k_pad_wide[which], size * 0.56f, UI_FONT_BOLD, UI_WHITE, UI_ALIGN_CENTER);
+    } else if (D.in.pad) {
         ui_circle(x + size / 2, y + size / 2, size / 2, k_col[which]);
         ui_glow(x + size / 2, y + size / 2, size, ui_alpha(k_col[which], 0.35f));
         ui_text(x + size / 2, y + size * 0.06f, k_pad[which], size * 0.8f, UI_FONT_BOLD, UI_WHITE, UI_ALIGN_CENTER);
@@ -588,23 +653,30 @@ void draw_button_glyph(float x, float y, int which, float size)
 
 static float glyph_w(int which, float size)
 {
-    static const char *const k_key[4] = {"Enter", "Esc", "Del", "Tab"};
+    if (D.in.pad && which >= 4) {
+        return ui_text_width(k_pad_wide[which], size * 0.56f, UI_FONT_BOLD) + size * 0.7f;
+    }
     return D.in.pad ? size : ui_text_width(k_key[which], size * 0.62f, UI_FONT_BOLD) + size * 0.6f;
 }
 
-void draw_hints(const char *a, const char *b, const char *x, const char *y)
+float draw_hint_at(float px, int which, const char *text)
+{
+    const float py = ui_h() - 58, s = 30;
+    draw_button_glyph(px, py, which, s);
+    px += glyph_w(which, s) + 10;
+    return px + ui_text(px, py + 3, text, 22, UI_FONT_REGULAR, UI_WHITE, UI_ALIGN_LEFT) + 34;
+}
+
+float draw_hints(const char *a, const char *b, const char *x, const char *y)
 {
     const char *t[4] = {a, b, x, y};
     float px = 60;
-    const float py = ui_h() - 58, s = 30;
     for (int i = 0; i < 4; i++) {
-        if (!t[i]) {
-            continue;
+        if (t[i]) {
+            px = draw_hint_at(px, i, t[i]);
         }
-        draw_button_glyph(px, py, i, s);
-        px += glyph_w(i, s) + 10;
-        px += ui_text(px, py + 3, t[i], 22, UI_FONT_REGULAR, UI_WHITE, UI_ALIGN_LEFT) + 34;
     }
+    return px;
 }
 
 void draw_header(const char *title, const char *sub)
@@ -1034,6 +1106,7 @@ void launch_game(LibGame *g, const char *extra)
         return;
     }
     dash_save_cfg();
+    lib_set_played(g);      /* the last played first, when the Games screen wants it */
     snprintf(g_go.path, sizeof(g_go.path), "%s", g->g.path);
     g_go.has_extra = extra != NULL;
     snprintf(g_go.extra, sizeof(g_go.extra), "%s", extra ? extra : "");
@@ -1208,14 +1281,16 @@ static void draw_card(LibGame *g, float x, float y, float w, float h, bool sel, 
         ui_rect_grad(x + 4, y + 4, w - 8, h - 8, ui_alpha((UiColor){0x1E, 0x52, 0x0A, 0xFF}, alpha),
                      ui_alpha((UiColor){0x06, 0x14, 0x03, 0xFF}, alpha));
         UiTex *ic = lib_icon(g);
-        const float is = w * 0.62f;
+        /* sized to the card: the small covers' view has them a third as big */
+        const float fs = fminf(17, fmaxf(10, w * 0.13f)), is = fminf(w * 0.62f, h - fs * 4.2f);
         if (ic) {
-            ui_image(ic, x + (w - is) / 2, y + h * 0.16f, is, is, alpha);
+            ui_image(ic, x + (w - is) / 2, y + h * 0.12f, is, is, alpha);
         } else {
-            ui_text(x + w / 2, y + h * 0.3f, "X", is * 0.7f, UI_FONT_BOLD, ui_alpha(UI_GREEN, alpha), UI_ALIGN_CENTER);
+            ui_text(x + w / 2, y + h * 0.12f + is * 0.12f, "X", is * 0.7f, UI_FONT_BOLD, ui_alpha(UI_GREEN, alpha),
+                    UI_ALIGN_CENTER);
         }
-        ui_text_fit(x + w / 2, y + h - 52, g->g.title, 17, UI_FONT_BOLD, ui_alpha(UI_WHITE, alpha), UI_ALIGN_CENTER,
-                    w - 14);
+        ui_text_fit(x + w / 2, y + h - fs * 2.6f, g->g.title, fs, UI_FONT_BOLD, ui_alpha(UI_WHITE, alpha),
+                    UI_ALIGN_CENTER, w - 10);
     }
     ui_round_outline(x, y, w, h, 10, sel ? 3 : 1, ui_alpha(sel ? UI_GREEN_HI : UI_GREEN_DIM, alpha));
 }
@@ -1236,6 +1311,58 @@ static void draw_add_card(float x, float y, float w, float h, bool sel, float al
     ui_round_outline(x, y, w, h, 10, sel ? 3 : 1, ui_alpha(sel ? UI_GREEN_HI : UI_GREEN_DIM, alpha));
 }
 
+/* a favorite's star: five points on a dark disc, top right of a card */
+static void draw_star(float cx, float cy, float r, float alpha)
+{
+    ui_circle(cx, cy, r * 1.25f, ui_alpha((UiColor){0x08, 0x10, 0x04, 0xFF}, 0.85f * alpha));
+    SDL_FPoint p[10];
+    for (int i = 0; i < 10; i++) {
+        const float a = -1.5707963f + i * 0.6283185f, k = i % 2 ? r * 0.45f : r;
+        p[i] = (SDL_FPoint){cx + cosf(a) * k, cy + sinf(a) * k};
+    }
+    const UiColor gold = ui_alpha((UiColor){0xF0, 0xC0, 0x20, 0xFF}, alpha);
+    for (int i = 0; i < 10; i++) {
+        ui_line(cx, cy, p[i].x, p[i].y, r * (i % 2 ? 0.5f : 0.36f), gold);
+        ui_line(p[i].x, p[i].y, p[(i + 1) % 10].x, p[(i + 1) % 10].y, 1.6f, gold);
+    }
+}
+
+/* the icons view's tile: the disc's icon, the title, the publisher and year under */
+static void draw_tile(LibGame *g, float x, float y, float w, float h, bool sel, float alpha)
+{
+    if (g->hidden) {
+        alpha *= 0.45f;
+    }
+    if (sel) {
+        ui_glow(x + w / 2, y + h / 2, w * 0.7f, ui_alpha(UI_GREEN, 0.3f * alpha));
+    }
+    ui_round(x, y, w, h, 8, ui_alpha(sel ? (UiColor){0x1A, 0x44, 0x0C, 0xFF} : (UiColor){0x0E, 0x26, 0x07, 0xFF}, alpha));
+    const float is = h - 10;
+    UiTex *ic = lib_icon(g);
+    if (ic) {
+        ui_image(ic, x + 5, y + 5, is, is, alpha);
+    } else {
+        ui_round(x + 5, y + 5, is, is, 6, ui_alpha((UiColor){0x1E, 0x52, 0x0A, 0xFF}, alpha));
+        ui_text(x + 5 + is / 2, y + 5 + is * 0.18f, "X", is * 0.6f, UI_FONT_BOLD, ui_alpha(UI_GREEN, alpha),
+                UI_ALIGN_CENTER);
+    }
+    const float tx = x + is + 14, tw = w - is - 22 - (g->fav ? 18 : 0);
+    ui_text_fit(tx, y + 6, g->g.title, 19, sel ? UI_FONT_BOLD : UI_FONT_REGULAR, ui_alpha(UI_WHITE, alpha),
+                UI_ALIGN_LEFT, tw);
+    char info[120];
+    const char *pub = lib_publisher(g);
+    if (g->g.year) {
+        snprintf(info, sizeof(info), "%s%s%d", pub, *pub ? " · " : "", g->g.year);
+    } else {
+        snprintf(info, sizeof(info), "%s", pub);
+    }
+    ui_text_fit(tx, y + h - 26, info, 15, UI_FONT_REGULAR, ui_alpha(UI_GREY, alpha), UI_ALIGN_LEFT, w - is - 22);
+    if (g->fav) {
+        draw_star(x + w - 14, y + 15, 7, alpha);
+    }
+    ui_round_outline(x, y, w, h, 8, sel ? 2.5f : 1, ui_alpha(sel ? UI_GREEN_HI : UI_GREEN_DIM, alpha));
+}
+
 static void open_game(LibGame *g)
 {
     D.cur = g;
@@ -1247,20 +1374,34 @@ static void open_game(LibGame *g)
     dash_push(SCR_GAME);
 }
 
+#define MAX_SHOWN 16384
+
 static void scr_games(void)
 {
     const float W = ui_w(), H = ui_h();
     /* hidden games left out here only (the rest of the dashboard sees them all) */
     lib_show_hidden(cfg_bool(&D.global, "ui.showhidden", false));
-    const int n = lib_count();
-    char sub[160];
-    if (lib_scanning()) {
-        snprintf(sub, sizeof(sub), "%s %d", T(S_SCANNING), n);
+    static LibGame *vis[MAX_SHOWN];
+    const int total = lib_count(), n = dash_find_list(vis, MAX_SHOWN);
+    const char *desc = dash_find_desc();
+    const bool filtered = desc[0] != 0;
+    char sub[300];
+    if (filtered) {
+        char cnt[64];
+        snprintf(cnt, sizeof(cnt), T(S_SHOWING), n, total);
+        snprintf(sub, sizeof(sub), "%s    %s", cnt, desc);
     } else {
-        snprintf(sub, sizeof(sub), "%d", n);
+        snprintf(sub, sizeof(sub), "%d", total);
     }
     draw_header(T(S_GAMES), sub);
-    if (!n) {
+    if (D.in.y || D.in.find) {
+        dash_find_open(true);   /* the search, the keyboard up */
+        return;
+    }
+    if (D.in.view) {
+        dash_find_next_view();
+    }
+    if (!total) {
         ui_text(W / 2, H * 0.45f, lib_scanning() ? T(S_SCANNING) : T(S_NO_GAMES), 26, UI_FONT_REGULAR, UI_WHITE,
                 UI_ALIGN_CENTER);
         if (D.in.back) {
@@ -1272,33 +1413,77 @@ static void scr_games(void)
         }
         return;
     }
-    /* the games, then a card that adds more (the file browser) */
-    const int nc = n + 1;
-    /* a grid of box-shaped cards (box art is 7:10) */
+    if (!n) {
+        /* the search found nothing: say so, B clears it */
+        ui_text(W / 2, H * 0.42f, T(S_NO_MATCH), 26, UI_FONT_REGULAR, UI_WHITE, UI_ALIGN_CENTER);
+        if (D.in.back) {
+            dash_find_clear();
+        }
+        draw_hints(NULL, T(S_CLEAR_FILTERS), NULL, T(S_FIND));
+        return;
+    }
+    /* the games, then (no search on) a card that adds more (the file browser) */
+    const int nc = n + (filtered ? 0 : 1);
+    const int view = dash_find_view();
     const float top = 140, bottom = H - 150, gw = W - 120;
-    float ch = (bottom - top) / 2 - 18, cw = ch * 0.70f;
-    int cols = (int)((gw + 24) / (cw + 24)) > 0 ? (int)((gw + 24) / (cw + 24)) : 1;
-    /* the largest cards whose rows (one or two) hold every game; more: two rows that scroll */
-    {
+    float cw, ch, gx, gy;   /* a cell, the gaps between */
+    int cols, vrows;        /* across, and rows on screen */
+    if (view == 0) {
+        /* big box-shaped cards (box art is 7:10): the largest whose rows (one
+         * or two) hold every game; more: two rows that scroll */
+        gx = 24;
+        gy = 36;
+        ch = (bottom - top) / 2 - 18;
+        cw = ch * 0.70f;
+        cols = (int)((gw + gx) / (cw + gx)) > 0 ? (int)((gw + gx) / (cw + gx)) : 1;
         float best = 0;
         for (int r = 1; r <= 2; r++) {
             const int need = (nc + r - 1) / r;
             const float by_h = (bottom - top - 30) / r - (r > 1 ? 18 : 0);
-            const float by_w = ((gw + 24) / need - 24) / 0.70f;
+            const float by_w = ((gw + gx) / need - gx) / 0.70f;
             const float chr = fminf(by_h, by_w);
             if (chr > best && chr >= ch * 0.9f) {
                 best = chr;
                 ch = chr;
                 cw = chr * 0.70f;
-                cols = (int)((gw + 24) / (cw + 24));
+                cols = (int)((gw + gx) / (cw + gx));
+            }
+        }
+        vrows = 2;
+    } else if (view == 1) {
+        /* small covers: four rows */
+        gx = 14;
+        gy = 16;
+        vrows = 4;
+        ch = (bottom - top + 10 - gy * (vrows - 1)) / vrows;
+        cw = ch * 0.70f;
+        cols = (int)((gw + gx) / (cw + gx));
+    } else {
+        /* icons and names: rows of tiles */
+        gx = 14;
+        gy = 10;
+        ch = 58;
+        cw = 272;
+        vrows = (int)((bottom - top + 10 + gy) / (ch + gy));
+        cols = (int)((gw + gx) / (cw + gx));
+    }
+    cols = cols > 0 ? cols : 1;
+    const float x0 = (W - (cols * (cw + gx) - gx)) / 2;
+    /* the selection is the game's: it stays on it while games join or the order changes */
+    static LibGame *s_selg;
+    static bool s_on_add;
+    int *sel = &D.sel[SCR_GAMES], *scroll = &D.scroll[SCR_GAMES];
+    if (s_on_add && !filtered) {
+        *sel = n;
+    } else if (s_selg) {
+        for (int i = 0; i < n; i++) {
+            if (vis[i] == s_selg) {
+                *sel = i;
+                break;
             }
         }
     }
-    const float x0 = (W - (cols * (cw + 24) - 24)) / 2;
-    int *sel = &D.sel[SCR_GAMES], *scroll = &D.scroll[SCR_GAMES];
-    if (*sel >= nc) {
-        *sel = nc - 1;
-    }
+    *sel = *sel >= nc ? nc - 1 : *sel < 0 ? 0 : *sel;
     if (D.in.left) {
         *sel = *sel > 0 ? *sel - 1 : nc - 1;
     }
@@ -1312,65 +1497,111 @@ static void scr_games(void)
         *sel = *sel + cols < nc ? *sel + cols : nc - 1;
     }
     if (D.in.lb) {
-        *sel = *sel >= cols * 2 ? *sel - cols * 2 : 0;
+        *sel = *sel >= cols * vrows ? *sel - cols * vrows : 0;
     }
     if (D.in.rb) {
-        *sel = *sel + cols * 2 < nc ? *sel + cols * 2 : nc - 1;
+        *sel = *sel + cols * vrows < nc ? *sel + cols * vrows : nc - 1;
+    }
+    /* the triggers: the next (or this, then the last) group's first game,
+     * by the order (a letter, a publisher, a year; the favorites) */
+    static double s_jump_at;
+    static char s_jump[80];
+    if ((D.in.lt || D.in.rt) && n) {
+        int i = *sel < n ? *sel : n - 1;
+        const int gcur = dash_find_group(vis[i]);
+        if (D.in.rt) {
+            while (i < n && dash_find_group(vis[i]) == gcur) {
+                i++;
+            }
+            i = i < n ? i : *sel < n ? *sel : n - 1;    /* the last group: stays */
+        } else {
+            if ((*sel >= n || i > 0) && (*sel >= n || dash_find_group(vis[i - 1]) == gcur)) {
+                /* within a group (or on the add card, after the last): this group's first */
+                while (i > 0 && dash_find_group(vis[i - 1]) == gcur) {
+                    i--;    /* this group's first */
+                }
+            } else if (i > 0) {
+                const int gprev = dash_find_group(vis[i - 1]);
+                i--;
+                while (i > 0 && dash_find_group(vis[i - 1]) == gprev) {
+                    i--;
+                }
+            }
+        }
+        *sel = i;
+        snprintf(s_jump, sizeof(s_jump), "%s", dash_find_group_name(vis[i]));
+        s_jump_at = ui_time();
+        snd_play(SND_TAB);
     }
     if (D.in.wheel) {
         *scroll -= (int)D.in.wheel;
     }
     const int rows = (nc + cols - 1) / cols;
-    if (D.in.up || D.in.down || D.in.left || D.in.right || D.in.lb || D.in.rb) {
+    static int s_prev = -1, s_prev_cols, s_prev_view;
+    if (*sel != s_prev || cols != s_prev_cols || view != s_prev_view) {
+        /* the selection moved (a press, a jump, games joining before it): in sight */
         if (*sel / cols < *scroll) {
             *scroll = *sel / cols;
         }
-        if (*sel / cols > *scroll + 1) {
-            *scroll = *sel / cols - 1;
+        if (*sel / cols > *scroll + vrows - 1) {
+            *scroll = *sel / cols - vrows + 1;
         }
     }
-    *scroll = *scroll > rows - 2 ? rows - 2 : *scroll;
+    *scroll = *scroll > rows - vrows ? rows - vrows : *scroll;
     *scroll = *scroll < 0 ? 0 : *scroll;
-    ui_clip(0, top - 20, W, bottom - top + 40);
-    for (int r = 0; r < 3; r++) {
+    /* the rows on screen (and the selected card's glow), not the next one's top */
+    ui_clip(0, top - 20, W, vrows * (ch + gy) - gy + 20 + (view == 2 ? 6 : 16));
+    for (int r = 0; r <= vrows; r++) {
         for (int c = 0; c < cols; c++) {
             const int i = (*scroll + r) * cols + c;
             if (i >= nc) {
                 break;
             }
+            const bool s = i == *sel;
+            const float k = s && view < 2 ? (view ? 1.08f : 1.06f) : 1.0f;
+            const float x = x0 + c * (cw + gx) - cw * (k - 1) / 2, y = top + r * (ch + gy) - ch * (k - 1) / 2;
+            const bool over = D.in.mx >= x && D.in.mx < x + cw && D.in.my >= y && D.in.my < y + ch &&
+                              D.in.my < bottom + 20;
+            if (over && D.in.moved) {
+                *sel = i;
+            }
+            const float a = ease(D.anim * 4 - (r * cols + c) * (view ? 0.01f : 0.04f));
             if (i == n) {
-                const bool s = i == *sel;
-                const float k = s ? 1.06f : 1.0f;
-                const float x = x0 + c * (cw + 24) - cw * (k - 1) / 2, y = top + r * (ch + 36) - ch * (k - 1) / 2;
-                const bool over = D.in.mx >= x && D.in.mx < x + cw && D.in.my >= y && D.in.my < y + ch;
-                if (over && D.in.moved) {
-                    *sel = i;
-                }
-                draw_add_card(x, y, cw * k, ch * k, s, ease(D.anim * 4 - (r * cols + c) * 0.04f));
+                draw_add_card(x, y, cw * k, ch * k, s, a);
                 if (over && D.in.click) {
                     dash_browse_games();
                 }
                 continue;
             }
-            LibGame *g = lib_get(i);
-            if (!g) {
-                continue;
+            LibGame *g = vis[i];
+            if (view == 2) {
+                draw_tile(g, x, y, cw, ch, s, a);
+            } else {
+                draw_card(g, x, y, cw * k, ch * k, s, a);
+                if (g->fav) {
+                    draw_star(x + cw * k - (view ? 11 : 18), y + (view ? 11 : 18), view ? 6 : 10, a);
+                }
             }
-            const bool s = i == *sel;
-            const float k = s ? 1.06f : 1.0f;
-            const float x = x0 + c * (cw + 24) - cw * (k - 1) / 2, y = top + r * (ch + 36) - ch * (k - 1) / 2;
-            const bool over = D.in.mx >= x && D.in.mx < x + cw && D.in.my >= y && D.in.my < y + ch;
-            if (over && D.in.moved) {
-                *sel = i;
-            }
-            draw_card(g, x, y, cw * k, ch * k, s, ease(D.anim * 4 - (r * cols + c) * 0.04f));
             if (over && D.in.click) {
                 open_game(g);
             }
         }
     }
     ui_unclip();
-    LibGame *g = *sel < n ? lib_get(*sel) : NULL;
+    s_prev = *sel;
+    s_prev_cols = cols;
+    s_prev_view = view;
+    s_on_add = *sel == n && !filtered;
+    s_selg = *sel < n ? vis[*sel] : NULL;
+    /* the letter (or group) jumped to, big, for a moment */
+    if (s_jump[0] && ui_time() - s_jump_at < 0.9) {
+        const float t = (float)(ui_time() - s_jump_at), al = t < 0.6f ? 1 : 1 - (t - 0.6f) / 0.3f;
+        const float tw = ui_text_width(s_jump, 64, UI_FONT_BOLD), bw = fmaxf(tw + 60, 130), bh = 104;
+        ui_round((W - bw) / 2, (H - bh) / 2 - 20, bw, bh, 18, ui_alpha((UiColor){0x08, 0x1A, 0x04, 0xF0}, al));
+        ui_round_outline((W - bw) / 2, (H - bh) / 2 - 20, bw, bh, 18, 2, ui_alpha(UI_GREEN_HI, al));
+        ui_text(W / 2, (H - bh) / 2 - 2, s_jump, 64, UI_FONT_BOLD, ui_alpha(UI_WHITE, al), UI_ALIGN_CENTER);
+    }
+    LibGame *g = s_selg;
     if (*sel == n) {
         ui_text_fit(60, H - 128, T(S_ADD_GAMES), 32, UI_FONT_BOLD, UI_WHITE, UI_ALIGN_LEFT, W - 400);
         if (D.in.ok) {
@@ -1378,11 +1609,19 @@ static void scr_games(void)
         }
     }
     if (g) {
-        ui_rect_hgrad(0, H - 132, W, 64, ui_alpha(UI_BLACK, 0.0f), ui_alpha(UI_BLACK, 0.0f));
-        ui_text_fit(60, H - 128, g->g.title, 32, UI_FONT_BOLD, UI_WHITE, UI_ALIGN_LEFT, W - 400);
-        char info[96];
-        snprintf(info, sizeof(info), "%08X  v%u  %.1f GB", g->g.title_id, g->g.version, g->g.size / 1073741824.0);
-        ui_text(W - 60, H - 120, info, 20, UI_FONT_REGULAR, UI_GREY, UI_ALIGN_RIGHT);
+        const float tw = ui_text_fit(60, H - 128, g->g.title, 32, UI_FONT_BOLD, UI_WHITE, UI_ALIGN_LEFT, W - 560);
+        if (g->fav) {
+            draw_star(60 + tw + 22, H - 110, 10, 1);
+        }
+        char info[200];
+        const char *pub = lib_publisher(g);
+        char year[16] = "";
+        if (g->g.year) {
+            snprintf(year, sizeof(year), "%d  ", g->g.year);
+        }
+        snprintf(info, sizeof(info), "%s%s%s%08X  v%u  %.1f GB", pub, *pub ? "  " : "", year, g->g.title_id,
+                 g->g.version, g->g.size / 1073741824.0);
+        ui_text_fit(W - 60, H - 120, info, 20, UI_FONT_REGULAR, UI_GREY, UI_ALIGN_RIGHT, 480);
         if (D.in.ok) {
             open_game(g);
         }
@@ -1392,15 +1631,18 @@ static void scr_games(void)
     }
     const char *fs = lib_fetch_status();
     if (fs) {
-        ui_text(W - 60, 84, fs, 18, UI_FONT_REGULAR, UI_GREEN, UI_ALIGN_RIGHT);
-    }
-    if (D.in.y) {
-        lib_fetch_all_covers();
+        ui_text(W - 60, lib_scanning() ? 116 : 84, fs, 18, UI_FONT_REGULAR, UI_GREEN, UI_ALIGN_RIGHT);
     }
     if (D.in.back) {
-        dash_pop();
+        if (filtered) {
+            dash_find_clear();  /* the search off first, then out */
+        } else {
+            dash_pop();
+        }
     }
-    draw_hints(T(S_SELECT), T(S_BACK), T(S_PLAY), T(S_COVERS_ALL));
+    float hx = draw_hints(T(S_SELECT), T(filtered ? S_CLEAR_FILTERS : S_BACK), T(S_PLAY), T(S_FIND));
+    hx = draw_hint_at(hx, 4, T(S_JUMP));
+    draw_hint_at(hx, 5, T(S_VIEW));
 }
 
 /* ------------------------------------------------------------ a game */
@@ -1431,9 +1673,11 @@ static void rename_row(List *l, LibGame *g)
         if (editing) {
             lib_set_name(g, D.edit_tmp);
             D.edit_key = NULL;
+            D.typing = false;
             SDL_StopTextInput(SDL_GetKeyboardFocus());
         } else {
             D.edit_key = k_rename;
+            D.typing = true;
             snprintf(D.edit_tmp, sizeof(D.edit_tmp), "%s", g->g.title);
             SDL_StartTextInput(SDL_GetKeyboardFocus());
         }
@@ -1450,8 +1694,10 @@ static void rename_row(List *l, LibGame *g)
             D.edit_tmp[n] = 0;
             D.in.back = false;
         }
-        if (D.in.key == SDLK_ESCAPE || !list_selected(l)) {
+        if (D.in.key == SDLK_ESCAPE || D.in.back || !list_selected(l)) {
+            /* left as it was (B, Esc, another row) */
             D.edit_key = NULL;
+            D.typing = false;
             SDL_StopTextInput(SDL_GetKeyboardFocus());
             D.in.back = false;
         }
@@ -1469,8 +1715,13 @@ static void scr_game(void)
     char info[200];
     static const char *const k_reg[8] = {"-", "NTSC-U", "NTSC-J", "NTSC-U/J", "PAL", "NTSC-U/PAL", "NTSC-J/PAL",
                                          "World"};
-    snprintf(info, sizeof(info), "%s %08X   v%u   %s %s", T(S_TITLE_ID), g->g.title_id, g->g.version, T(S_REGION),
-             k_reg[g->g.regions & 7]);
+    const char *pub = lib_publisher(g);
+    char year[16] = "";
+    if (g->g.year) {
+        snprintf(year, sizeof(year), "   %d", g->g.year);
+    }
+    snprintf(info, sizeof(info), "%s %08X   v%u   %s %s%s%s%s", T(S_TITLE_ID), g->g.title_id, g->g.version,
+             T(S_REGION), k_reg[g->g.regions & 7], *pub ? "   " : "", pub, year);
     ui_text_fit(70, 160 + ch, info, 18, UI_FONT_REGULAR, UI_GREY, UI_ALIGN_LEFT, W - 140);
     List l;
     list_begin(&l, 110 + cw, 150, W - 180 - cw, ch, 60);
@@ -1502,6 +1753,10 @@ static void scr_game(void)
     if (list_row(&l, T(S_CHOOSE_COVER), NULL, NULL)) {
         dash_browse_file(T(S_CHOOSE_COVER), "png;jpg;jpeg", cover_file_cb, NULL);
     }
+    if (list_row(&l, T(g->fav ? S_REMOVE_FAV : S_ADD_FAV), NULL, NULL)) {
+        lib_set_favorite(g, !g->fav);
+        dash_toast(T(g->fav ? S_FAV_ADDED : S_FAV_REMOVED));
+    }
     rename_row(&l, g);
     if (list_row(&l, T(S_SHORTCUT), NULL, NULL)) {
         char png[1200], ico[1200], where[1200];
@@ -1526,7 +1781,7 @@ static void scr_game(void)
     }
     const char *fs = lib_fetch_status();
     if (fs) {
-        ui_text(W - 60, 84, fs, 18, UI_FONT_REGULAR, UI_GREEN, UI_ALIGN_RIGHT);
+        ui_text(W - 60, lib_scanning() ? 116 : 84, fs, 18, UI_FONT_REGULAR, UI_GREEN, UI_ALIGN_RIGHT);
     }
     if (D.in.back) {
         dash_pop();
@@ -1729,8 +1984,9 @@ int dash_run(SDL_Window *win, const char *exe)
     if (cfg_bool(&D.global, "covers", true) && fn) {
         /* box art for games without, once the scan is done (lib_poll) */
     }
-    bool fetched = false;
+    bool was_scanning = true;
     while (!D.quit) {
+        lib_set_busy(child_running());  /* the scan goes on while a game plays, gently */
         if (child_running()) {
             SDL_Event e;
             while (SDL_PollEvent(&e)) {
@@ -1753,10 +2009,12 @@ int dash_run(SDL_Window *win, const char *exe)
         dash_take_folder();
         lib_poll();
         update_poll();
-        if (!fetched && !lib_scanning() && cfg_bool(&D.global, "covers", true) && lib_count()) {
-            fetched = true;
+        /* a scan done: box art for the games without (those found since too) */
+        const bool scanning = lib_scanning();
+        if (was_scanning && !scanning && cfg_bool(&D.global, "covers", true) && lib_count()) {
             lib_fetch_all_covers();
         }
+        was_scanning = scanning;
         const In saved = D.in;
         const bool asked = D.ask != NULL;  /* a question asked this frame answers from the next */
         if (D.ask) {
@@ -1824,6 +2082,7 @@ int dash_run(SDL_Window *win, const char *exe)
         case SCR_ONLINE: scr_online(); break;
         case SCR_ABOUT: scr_about(); break;
         case SCR_BROWSE: scr_browse(); break;
+        case SCR_FIND: scr_find(); break;
         default: break;
         }
         ui_layer_end();
@@ -1858,6 +2117,9 @@ int dash_run(SDL_Window *win, const char *exe)
             }
             draw_ask();
         }
+        if (scanning && dash_top() != SCR_REMAP) {
+            draw_scan_badge();
+        }
         if (D.toast[0] && ui_time() < D.toast_until) {
             draw_toast();
         }
@@ -1873,13 +2135,30 @@ int dash_run(SDL_Window *win, const char *exe)
         auto_shot();
         ui_end();
         D.anim += 1.0f / 60;
-        /* the folders changed (settings): scan again */
-        static int last_fn = -1;
+        /* xbased.ini changed by hand while xbased runs (a folder added in a
+         * text editor): read again, or leaving would write the old one over it */
+        static double ini_checked;
+        if (ui_time() - ini_checked > 1.0) {
+            ini_checked = ui_time();
+            if (cfg_changed_outside(&D.global)) {
+                cfg_load(&D.global, D.global.path);
+                i18n_set(cfg_get(&D.global, "ui.lang"));
+            }
+        }
+                /* the folders changed (one added, removed or swapped for another): scan again */
+        static unsigned last_sig;
         folders(&fv, &fn);
-        if (fn != last_fn && last_fn >= 0) {
+        unsigned sig = 2166136261u;
+        for (int i = 0; i < fn; i++) {
+            for (const char *s = fv[i]; *s; s++) {
+                sig = (sig ^ (unsigned char)*s) * 16777619u;
+            }
+            sig = (sig ^ 0xFF) * 16777619u;
+        }
+        if (last_sig && sig != last_sig) {
             lib_scan(fv, fn);
         }
-        last_fn = fn;
+        last_sig = sig;
     }
     dash_save_cfg();
     lib_shutdown();
