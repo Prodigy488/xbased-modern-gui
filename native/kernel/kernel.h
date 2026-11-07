@@ -634,8 +634,14 @@ void nc_io_set_launch_dir(const char *dir);
 /* Whether the disc has language folders, English's among them, and none for
  * XC_LANGUAGE lang next to it (Fable's Data\lang\English without Spanish). */
 bool nc_io_disc_lacks_language(const struct NcDisc *disc, int lang);
-/* Console timing: reads take the console's drives' time, their thread waiting (io.c). */
-void nc_io_set_device_time(bool on);
+/* Console timing: reads take the console's drives' time, their thread waiting
+ * (io.c): mode 0 off, 1 a quarter of it, 2 all of it (devtime=). */
+void nc_io_set_device_time(int mode);
+/* ... the drives' own time for the titles that need it, the options not
+ * having chosen (at boot, the XBE's title id and its certificate's name) */
+void nc_io_title_device_time(uint32_t title_id, const char *name);
+/* ... the mode a title gets by default (0: none of its own); name may be NULL */
+int nc_io_title_device_mode(uint32_t title_id, const char *name);
 /* A file object's handle closed (ob.c). */
 void nc_io_close(NcKernel *k, uint32_t object);
 /* Completes the overlapped disc reads the reader thread finished (cheap when

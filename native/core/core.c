@@ -230,6 +230,22 @@ bool nc_core_boot(NcCore *c, int disc_fd)
         nc_kernel_launch_page_restore(&c->kernel, page);
     }
     nc_kernel_title_fixups(&c->kernel, &c->xbe.info);
+    {
+        /* the titles that need the drives' own speed, by id or by the
+         * certificate's title name (another edition, another id) */
+        char name[41] = "";
+        const uint32_t cert = nc_vm_rd32(&c->vm, c->xbe.info.base + 0x118);
+        if (cert >= c->xbe.info.base && cert - c->xbe.info.base < c->xbe.info.sizeof_headers) {
+            for (unsigned i = 0; i < 40; i++) {
+                const uint16_t ch = (uint16_t)(nc_vm_rd32(&c->vm, cert + 0xC + 2 * i) & 0xFFFF);
+                if (!ch) {
+                    break;
+                }
+                name[i] = ch < 0x80 ? (char)ch : '?';
+            }
+        }
+        nc_io_title_device_time(c->xbe.info.title_id, name);
+    }
 
     NcCpuConfig cfg = {
         .membase = c->vm.base,

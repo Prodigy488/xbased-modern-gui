@@ -1,5 +1,19 @@
 # xbased changelog
 
+## 1.0.57 (2026-11)
+
+### Fixes
+- Star Wars: KotOR II stayed on a black screen at the T3-M4 scene on
+  Peragus, after T3's part in the fuel depot. The game needs its disc read
+  at the speed of the Xbox's DVD drive there (players hit the same black
+  screen on the Xbox when they played it from the hard disk). Every
+  edition of KotOR II now reads its disc at the drive's speed by default.
+
+### New
+- Disc speed in a game's settings: Fast (as fast as the PC reads, the
+  default), Close to the console's, or Like the console, for games that
+  break when their loads finish too soon.
+
 ## 1.0.56 (2026-11)
 
 ### Fixes
