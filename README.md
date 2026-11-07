@@ -49,8 +49,8 @@ the emulator, the dashboard, the game fixes and every release.
 
 | Platform | File | |
 |---|---|---|
-| **Windows** 10/11 (x64) | `xbased-1.0.53-windows-x64.zip` | Unzip anywhere and run `xbased.exe`. Portable: everything stays in its folder. |
-| **Linux** (x86-64) | `xbased-1.0.53-x86_64.AppImage` | `chmod +x` it and run. Ubuntu 22.04 or newer, or any distribution of the same age. |
+| **Windows** 10/11 (x64) | `xbased-1.0.54-windows-x64.zip` | Unzip anywhere and run `xbased.exe`. Portable: everything stays in its folder. |
+| **Linux** (x86-64) | `xbased-1.0.54-x86_64.AppImage` | `chmod +x` it and run. Ubuntu 22.04 or newer, or any distribution of the same age. |
 
 Get them from **[Releases](https://github.com/crazyriddler/xbased/releases/latest)**.
 
@@ -192,9 +192,11 @@ xbased doesn't include any copyrighted Xbox software.
 
 1. Download xbased from [Releases](https://github.com/crazyriddler/xbased/releases/latest):
    unzip it anywhere (Windows) or run the AppImage (Linux).
-2. Start it: the dashboard opens. **Settings › Interface › Add folder** and pick
-   the folder with your disc images (or **Add a game file** for a single
-   image).
+2. Start it: the dashboard opens. In **Games**, choose **Add games** (the last
+   card, or A on an empty library) to open the file browser: go to the folder
+   with your disc images and press X to add it, or A on a single image to add
+   just that one. It works with a gamepad, the keyboard or the mouse, and
+   lists every drive or mounted disk with its free space.
 3. Choose a game in **Games**. Box art downloads automatically (it can be
    turned off).
 

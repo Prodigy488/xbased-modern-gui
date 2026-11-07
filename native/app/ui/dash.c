@@ -20,7 +20,7 @@
 #endif
 
 #ifndef XBASED_VERSION
-#define XBASED_VERSION "1.0.53"
+#define XBASED_VERSION "1.0.54"
 #endif
 
 Dash D;
@@ -418,7 +418,8 @@ static void poll_input(void)
 
 /* Scripted input and pictures (tests): HAKUX_AUTO_CMD=<file>, a command a
  * line as it grows: UP DOWN LEFT RIGHT OK BACK X Y LB RB, "shot <name>" (a
- * BMP in HAKUX_AUTO_DIR), "quit". */
+ * BMP in HAKUX_AUTO_DIR), "quit"; real input events too: "KEY <name>",
+ * "MOUSE x y" (720p units), CLICK, RCLICK, "WHEEL n". */
 static char g_shot_req[256];
 static long long g_auto_off = -1;   /* -1: from the file's end at the next look */
 
@@ -504,6 +505,49 @@ static void auto_poll(void)
                 SDL_SetWindowFullscreen(g_win, false);
                 SDL_SetWindowSize(g_win, w, h);
             }
+        } else if (!strncmp(line, "KEY ", 4)) {
+            /* a key as the keyboard sends it (its SDL name: Return, Backspace, Down, X) */
+            SDL_Event e = {0};
+            e.type = SDL_EVENT_KEY_DOWN;
+            e.key.key = SDL_GetKeyFromName(line + 4);
+            e.key.windowID = SDL_GetWindowID(g_win);
+            e.key.down = true;
+            SDL_PushEvent(&e);
+            e.type = SDL_EVENT_KEY_UP;
+            e.key.down = false;
+            SDL_PushEvent(&e);
+        } else if (!strncmp(line, "MOUSE ", 6)) {
+            /* the pointer to (x, y) in 720p units, as a mouse moves it */
+            float x = 0, y = 0;
+            if (sscanf(line + 6, "%f %f", &x, &y) == 2) {
+                const float k = ui_scale() / SDL_GetWindowPixelDensity(g_win);
+                SDL_WarpMouseInWindow(g_win, x * k, y * k);
+                SDL_Event e = {0};
+                e.type = SDL_EVENT_MOUSE_MOTION;
+                e.motion.windowID = SDL_GetWindowID(g_win);
+                e.motion.x = x * k;
+                e.motion.y = y * k;
+                e.motion.xrel = 4;
+                e.motion.yrel = 4;
+                SDL_PushEvent(&e);
+            }
+        } else if (!strcmp(line, "CLICK") || !strcmp(line, "RCLICK")) {
+            SDL_Event e = {0};
+            e.type = SDL_EVENT_MOUSE_BUTTON_DOWN;
+            e.button.windowID = SDL_GetWindowID(g_win);
+            e.button.button = line[0] == 'R' ? SDL_BUTTON_RIGHT : SDL_BUTTON_LEFT;
+            e.button.down = true;
+            e.button.clicks = 1;
+            SDL_PushEvent(&e);
+            e.type = SDL_EVENT_MOUSE_BUTTON_UP;
+            e.button.down = false;
+            SDL_PushEvent(&e);
+        } else if (!strncmp(line, "WHEEL ", 6)) {
+            SDL_Event e = {0};
+            e.type = SDL_EVENT_MOUSE_WHEEL;
+            e.wheel.windowID = SDL_GetWindowID(g_win);
+            e.wheel.y = (float)atof(line + 6);
+            SDL_PushEvent(&e);
         } else if (!strcmp(line, "full")) {
             SDL_SetWindowFullscreen(g_win, true);
         } else if (!strcmp(line, "quit")) {
@@ -1176,6 +1220,22 @@ static void draw_card(LibGame *g, float x, float y, float w, float h, bool sel, 
     ui_round_outline(x, y, w, h, 10, sel ? 3 : 1, ui_alpha(sel ? UI_GREEN_HI : UI_GREEN_DIM, alpha));
 }
 
+/* the last card of the grid: the file browser, games added */
+static void draw_add_card(float x, float y, float w, float h, bool sel, float alpha)
+{
+    if (sel) {
+        ui_glow(x + w / 2, y + h / 2, w * 1.1f, ui_alpha(UI_GREEN, 0.35f * alpha));
+    }
+    ui_round(x, y, w, h, 10, ui_alpha((UiColor){0x08, 0x16, 0x05, 0xE8}, alpha));
+    const float cx = x + w / 2, cy = y + h * 0.4f, r = w * 0.26f;
+    ui_ring(cx, cy, r, r, 0, 3, ui_alpha(sel ? UI_GREEN_HI : UI_GREEN, alpha));
+    ui_rect(cx - r * 0.5f, cy - 3, r, 6, ui_alpha(sel ? UI_GREEN_HI : UI_GREEN, alpha));
+    ui_rect(cx - 3, cy - r * 0.5f, 6, r, ui_alpha(sel ? UI_GREEN_HI : UI_GREEN, alpha));
+    ui_text_fit(cx, y + h * 0.68f, T(S_ADD_GAMES), 20, UI_FONT_BOLD, ui_alpha(sel ? UI_WHITE : UI_GREY, alpha),
+                UI_ALIGN_CENTER, w - 14);
+    ui_round_outline(x, y, w, h, 10, sel ? 3 : 1, ui_alpha(sel ? UI_GREEN_HI : UI_GREEN_DIM, alpha));
+}
+
 static void open_game(LibGame *g)
 {
     D.cur = g;
@@ -1206,14 +1266,14 @@ static void scr_games(void)
         if (D.in.back) {
             dash_pop();
         }
-        draw_hints(lib_scanning() ? NULL : T(S_ADD_FOLDER), T(S_BACK), NULL, lib_scanning() ? NULL : T(S_ADD_GAME_FILE));
-        if ((D.in.ok || D.in.click) && !lib_scanning()) {
-            SDL_ShowOpenFolderDialog(add_folder_cb, NULL, g_win, NULL, false);
-        } else if (D.in.y && !lib_scanning()) {
-            dash_pick_game_file();
+        draw_hints(T(S_ADD_GAMES), T(S_BACK), NULL, NULL);    /* while it scans too */
+        if (D.in.ok || D.in.click) {
+            dash_browse_games();
         }
         return;
     }
+    /* the games, then a card that adds more (the file browser) */
+    const int nc = n + 1;
     /* a grid of box-shaped cards (box art is 7:10) */
     const float top = 140, bottom = H - 150, gw = W - 120;
     float ch = (bottom - top) / 2 - 18, cw = ch * 0.70f;
@@ -1222,7 +1282,7 @@ static void scr_games(void)
     {
         float best = 0;
         for (int r = 1; r <= 2; r++) {
-            const int need = (n + r - 1) / r;
+            const int need = (nc + r - 1) / r;
             const float by_h = (bottom - top - 30) / r - (r > 1 ? 18 : 0);
             const float by_w = ((gw + 24) / need - 24) / 0.70f;
             const float chr = fminf(by_h, by_w);
@@ -1236,31 +1296,31 @@ static void scr_games(void)
     }
     const float x0 = (W - (cols * (cw + 24) - 24)) / 2;
     int *sel = &D.sel[SCR_GAMES], *scroll = &D.scroll[SCR_GAMES];
-    if (*sel >= n) {
-        *sel = n - 1;
+    if (*sel >= nc) {
+        *sel = nc - 1;
     }
     if (D.in.left) {
-        *sel = *sel > 0 ? *sel - 1 : n - 1;
+        *sel = *sel > 0 ? *sel - 1 : nc - 1;
     }
     if (D.in.right) {
-        *sel = (*sel + 1) % n;
+        *sel = (*sel + 1) % nc;
     }
     if (D.in.up && *sel >= cols) {
         *sel -= cols;
     }
     if (D.in.down) {
-        *sel = *sel + cols < n ? *sel + cols : n - 1;
+        *sel = *sel + cols < nc ? *sel + cols : nc - 1;
     }
     if (D.in.lb) {
         *sel = *sel >= cols * 2 ? *sel - cols * 2 : 0;
     }
     if (D.in.rb) {
-        *sel = *sel + cols * 2 < n ? *sel + cols * 2 : n - 1;
+        *sel = *sel + cols * 2 < nc ? *sel + cols * 2 : nc - 1;
     }
     if (D.in.wheel) {
         *scroll -= (int)D.in.wheel;
     }
-    const int rows = (n + cols - 1) / cols;
+    const int rows = (nc + cols - 1) / cols;
     if (D.in.up || D.in.down || D.in.left || D.in.right || D.in.lb || D.in.rb) {
         if (*sel / cols < *scroll) {
             *scroll = *sel / cols;
@@ -1275,8 +1335,22 @@ static void scr_games(void)
     for (int r = 0; r < 3; r++) {
         for (int c = 0; c < cols; c++) {
             const int i = (*scroll + r) * cols + c;
-            if (i >= n) {
+            if (i >= nc) {
                 break;
+            }
+            if (i == n) {
+                const bool s = i == *sel;
+                const float k = s ? 1.06f : 1.0f;
+                const float x = x0 + c * (cw + 24) - cw * (k - 1) / 2, y = top + r * (ch + 36) - ch * (k - 1) / 2;
+                const bool over = D.in.mx >= x && D.in.mx < x + cw && D.in.my >= y && D.in.my < y + ch;
+                if (over && D.in.moved) {
+                    *sel = i;
+                }
+                draw_add_card(x, y, cw * k, ch * k, s, ease(D.anim * 4 - (r * cols + c) * 0.04f));
+                if (over && D.in.click) {
+                    dash_browse_games();
+                }
+                continue;
             }
             LibGame *g = lib_get(i);
             if (!g) {
@@ -1296,7 +1370,13 @@ static void scr_games(void)
         }
     }
     ui_unclip();
-    LibGame *g = lib_get(*sel);
+    LibGame *g = *sel < n ? lib_get(*sel) : NULL;
+    if (*sel == n) {
+        ui_text_fit(60, H - 128, T(S_ADD_GAMES), 32, UI_FONT_BOLD, UI_WHITE, UI_ALIGN_LEFT, W - 400);
+        if (D.in.ok) {
+            dash_browse_games();
+        }
+    }
     if (g) {
         ui_rect_hgrad(0, H - 132, W, 64, ui_alpha(UI_BLACK, 0.0f), ui_alpha(UI_BLACK, 0.0f));
         ui_text_fit(60, H - 128, g->g.title, 32, UI_FONT_BOLD, UI_WHITE, UI_ALIGN_LEFT, W - 400);
@@ -1420,8 +1500,7 @@ static void scr_game(void)
         lib_fetch_cover(g);
     }
     if (list_row(&l, T(S_CHOOSE_COVER), NULL, NULL)) {
-        static const SDL_DialogFileFilter f[] = {{"Images (*.png, *.jpg)", "png;jpg;jpeg"}};
-        SDL_ShowOpenFileDialog(cover_file_cb, NULL, SDL_GetKeyboardFocus(), f, 1, NULL, false);
+        dash_browse_file(T(S_CHOOSE_COVER), "png;jpg;jpeg", cover_file_cb, NULL);
     }
     rename_row(&l, g);
     if (list_row(&l, T(S_SHORTCUT), NULL, NULL)) {
@@ -1744,6 +1823,7 @@ int dash_run(SDL_Window *win, const char *exe)
         case SCR_MEMORY_TITLE: scr_memory_title(); break;
         case SCR_ONLINE: scr_online(); break;
         case SCR_ABOUT: scr_about(); break;
+        case SCR_BROWSE: scr_browse(); break;
         default: break;
         }
         ui_layer_end();

@@ -28,7 +28,7 @@ typedef struct In {
 enum Screen {
     SCR_MAIN, SCR_GAMES, SCR_GAME, SCR_GAME_SETTINGS, SCR_MODS, SCR_STATES, SCR_SETTINGS, SCR_CONTROLS,
     SCR_REMAP, SCR_MEMORY, SCR_MEMORY_TITLE, SCR_ONLINE, SCR_ABOUT, SCR_INGAME, SCR_INGAME_SLOTS, SCR_STICKS,
-    SCR_TRIGGERS, SCR_COUNT
+    SCR_TRIGGERS, SCR_BROWSE, SCR_COUNT
 };
 
 typedef struct Dash {
@@ -121,14 +121,18 @@ void scr_online(void);
 void scr_game_settings(void);
 void scr_mods(void);
 void scr_states(void);
-/* the folder picker's answer: a game folder added (SDL_ShowOpenFolderDialog) */
-void add_folder_cb(void *ud, const char *const *files, int filter);
-void dash_take_folder(void);
-/* a game file started without adding it to the library: a dialog for one,
- * or one given (dropped on the window) */
-void dash_pick_play_file(void);
+/* The file browser (dash_browse.c), the dashboard's own for the gamepad,
+ * the keyboard and the mouse: dash_browse_games adds folders and game
+ * files to the library; dash_browse_file has one file chosen (exts:
+ * "png;jpg", NULL any) and hands it to cb as a file dialog would. */
+void dash_browse_games(void);
+void dash_browse_file(const char *title, const char *exts, SDL_DialogFileCallback cb, void *ud);
+void scr_browse(void);
+/* a game file started without adding it to the library: one chosen, or
+ * dropped on the window; dash_take_folder starts it from the UI's thread */
 void dash_play_file_later(const char *path);
-void dash_pick_game_file(void);  /* a disc image the folders don't have, added on its own */    /* each frame: a folder picked meanwhile goes in */
+void dash_pick_play_file(void);
+void dash_take_folder(void);
 
 /* the game's files */
 void game_cfg_path(const LibGame *g, char *out, size_t n);

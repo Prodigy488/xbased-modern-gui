@@ -77,9 +77,8 @@ static void import_ask(void)
         return;
     }
     if (!xi_find_toml(g_xemu_toml, sizeof(g_xemu_toml))) {
-        static const SDL_DialogFileFilter f[] = {{"xemu.toml", "toml"}};
         dash_toast(T(S_IMPORT_XEMU_PICK));
-        SDL_ShowOpenFileDialog(toml_cb, NULL, NULL, f, 1, NULL, false);
+        dash_browse_file("xemu.toml", "toml", toml_cb, NULL);
         return;
     }
     dash_ask(T(S_IMPORT_XEMU_ASK), import_yes);

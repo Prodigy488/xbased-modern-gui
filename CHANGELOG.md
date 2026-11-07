@@ -1,5 +1,38 @@
 # xbased changelog
 
+## 1.0.54 (2026-11)
+
+### New
+- A file browser of xbased's own for adding games, made for the gamepad
+  and just as usable with the keyboard or the mouse. Before, adding games
+  opened the system's file dialog, which a gamepad can't drive.
+  - Open it from the new **Add games** card at the end of the Games grid
+    (or with A when the library is empty), or from Settings, Interface.
+  - On the left are your places: the library's folders, your home,
+    desktop, documents and downloads folders, and every drive with its
+    name, file system and free space. On Linux that's the disks your
+    desktop mounts (/media, /run/media), anything mounted in /mnt and
+    any other real disk, from ext4, Btrfs and XFS to FAT32, exFAT, NTFS
+    and network shares.
+  - On the right is the folder you're in: its folders first, then its
+    disc images. Y shows the other files too. Hidden and system folders
+    stay out.
+  - A opens a folder, or adds a single game image to the library after
+    checking it really is one. X (or the Add this folder button) adds
+    the folder you're in. Adding a folder that holds folders or files
+    already in the library merges them into it. Everything that's
+    already in the library is marked as such.
+  - B goes up a folder and keeps your place in the list, left and right
+    move between the two sides, LB and RB page through long folders.
+    With the mouse, a click opens, the wheel scrolls and a right click
+    goes back.
+  - Folders are read in the background, so a slow USB disk or network
+    share doesn't freeze the dashboard, and the browser opens where you
+    left it last time.
+- The same browser replaces the other file dialogs too: playing a game
+  file without adding it, choosing a game's cover image, and finding
+  xemu.toml for importing xemu saves.
+
 ## 1.0.53 (2026-11)
 
 ### Fixes

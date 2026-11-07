@@ -130,44 +130,6 @@ static void tab_bar(const enum UiStr *tabs, int n)
     }
 }
 
-/* SDL may call it on a thread of its own: the folder waits for the UI's thread */
-static char g_new_folder[1024];
-static SDL_AtomicInt g_new_folder_set;
-
-void add_folder_cb(void *ud, const char *const *files, int filter)
-{
-    (void)ud;
-    (void)filter;
-    if (files && files[0] && !SDL_GetAtomicInt(&g_new_folder_set)) {
-        snprintf(g_new_folder, sizeof(g_new_folder), "%s", files[0]);
-        SDL_SetAtomicInt(&g_new_folder_set, 1);
-    }
-}
-
-/* a game file: any name (what the folders' scan leaves out: another
- * extension, a folder deeper than it looks) */
-static char g_new_file[1024];
-static SDL_AtomicInt g_new_file_set;
-
-static void SDLCALL add_file_cb(void *ud, const char *const *files, int filter)
-{
-    (void)ud;
-    (void)filter;
-    if (files && files[0] && !SDL_GetAtomicInt(&g_new_file_set)) {
-        snprintf(g_new_file, sizeof(g_new_file), "%s", files[0]);
-        SDL_SetAtomicInt(&g_new_file_set, 1);
-    }
-}
-
-void dash_pick_game_file(void)
-{
-    static const SDL_DialogFileFilter f[] = {
-        {"Xbox disc images (*.iso, *.xiso, *.cci, *.chd)", "iso;xiso;cci;chd"},
-        {"All files", "*"},
-    };
-    SDL_ShowOpenFileDialog(add_file_cb, NULL, SDL_GetKeyboardFocus(), f, 2, NULL, false);
-}
-
 /* a game file played once, not added to the library (the dialog's, or one
  * dropped on the window): started from the UI's thread (dash_take_folder) */
 static char g_play_file[1024];
@@ -192,11 +154,7 @@ static void SDLCALL play_file_cb(void *ud, const char *const *files, int filter)
 
 void dash_pick_play_file(void)
 {
-    static const SDL_DialogFileFilter f[] = {
-        {"Xbox disc images (*.iso, *.xiso, *.cci, *.chd)", "iso;xiso;cci;chd"},
-        {"All files", "*"},
-    };
-    SDL_ShowOpenFileDialog(play_file_cb, NULL, SDL_GetKeyboardFocus(), f, 2, NULL, false);
+    dash_browse_file(T(S_PLAY_GAME_FILE), "iso;xiso;cci;chd", play_file_cb, NULL);
 }
 
 void dash_take_folder(void)
@@ -212,24 +170,6 @@ void dash_take_folder(void)
             dash_toast(T(S_NOT_A_GAME));
         }
         SDL_SetAtomicInt(&g_play_file_set, 0);
-    }
-    if (SDL_GetAtomicInt(&g_new_folder_set)) {
-        cfg_add(&D.global, "gamedir", g_new_folder);
-        cfg_save(&D.global);
-        SDL_SetAtomicInt(&g_new_folder_set, 0);
-    }
-    if (SDL_GetAtomicInt(&g_new_file_set)) {
-        const char *have[32];
-        const int n = cfg_all(&D.global, "gamefile", have, 32);
-        bool dup = false;
-        for (int i = 0; i < n; i++) {
-            dup |= !strcmp(have[i], g_new_file);
-        }
-        if (!dup) {
-            cfg_add(&D.global, "gamefile", g_new_file);
-            cfg_save(&D.global);
-        }
-        SDL_SetAtomicInt(&g_new_file_set, 0);
     }
 }
 
@@ -318,8 +258,8 @@ void scr_settings(void)
                 break;
             }
         }
-        if (list_row(&l, T(S_ADD_FOLDER), "+", NULL)) {
-            SDL_ShowOpenFolderDialog(add_folder_cb, NULL, SDL_GetKeyboardFocus(), NULL, false);
+        if (list_row(&l, T(S_ADD_GAMES), "+", NULL)) {
+            dash_browse_games();
         }
         const char *files[32];
         const int nf = cfg_all(&D.global, "gamefile", files, 32);
@@ -333,9 +273,6 @@ void scr_settings(void)
                 cfg_save(&D.global);
                 break;
             }
-        }
-        if (list_row(&l, T(S_ADD_GAME_FILE), "+", NULL)) {
-            dash_pick_game_file();
         }
         if (list_row(&l, T(S_PLAY_GAME_FILE), ">", NULL)) {
             dash_pick_play_file();
