@@ -133,7 +133,7 @@ bool nc_core_boot(NcCore *c, int disc_fd)
      * moved the pool's first range) */
     nc_kernel_pool_for(g_loadstate[0] ? nc_kern_state_kprocess(g_loadstate) : 0);
     if (!nc_vm_init(&c->vm, ram) || !nc_kernel_init(&c->kernel, &c->vm)) {
-        return boot_failed("The emulated console couldn't be set up.");
+        return boot_failed(nc_vm_why ? nc_vm_why : "The emulated console couldn't be set up.");
     }
     if (g_relaunch) {
         /* the last title's kept memory (D3D's saved display), where it was */
@@ -212,6 +212,9 @@ bool nc_core_boot(NcCore *c, int disc_fd)
     }
     if (!nc_xbe_load(&c->vm, &c->disc, xbe_path, &c->kernel, &c->xbe)) {
         char why[256], host[512];
+        if (nc_vm_why) {
+            return boot_failed(nc_vm_why);  /* the host's memory where the XBE goes */
+        }
         if (!strcasecmp(xbe_path, NC_DASHBOARD_PATH) && !nc_io_host_file(xbe_path, host, sizeof(host))) {
             return boot_failed("The dashboard isn't installed: its files (xboxdash.xbe and its folders) go on "
                                "the hard disk's C: drive.");

@@ -1,5 +1,17 @@
 # xbased changelog
 
+## 1.0.56 (2026-11)
+
+### Fixes
+- No game booted on a Windows with "Randomize memory allocations
+  (Bottom-up ASLR)" turned off in Exploit protection: Windows put its own
+  memory where the game's program has to go, and every game said its
+  default.xbe couldn't be loaded. xbased now runs its games with that
+  protection on for their own process, without changing any setting,
+  and if the memory is still taken the message says what to turn on.
+- The "Add games" card in the icons view was drawn at the size of a
+  cover's, spilling out of its tile. It's laid out like a game's tile now.
+
 ## 1.0.55 (2026-11)
 
 ### Fixes

@@ -17,10 +17,12 @@
 #include <time.h>
 #ifdef _WIN32
 #include <windows.h>
+
+#include "native/app/win_aslr.h"
 #endif
 
 #ifndef XBASED_VERSION
-#define XBASED_VERSION "1.0.55"
+#define XBASED_VERSION "1.0.56"
 #endif
 
 Dash D;
@@ -1079,20 +1081,65 @@ static struct {
     UiTex *pic;
 } g_go;
 
+#ifdef _WIN32
+static HANDLE g_follow;     /* the game's process on Windows (follow below) */
+
+/* s, quoted for a Windows command line, after cmd's n bytes */
+static size_t quote_arg(char *cmd, size_t n, size_t size, const char *s)
+{
+    size_t slashes = 0;
+    if (n && n + 1 < size) {
+        cmd[n++] = ' ';
+    }
+    if (n + 1 < size) {
+        cmd[n++] = '"';
+    }
+    for (; *s && n + 4 < size; s++) {
+        slashes = *s == '\\' ? slashes + 1 : 0;
+        cmd[n++] = *s;
+    }
+    for (; slashes && n + 3 < size; slashes--) {
+        cmd[n++] = '\\';    /* a closing quote after backslashes: each doubled */
+    }
+    if (n + 1 < size) {
+        cmd[n++] = '"';
+    }
+    cmd[n] = 0;
+    return n;
+}
+#endif
+
 static void go_spawn(void)
 {
-    const char *args[4] = {D.exe, g_go.path, g_go.has_extra ? g_go.extra : NULL, NULL};
 #ifdef _WIN32
     {   /* the game gives this window the foreground as it quits (win_main.c give_foreground) */
         char hv[32];
         void *h = SDL_GetPointerProperty(SDL_GetWindowProperties(g_win), SDL_PROP_WINDOW_WIN32_HWND_POINTER, NULL);
         snprintf(hv, sizeof(hv), "%llx", (unsigned long long)(uintptr_t)h);
-        SDL_SetEnvironmentVariable(SDL_GetEnvironment(), "XBASED_DASH_HWND", hv, true);
+        SetEnvironmentVariableA("XBASED_DASH_HWND", hv);
     }
-#endif
+    /* the game's process with Windows' address randomization on for it
+     * (win_aslr.h), followed as a run started again is */
+    static char cmd[4096];
+    size_t n = quote_arg(cmd, 0, sizeof(cmd), D.exe);
+    n = quote_arg(cmd, n, sizeof(cmd), g_go.path);
+    if (g_go.has_extra) {
+        quote_arg(cmd, n, sizeof(cmd), g_go.extra);
+    }
+    PROCESS_INFORMATION pi;
+    if (xb_spawn(D.exe, cmd, NULL, &pi)) {
+        CloseHandle(pi.hThread);
+        g_follow = pi.hProcess;
+    } else {
+        char e[96];
+        snprintf(e, sizeof(e), "The game couldn't start (error %lu)", GetLastError());
+        dash_toast(e);
+#else
+    const char *args[4] = {D.exe, g_go.path, g_go.has_extra ? g_go.extra : NULL, NULL};
     g_child = SDL_CreateProcess(args, false);
     if (!g_child) {
         dash_toast(SDL_GetError());
+#endif
         g_go.back = ui_time();      /* the screen back */
         return;
     }
@@ -1125,7 +1172,6 @@ void launch_game(LibGame *g, const char *extra)
 /* A game run again (a state loaded, a restart) is a new process on
  * Windows: the one that ends says its id (exit code, bit 30), and the
  * dashboard follows that one instead of coming back. */
-static HANDLE g_follow;
 
 static bool follow(DWORD code)
 {
@@ -1298,6 +1344,24 @@ static void draw_card(LibGame *g, float x, float y, float w, float h, bool sel, 
 /* the last card of the grid: the file browser, games added */
 static void draw_add_card(float x, float y, float w, float h, bool sel, float alpha)
 {
+    if (w > h) {
+        /* the icons view's tile, laid out as a game's (draw_tile): the ring
+         * where the icon goes, the words beside it */
+        const UiColor fg = ui_alpha(sel ? UI_GREEN_HI : UI_GREEN, alpha);
+        if (sel) {
+            ui_glow(x + w / 2, y + h / 2, w * 0.7f, ui_alpha(UI_GREEN, 0.3f * alpha));
+        }
+        ui_round(x, y, w, h, 8, ui_alpha(sel ? (UiColor){0x1A, 0x44, 0x0C, 0xFF} : (UiColor){0x0E, 0x26, 0x07, 0xFF},
+                                         alpha));
+        const float is = h - 10, cx = x + 5 + is / 2, cy = y + h / 2, r = is * 0.36f;
+        ui_ring(cx, cy, r, r, 0, 2.5f, fg);
+        ui_rect(cx - r * 0.5f, cy - 2, r, 4, fg);
+        ui_rect(cx - 2, cy - r * 0.5f, 4, r, fg);
+        ui_text_fit(x + is + 14, y + h / 2 - 12, T(S_ADD_GAMES), 19, sel ? UI_FONT_BOLD : UI_FONT_REGULAR,
+                    ui_alpha(sel ? UI_WHITE : UI_GREY, alpha), UI_ALIGN_LEFT, w - is - 22);
+        ui_round_outline(x, y, w, h, 8, sel ? 2.5f : 1, ui_alpha(sel ? UI_GREEN_HI : UI_GREEN_DIM, alpha));
+        return;
+    }
     if (sel) {
         ui_glow(x + w / 2, y + h / 2, w * 1.1f, ui_alpha(UI_GREEN, 0.35f * alpha));
     }

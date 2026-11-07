@@ -36,6 +36,7 @@
 #include "hw/xbox/hle/vk/swapchain.h"
 #include "native/app/ui/xbox_data.h"
 #include "native/app/ui/xemu_import.h"
+#include "native/app/win_aslr.h"
 #include "native/app/win_auto.h"
 #include "native/app/win_mods.h"
 #include "native/core/cheats.h"
@@ -384,9 +385,8 @@ static void run_again(const char *extra, bool hold)
     if (g_nw.hwnd) {
         SetWindowPos((HWND)g_nw.hwnd, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
     }
-    STARTUPINFOA si = {.cb = sizeof(si)};
     PROCESS_INFORMATION pi;
-    if (CreateProcessA(exe, cmd, NULL, NULL, FALSE, 0, NULL, g_exe_dir, &si, &pi)) {
+    if (xb_spawn(exe, cmd, g_exe_dir, &pi)) {
         CloseHandle(pi.hThread);
         wait_next_run(ev, pi.hProcess);
         CloseHandle(pi.hProcess);
@@ -1103,7 +1103,7 @@ static const char *pick_disc(void)
 }
 
 #ifndef XBASED_VERSION
-#define XBASED_VERSION "1.0.55"
+#define XBASED_VERSION "1.0.56"
 #endif
 #ifdef _WIN32
 #define NC_PLATFORM_NAME "Windows"
@@ -1113,6 +1113,9 @@ static const char *pick_disc(void)
 
 int main(int argc, char *argv[])
 {
+#ifdef _WIN32
+    xb_aslr_check();    /* Windows' first memory where the guest's goes: run again without (win_aslr.h) */
+#endif
     exe_dir();
     read_ini();
     g_ncfg_args = g_nargs;
