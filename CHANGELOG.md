@@ -1,5 +1,20 @@
 # xbased changelog
 
+## 1.0.52 (2026-11)
+
+### Fixes
+- RalliSport Challenge no longer says the console doesn't have enough
+  free blocks when you create a profile. Before saving one, the game
+  makes a file named with a single space in its save folder. The
+  console's file system takes that name, but Windows drops spaces at the
+  end of a name, so the file became the save folder itself, creating it
+  failed and the game took that as a full disk. Names Windows can't hold
+  (ending in a space or a dot, or a device name like CON or NUL) are now
+  stored on the host with those characters written as =XX, and the game
+  sees them exactly as it named them. Profiles now get created and saved,
+  races start, and the profile is still there after restarting. Thanks to
+  Archive82-star for the report (#92).
+
 ## 1.0.51 (2026-11)
 
 ### Fixes

@@ -407,9 +407,74 @@ static bool mkdirs(const char *path)
     return mkdir(tmp, 0775) == 0 || errno == EEXIST;
 }
 
+/* Names the console's FATX takes that a Windows host can't hold: one
+ * ending in spaces or dots (Windows drops them, and the name becomes
+ * another) and the device names (CON, NUL, COM1 and the like, with or
+ * without an extension). On the host those characters are kept as =XX
+ * (hex), and '=', which FATX doesn't take, as =3D, on every host alike so
+ * a hard disk folder moves between them. RalliSport Challenge makes a
+ * folder named " " in its save folder for each profile: on Windows that
+ * was the save folder itself, the create failed, and the game said the
+ * console had no free blocks to save. */
+static bool dos_device(const char *n)
+{
+    static const char *const devs[] = {"CON", "PRN", "AUX", "NUL", "CONIN$", "CONOUT$"};
+    const size_t len = strcspn(n, ".");
+    for (size_t i = 0; i < sizeof(devs) / sizeof(devs[0]); i++) {
+        if (len == strlen(devs[i]) && !strncasecmp(n, devs[i], len)) {
+            return true;
+        }
+    }
+    return len == 4 && (!strncasecmp(n, "COM", 3) || !strncasecmp(n, "LPT", 3)) && n[3] >= '0' && n[3] <= '9';
+}
+
+static void name_to_host(const char *g, char *h, size_t cap)
+{
+    const size_t n = strlen(g);
+    if (!strcmp(g, ".") || !strcmp(g, "..")) {
+        snprintf(h, cap, "%s", g);
+        return;
+    }
+    size_t keep = n, o = 0;
+    while (keep && (g[keep - 1] == ' ' || g[keep - 1] == '.')) {
+        keep--;
+    }
+    const bool dev = dos_device(g);
+    for (size_t i = 0; i < n && o + 4 < cap; i++) {
+        const unsigned char c = (unsigned char)g[i];
+        if (c == '=' || i >= keep || (i == 0 && dev)) {
+            o += (size_t)snprintf(h + o, cap - o, "=%02X", c);
+        } else {
+            h[o++] = (char)c;
+        }
+    }
+    h[o] = 0;
+}
+
+static int hex_digit(char c)
+{
+    return c >= '0' && c <= '9' ? c - '0' : c >= 'A' && c <= 'F' ? c - 'A' + 10 : c >= 'a' && c <= 'f' ? c - 'a' + 10 : -1;
+}
+
+static void name_from_host(const char *h, char *g, size_t cap)
+{
+    size_t o = 0;
+    for (size_t i = 0; h[i] && o + 1 < cap; i++) {
+        int hi, lo;
+        if (h[i] == '=' && (hi = hex_digit(h[i + 1])) >= 0 && (lo = hex_digit(h[i + 2])) >= 0) {
+            g[o++] = (char)(hi << 4 | lo);
+            i += 2;
+        } else {
+            g[o++] = h[i];
+        }
+    }
+    g[o] = 0;
+}
+
 /* Host path for a path inside partition part, matching existing names
- * case-insensitively. Returns 1 if it exists, 0 if only the last component is
- * missing, -1 if a parent is missing. */
+ * case-insensitively (as the guest names them: name_to_host). Returns 1 if
+ * it exists, 0 if only the last component is missing, -1 if a parent is
+ * missing. */
 static int host_path(int part, const char *rel, char *out, size_t cap)
 {
     size_t len = (size_t)snprintf(out, cap, "%s/Partition%d", g_hdd_root, part);
@@ -422,13 +487,16 @@ static int host_path(int part, const char *rel, char *out, size_t cap)
         DIR *d = opendir(out);
         const char *match = NULL;
         struct dirent *de;
+        char guest[512], enc[512];
         while (d && (de = readdir(d))) {
-            if (strcasecmp(de->d_name, tok) == 0) {
+            name_from_host(de->d_name, guest, sizeof(guest));
+            if (strcasecmp(guest, tok) == 0) {
                 match = de->d_name;
                 break;
             }
         }
-        len += (size_t)snprintf(out + len, cap - len, "/%s", match ? match : tok);
+        name_to_host(tok, enc, sizeof(enc));
+        len += (size_t)snprintf(out + len, cap - len, "/%s", match ? match : enc);
         if (d) {
             closedir(d);
         }
@@ -2650,14 +2718,16 @@ static unsigned list_dir(NcKernel *k, const NcFile *nf, DirEntry *out, unsigned 
     DIR *d = opendir(nf->host);
     struct dirent *de;
     while (d && n < cap && (de = readdir(d))) {
-        if (!strcmp(de->d_name, ".") || !strcmp(de->d_name, "..") || strlen(de->d_name) >= sizeof(out->name)) {
+        char guest[512];
+        name_from_host(de->d_name, guest, sizeof(guest));
+        if (!strcmp(de->d_name, ".") || !strcmp(de->d_name, "..") || strlen(guest) >= sizeof(out->name)) {
             continue;
         }
         char p[600];
         struct stat st;
         snprintf(p, sizeof(p), "%s/%s", nf->host, de->d_name);
         DirEntry *e = &out[n++];
-        snprintf(e->name, sizeof(e->name), "%s", de->d_name);
+        snprintf(e->name, sizeof(e->name), "%s", guest);
         e->dir = stat(p, &st) == 0 && S_ISDIR(st.st_mode);
         e->size = e->dir ? 0 : (uint64_t)st.st_size;
     }
