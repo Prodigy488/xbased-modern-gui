@@ -1103,7 +1103,7 @@ static const char *pick_disc(void)
 }
 
 #ifndef XBASED_VERSION
-#define XBASED_VERSION "1.0.60"
+#define XBASED_VERSION "1.0.61"
 #endif
 #ifdef _WIN32
 #define NC_PLATFORM_NAME "Windows"
@@ -1116,13 +1116,26 @@ int main(int argc, char *argv[])
 #ifdef _WIN32
     xb_aslr_check();    /* Windows' first memory where the guest's goes: run again without (win_aslr.h) */
 #endif
+    /* The gamepads with the window in the background (the dashboard behind a
+     * launcher, a game after a click elsewhere): as the environment's, which
+     * SDL takes where the hint set at run time didn't (a virtual gamepad's
+     * moves behind another window were dropped with it), inherited by the
+     * game's process. */
+    if (!getenv("SDL_JOYSTICK_ALLOW_BACKGROUND_EVENTS")) {
+#ifdef _WIN32
+        _putenv("SDL_JOYSTICK_ALLOW_BACKGROUND_EVENTS=1");
+#else
+        setenv("SDL_JOYSTICK_ALLOW_BACKGROUND_EVENTS", "1", 0);
+#endif
+        SDL_SetEnvironmentVariable(SDL_GetEnvironment(), "SDL_JOYSTICK_ALLOW_BACKGROUND_EVENTS", "1", false);
+    }
     exe_dir();
     read_ini();
     g_ncfg_args = g_nargs;
     const char *disc = NULL;
     for (int i = 1; i < argc; i++) {
         if (!disc && !strchr(argv[i], '=') && strcmp(argv[i], "uncap") && strcmp(argv[i], "relaunch") &&
-            strcmp(argv[i], "fullscreen") && strcmp(argv[i], "console")) {
+            strcmp(argv[i], "fullscreen") && strcmp(argv[i], "console") && strcmp(argv[i], "dash")) {
             disc = argv[i];
         } else {
             add_arg(argv[i]);
@@ -1160,7 +1173,10 @@ int main(int argc, char *argv[])
             nc_log("hakuX-app", "%d gamepad mappings from %s", n, db);
         }
     }
-    if (!disc || !strcmp(disc, "none")) {
+    /* "dash" with no disc: the Xbox dashboard from the hard disk's C: drive,
+     * the tray empty (its Xbox Live account pages, its settings) */
+    const bool xbox_dash = opt_flag("dash") && (!disc || !strcmp(disc, "none"));
+    if (!xbox_dash && (!disc || !strcmp(disc, "none"))) {
         if (opt_flag("pick")) {
             disc = pick_disc();
             if (!disc) {
@@ -1183,12 +1199,13 @@ int main(int argc, char *argv[])
             return r;
         }
     }
-    snprintf(g_disc, sizeof(g_disc), "%s", disc);
-    game_options(g_disc);
-
-    g_disc_fd = open(g_disc, O_RDONLY | O_BINARY);
-    if (g_disc_fd < 0) {
-        nc_log("hakuX-app", "can't open the disc %s", g_disc);
+    if (!xbox_dash) {
+        snprintf(g_disc, sizeof(g_disc), "%s", disc);
+        game_options(g_disc);
+        g_disc_fd = open(g_disc, O_RDONLY | O_BINARY);
+        if (g_disc_fd < 0) {
+            nc_log("hakuX-app", "can't open the disc %s", g_disc);
+        }
     }
     char hdd[1024];
     const char *hv = opt_value("hdd");
@@ -1274,7 +1291,7 @@ int main(int argc, char *argv[])
     const char *title2 = strrchr(g_disc, '/');
     title = title2 > title ? title2 : title;
     char wtitle[512];
-    snprintf(wtitle, sizeof(wtitle), "xbased - %s", title ? title + 1 : g_disc);
+    snprintf(wtitle, sizeof(wtitle), "xbased - %s", xbox_dash ? "Xbox Dashboard" : title ? title + 1 : g_disc);
 #ifdef _WIN32
     const SDL_WindowFlags vk_flag = 0;            /* the presenter makes its own Win32 surface */
 #else

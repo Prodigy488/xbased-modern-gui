@@ -1,5 +1,24 @@
 # xbased changelog
 
+## 1.0.61 (2026-11)
+
+### Fixes
+- Insignia never got past the first connection on Windows: as soon as a
+  game or the Setup Assistant opened a connection to the Internet, the
+  network stopped (Windows refused a kind of request the network asked
+  for). Insignia's Setup Assistant now registers the console, and the
+  Xbox dashboard signs in to Xbox Live through Insignia.
+- The gamepad works with xbased's window in the background: the menu (and
+  games) take it with another window in front, with no click on xbased
+  first.
+
+### New
+- Settings › Online › Open the Xbox dashboard (with Insignia chosen): the
+  Xbox's own dashboard, for creating or recovering an Xbox Live account on
+  Insignia. Its files (xboxdash.xbe and its folders, from your own Xbox)
+  go in hdd/Partition2, the hard disk's C: drive. It starts with the tray
+  empty.
+
 ## 1.0.60 (2026-11)
 
 ### Fixes

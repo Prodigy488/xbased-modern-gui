@@ -1,5 +1,5 @@
 /*
- * hakuX front end â€” the dashboard (dash.h): its loop, input, lists, and
+ * hakuX front end ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â the dashboard (dash.h): its loop, input, lists, and
  * the main, games and game screens. Settings, controls, memory and online
  * are in dash_settings.c, dash_memory.c.
  */
@@ -22,7 +22,7 @@
 #endif
 
 #ifndef XBASED_VERSION
-#define XBASED_VERSION "1.0.60"
+#define XBASED_VERSION "1.0.61"
 #endif
 
 Dash D;
@@ -1147,6 +1147,44 @@ static void go_spawn(void)
     g_hide_at = ui_time() + 8.0;
 }
 
+/* The Xbox dashboard (its Xbox Live account pages, Insignia's sign-up) from
+ * the hard disk's C: drive, the tray empty: win_main's "none dash". */
+bool dash_xbox_dashboard_installed(void)
+{
+    const char *hdd = cfg_get(&D.global, "hdd");
+    char p[1400];
+    if (hdd && hdd[0]) {
+        snprintf(p, sizeof(p), "%s/Partition2/xboxdash.xbe", hdd);
+    } else {
+        snprintf(p, sizeof(p), "%shdd/Partition2/xboxdash.xbe", cfg_data_dir());
+    }
+    return SDL_GetPathInfo(p, NULL);
+}
+
+void dash_open_xbox_dashboard(void)
+{
+    if (g_go.on || child_running()) {
+        return;
+    }
+    if (!dash_xbox_dashboard_installed()) {
+        dash_toast(T(S_NO_XBOX_DASH));
+        return;
+    }
+    dash_save_cfg();
+    snprintf(g_go.path, sizeof(g_go.path), "none");
+    g_go.has_extra = true;
+    snprintf(g_go.extra, sizeof(g_go.extra), "dash");
+    snd_play(SND_LAUNCH);
+    g_go.back = 0;
+    if (!cfg_bool(&D.global, "ui.fx", true)) {
+        SDL_Delay(400);
+        go_spawn();
+        return;
+    }
+    g_go.on = true;
+    g_go.t0 = -1;
+}
+
 void launch_game(LibGame *g, const char *extra)
 {
     if (g_go.on || child_running()) {
@@ -1416,7 +1454,7 @@ static void draw_tile(LibGame *g, float x, float y, float w, float h, bool sel, 
     char info[120];
     const char *pub = lib_publisher(g);
     if (g->g.year) {
-        snprintf(info, sizeof(info), "%s%s%d", pub, *pub ? " · " : "", g->g.year);
+        snprintf(info, sizeof(info), "%s%s%d", pub, *pub ? " Ã‚Â· " : "", g->g.year);
     } else {
         snprintf(info, sizeof(info), "%s", pub);
     }
@@ -2039,7 +2077,11 @@ int dash_run(SDL_Window *win, const char *exe)
     if (!ui_init(win, fonts)) {
         return 1;
     }
-    SDL_SetHint(SDL_HINT_JOYSTICK_ALLOW_BACKGROUND_EVENTS, "0");
+    /* the gamepads drive the dashboard with its window behind another (no
+     * clicking it first after a game, a launcher or the desktop took the
+     * focus); while a game runs their events are only drained (the loop
+     * below), the game's process reads them */
+    SDL_SetHint(SDL_HINT_JOYSTICK_ALLOW_BACKGROUND_EVENTS, "1");
     snd_init();
     const char **fv;
     int fn;
