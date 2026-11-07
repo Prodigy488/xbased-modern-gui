@@ -33,17 +33,10 @@ https://github.com/user-attachments/assets/bf62adff-002a-4dc6-9b28-eee775181646
 
 ---
 
-**xbased** is an original Xbox emulator for Windows and Linux, developed by
-**[crazyriddler](https://github.com/crazyriddler)**. Based on
-[hakuX](https://github.com/rfandango/hakuX).
-
-It runs original Xbox games on a PC with a reimplemented Xbox kernel, a
-high-level NV2A renderer on Vulkan and an accurate MCPX audio core, behind a
+**xbased** runs original Xbox games on a PC with a reimplemented Xbox kernel,
+a high-level NV2A renderer on Vulkan and an accurate MCPX audio core, behind a
 console-style front end of its own.
 No BIOS, MCPX ROM or hard-disk image is needed.
-
-xbased is created and maintained by **[crazyriddler](https://github.com/crazyriddler)**:
-the emulator, the dashboard, the game fixes and every release.
 
 ## Download
 
