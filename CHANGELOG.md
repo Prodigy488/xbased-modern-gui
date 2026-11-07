@@ -1,5 +1,17 @@
 # xbased changelog
 
+## 1.0.68 (2026-11)
+
+### Fixes
+- Star Wars: Republic Commando took minutes to reach its title screen and
+  played its LucasArts logo at about 5 fps: while it loads it shows empty
+  frames as fast as it can, thousands a second, and xbased sent every one
+  of them to the screen on its own, far behind the game. Frames that come
+  faster than any monitor can show, with a newer one already waiting, are
+  now left out (the game still draws them all), and the title screen is up
+  in about 20 seconds with the movies at their normal speed. Games at a
+  normal frame rate keep every frame as before.
+
 ## 1.0.67 (2026-11)
 
 ### Fixes
