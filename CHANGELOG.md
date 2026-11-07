@@ -1,5 +1,18 @@
 # xbased changelog
 
+## 1.0.62 (2026-11)
+
+### Fixes
+- Dave Mirra Freestyle BMX 2 crashed right after its intro, as its title
+  screen came up. It reads a little past the top of its stack there (an
+  index it never set), which on the Xbox lands in memory the console's
+  kernel keeps over every thread's stack. Every thread's stack now has
+  that memory over it too: the game reaches its menus and plays.
+- The widescreen database's longer patches were cut at 96 bytes, written
+  only halfway: Phantom Dust's 16:9 patch left a function half moved and
+  the game closed as it started. Patterns of any length the database has
+  (up to 337 bytes, 15 games' patches) are written whole now.
+
 ## 1.0.61 (2026-11)
 
 ### Fixes
