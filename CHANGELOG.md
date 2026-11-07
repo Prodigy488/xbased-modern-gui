@@ -1,5 +1,20 @@
 # xbased changelog
 
+## 1.0.50 (2026-11)
+
+### Fixes
+- Steadier frame pacing on high refresh rate and variable refresh rate
+  displays (G-Sync, FreeSync). xbased used to send each frame out on the
+  first refresh of the display after it was ready, so at 60 fps on a 144
+  or 280 Hz display frames went out anywhere from 8 to 26 ms apart. A
+  variable refresh rate display refreshes when each frame arrives, so its
+  refresh rate swung all over the place and the game stuttered even at a
+  locked 60. On these displays frames now go out as soon as they're ready,
+  at the game's own pace (16.7 ms apart, give or take half a millisecond),
+  and the emulated console's clock no longer tries to follow refreshes
+  that aren't the display's real ones. On regular 60 and 120 Hz displays
+  nothing changes. Thanks to RiasatSalminSami for the report (#90).
+
 ## 1.0.49 (2026-11)
 
 ### Fixes

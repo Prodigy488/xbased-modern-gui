@@ -229,8 +229,39 @@ static void wait_next_vsync(void)
     clock_nanosleep(CLOCK_MONOTONIC, TIMER_ABSTIME, &ts, NULL);
 }
 
+/* Desktop, the vblank not locked to the display (a variable refresh rate
+ * display, G-Sync or FreeSync, or a refresh a frame isn't a whole number
+ * of): with nothing new to show, the loop waits for the next frame and
+ * shows it as it comes, at most until the next vsync (+0.5 ms; 4 ms without
+ * one) for the window's events. Waiting for the vsync instead, a frame went
+ * out on the panel's first tick after it came: at 60 fps beside a 280 Hz
+ * mode 8 to 26 ms apart, and a variable refresh rate display, whose refresh
+ * follows each present, swung with the game at a steady 60. Locked (60 Hz,
+ * 120 Hz), the presents keep to the vsyncs as before: shown as they came
+ * there, they were a little less even (0.8 to 1.1 ms of jitter, 0.7 to
+ * 0.95 before). */
+#ifdef NC_DESKTOP
+static void wait_next_frame(uint32_t seen)
+{
+    const uint64_t now = now_ns(), next = nc_dev_nv2a_next_vsync(now);
+    const uint64_t until = next ? next + 500000ull : now + 4000000ull;
+    const int ms = until > now ? (int)((until - now + 999999ull) / 1000000ull) : 1;
+    hle_disp_wait_front(seen, ms);
+}
+#else
+static void wait_next_frame(uint32_t seen)
+{
+    (void)seen;
+}
+#endif
+
 bool nc_present_frame(struct ANativeWindow *win)
 {
+#ifdef NC_DESKTOP
+    const uint32_t fronts = hle_disp_fronts();     /* before the look: one coming meanwhile ends the wait */
+#else
+    const uint32_t fronts = 0;
+#endif
     count_frames();
     debug_poll();
     const bool fxaa = g_dbg.fxaa < 0 ? g_fxaa : g_dbg.fxaa != 0;
@@ -239,16 +270,27 @@ bool nc_present_frame(struct ANativeWindow *win)
     const uint64_t key = (uint64_t)fxaa | (uint64_t)upscale << 1 | (uint64_t)g_dbg.average << 4 |
                          (uint64_t)g_widescreen << 5 | (uint64_t)(uint32_t)g_aspect << 8 |
                          (uint64_t)(uint32_t)(g_overscan + 64) << 16;
+#ifdef NC_DESKTOP
+    const bool as_they_come = !nc_dev_nv2a_vblank_locked();
+#else
+    const bool as_they_come = false;
+#endif
     if (!g_tween_t0 && hle_present_unchanged(win, key)) {
-        nc_dev_nv2a_display_pickup(now_ns()); /* it looked: the vblank keeps clear of it */
-        wait_next_vsync();
+        if (as_they_come) {
+            wait_next_frame(fronts);
+        } else {
+            nc_dev_nv2a_display_pickup(now_ns()); /* it looked: the vblank keeps clear of it */
+            wait_next_vsync();
+        }
         return true;
     }
     uint32_t ww = 0, wh = 0, fw = 0, fh = 0;
     if (!hle_present_begin(win, &ww, &wh)) {
         return false;
     }
-    nc_dev_nv2a_display_pickup(now_ns()); /* the vblank keeps clear of it */
+    if (!as_they_come) {
+        nc_dev_nv2a_display_pickup(now_ns()); /* the vblank keeps clear of it */
+    }
     float sx = 1.0f, sy = 1.0f;
     if (hle_present_frame(&fw, &fh)) {
         place(fw, fh, ww, wh, &sx, &sy);
