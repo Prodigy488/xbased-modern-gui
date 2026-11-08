@@ -34,7 +34,6 @@
 #include "native/app/ui/input_map.h"
 #include "native/app/ui/ui.h"
 #include "hw/xbox/hle/vk/swapchain.h"
-#include "hw/xbox/hle/vk/share.h"
 #include "native/app/ui/xbox_data.h"
 #include "native/app/ui/xemu_import.h"
 #include "native/app/win_aslr.h"
@@ -332,20 +331,16 @@ static void give_foreground(bool to_dash)
  * wrote is written (stderr isn't buffered, files are closed as they go).
  * A code with bit 30 is a run started again (run_again): no dashboard. */
 static void *g_frame;   /* the session's frame (win_frame.h), NULL: the run's window on its own */
-static bool g_frame_hidden;     /* the run's window out of sight in it: the frame presents the pictures */
 static bool g_frame_keep;   /* this run ends for another (run_again): the frame stays */
 
 static _Noreturn void exit_now(int code)
 {
-    const bool closing = g_frame && !(code & 0x40000000) && !g_frame_keep;
-    if (closing) {
-        nc_frame_close(g_frame);    /* the session's end: the frame hands the screen back to the dashboard */
+    if (g_frame && !(code & 0x40000000) && !g_frame_keep) {
+        nc_frame_close(g_frame);    /* not a run started again: the session's end */
     }
     fflush(NULL);
 #ifdef _WIN32
-    if (!closing) {
-        give_foreground(!(code & 0x40000000));
-    }
+    give_foreground(!(code & 0x40000000));
     TerminateProcess(GetCurrentProcess(), (UINT)code);
 #endif
     _exit(code);
@@ -839,25 +834,8 @@ static void ov_present(void)
 
 static void ov_size(int *w, int *h)
 {
-    uint32_t fw = 0, fh = 0;
-    if (hle_present_remote()) {
-        hle_present_remote_size(&fw, &fh);  /* the frame's pictures: its size */
-    }
-    *w = fw ? (int)fw : g_nw.width;
-    *h = fh ? (int)fh : g_nw.height;
-}
-
-/* the frame's pointer (its pictures: the frame has the mouse) */
-static float g_frame_mx = -1, g_frame_my = -1;
-
-static bool frame_pointer(float *x, float *y)
-{
-    if (!hle_present_remote()) {
-        return false;
-    }
-    *x = g_frame_mx;
-    *y = g_frame_my;
-    return true;
+    *w = g_nw.width;
+    *h = g_nw.height;
 }
 
 static bool ov_ok(void)
@@ -1117,9 +1095,7 @@ static void quit_to_dash(SDL_Window *win)
      * presenter's swapchain, the paused threads), so nothing can hold the
      * window */
     nc_log("hakuX-app", "quit to the dashboard");
-    if (!g_frame) {
-        give_foreground(true);  /* else the frame hands it back (exit_now) */
-    }
+    give_foreground(true);
     SDL_HideWindow(win);
     exit_now(0);
 }
@@ -1293,7 +1269,7 @@ static const char *pick_disc(void)
 }
 
 #ifndef XBASED_VERSION
-#define XBASED_VERSION "1.0.84"
+#define XBASED_VERSION "1.0.85"
 #endif
 
 static void rm_tree(const char *path)
@@ -1671,16 +1647,7 @@ int main(int argc, char *argv[])
             g_frame = nc_frame_get(wtitle, want_fullscreen(), g_fs60);
         }
         if (g_frame) {
-            /* the frame presents this run's pictures (hle_present_set_remote):
-             * its window out of sight; else (no token, or they can't be had,
-             * below) filling the frame and presenting itself */
-            const char *tok = nc_frame_token();
-            g_frame_hidden = tok && tok[0];
-            if (g_frame_hidden) {
-                hle_present_set_remote(tok);
-                dash_set_pointer_hook(frame_pointer);
-            }
-            nc_frame_adopt(g_frame, win, wtitle, g_frame_hidden);
+            nc_frame_adopt(g_frame, win, wtitle);
             dash_set_fullscreen_hook(frame_fullscreen);
             nc_log("hakuX-app", "window: inside the session's frame");
         }
@@ -1929,46 +1896,6 @@ int main(int argc, char *argv[])
         overlay_tick();
         if (minimized || g_nw.width <= 0 || !nc_present_frame(&g_nw)) {
             SDL_Delay(8); /* nothing to wait for the display on */
-        }
-        if (g_frame && g_frame_hidden) {
-            if (hle_present_remote_state() < 0) {
-                g_frame_hidden = false;     /* no shared pictures: the window fills the frame, as before */
-                nc_frame_fill(g_frame, win);
-                nc_log("hakuX-app", "window: the frame's pictures can't be had: drawn in the window");
-            } else if (hle_present_remote()) {
-                /* the frame's mouse, as this window's (the in-game menu's pointer) */
-                HleShareMouse ms[32];
-                static int64_t at;
-                const uint32_t n = hle_present_remote_mouse(ms, 32, &at);
-                for (uint32_t k = 0; k < n; k++) {
-                    SDL_Event e;
-                    SDL_zero(e);
-                    if (ms[k].type == 1) {
-                        e.type = SDL_EVENT_MOUSE_MOTION;
-                        e.motion.windowID = SDL_GetWindowID(win);
-                        e.motion.x = (float)ms[k].x;
-                        e.motion.y = (float)ms[k].y;
-                        e.motion.xrel = g_frame_mx < 0 ? 4.0f : (float)ms[k].x - g_frame_mx;
-                        e.motion.yrel = g_frame_my < 0 ? 4.0f : (float)ms[k].y - g_frame_my;
-                        g_frame_mx = (float)ms[k].x;
-                        g_frame_my = (float)ms[k].y;
-                    } else if (ms[k].type == 2 || ms[k].type == 3) {
-                        e.type = ms[k].type == 2 ? SDL_EVENT_MOUSE_BUTTON_DOWN : SDL_EVENT_MOUSE_BUTTON_UP;
-                        e.button.windowID = SDL_GetWindowID(win);
-                        e.button.button = (Uint8)ms[k].button;
-                        e.button.down = ms[k].type == 2;
-                        e.button.clicks = 1;
-                        e.button.x = (float)ms[k].x;
-                        e.button.y = (float)ms[k].y;
-                    } else {
-                        e.type = SDL_EVENT_MOUSE_WHEEL;
-                        e.wheel.windowID = SDL_GetWindowID(win);
-                        e.wheel.y = (float)ms[k].wheel;
-                    }
-                    SDL_PushEvent(&e);
-                }
-                hle_present_remote_cursor(SDL_CursorVisible());
-            }
         }
         static bool raised;
         if (g_frame && !raised && hle_present_count() > 0) {

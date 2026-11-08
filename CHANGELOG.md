@@ -1,5 +1,15 @@
 # xbased changelog
 
+## 1.0.85 (2026-11)
+
+### Fixes
+- On some PCs, such as the ROG Xbox Ally, 1.0.84 showed no picture when a
+  game started. The game is drawn as in 1.0.83 again while that's sorted
+  out, so G-Sync and FreeSync in full screen are back to how 1.0.83 had
+  them for now.
+- The screen saver still doesn't start in the middle of a game played with
+  a controller.
+
 ## 1.0.84 (2026-11)
 
 ### Fixes

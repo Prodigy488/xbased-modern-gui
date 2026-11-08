@@ -39,10 +39,6 @@
 #include "hw/xbox/hle/vk/swapchain.h"
 
 #include "hw/xbox/hle/vk/native_window.h"
-#ifdef _WIN32
-#include <windows.h>
-#include "hw/xbox/hle/vk/share.h"
-#endif
 #if defined(NC_DESKTOP) && !defined(_WIN32)
 #include <SDL3/SDL_vulkan.h>
 #endif
@@ -139,29 +135,6 @@ static struct {
     VkDeviceMemory shot_mem;
     VkDeviceSize shot_size;
 } g_ps;
-
-#ifdef _WIN32
-/* the game's frame's pictures (hle_present_set_remote) */
-static struct {
-    bool want, on, failed;
-    char token[64];
-    HANDLE map, ev;
-    HleShare *sh;
-    int slot;                   /* our source in the block */
-    int64_t order, gen;
-    uint32_t w, h;
-    VkImage img[HLE_SHARE_IMAGES];
-    VkDeviceMemory mem[HLE_SHARE_IMAGES];
-    VkImageView view[HLE_SHARE_IMAGES];
-    HANDLE memh[HLE_SHARE_IMAGES];
-    uint64_t val[HLE_SHARE_IMAGES];   /* the picture last drawn into each */
-    VkSemaphore drawn, freed;   /* timelines: ours (drawn), the frame's on it (copied) */
-    HANDLE drawn_h, freed_h;
-    uint64_t v;                 /* pictures so far */
-    uint32_t next;
-    unsigned timeouts;
-} g_rm;
-#endif
 
 /* ---- shaders ---- */
 
@@ -690,15 +663,8 @@ static void idle(void)
     hle_vk_check(r, "vkQueueWaitIdle (present)");
 }
 
-static bool remote_images(void);
-
 static void drop_images(void)
 {
-    if (remote_images()) {
-        g_ps.img = NULL;    /* the frame's pictures' (static, freed by remote_drop) */
-        g_ps.view = NULL;
-        return;
-    }
     for (uint32_t i = 0; i < g_ps.nimg; i++) {
         T.vkDestroyImageView(g_hvk.dev, g_ps.view[i], NULL);
         T.vkDestroySemaphore(g_hvk.dev, g_ps.drawn[i], NULL);
@@ -1024,18 +990,9 @@ static bool ov_on(void);
 
 bool hle_present_unchanged(struct ANativeWindow *win, uint64_t key)
 {
-    uint32_t ww = win ? (uint32_t)ANativeWindow_getWidth(win) : 0, wh = win ? (uint32_t)ANativeWindow_getHeight(win) : 0;
-    bool have_sc = g_ps.sc != VK_NULL_HANDLE;
-#ifdef _WIN32
-    if (g_rm.on) {
-        ww = g_rm.sh->cw;   /* the frame's pictures: its size */
-        wh = g_rm.sh->ch;
-        have_sc = g_rm.sh->src[g_rm.slot].vsync == (g_vsync ? 1u : 0u);
-    }
-#endif
-    if (ov_on() || g_ps.shot_want || !g_ps.shown || !win || win != g_ps.win || g_ps.stale || !have_sc ||
-        key != g_ps.shown_key || ww != g_ps.wsize.width || wh != g_ps.wsize.height ||
-        hle_disp_gamma_seq() != g_ps.ramp_gen) {
+    if (ov_on() || g_ps.shot_want || !g_ps.shown || !win || win != g_ps.win || g_ps.stale || !g_ps.sc || key != g_ps.shown_key ||
+        (uint32_t)ANativeWindow_getWidth(win) != g_ps.wsize.width ||
+        (uint32_t)ANativeWindow_getHeight(win) != g_ps.wsize.height || hle_disp_gamma_seq() != g_ps.ramp_gen) {
         return false;
     }
     uint32_t gen, swap_id;
@@ -1045,338 +1002,6 @@ bool hle_present_unchanged(struct ANativeWindow *win, uint64_t key)
     }
     return !front || (gen == g_ps.f.gen && swap_id == g_ps.f.swap_id);
 }
-
-/* ---- the frame's pictures (vk/share.h): a ring of shared images instead
- * of a swapchain, the frame presenting them ---- */
-
-#ifdef _WIN32
-
-static bool remote_images(void)
-{
-    return g_ps.img && g_ps.img == g_rm.img;
-}
-
-int hle_present_remote_state(void)
-{
-    return g_rm.on ? 1 : g_rm.failed ? -1 : 0;
-}
-
-void hle_present_set_remote(const char *token)
-{
-    g_rm.want = token && token[0];
-    snprintf(g_rm.token, sizeof(g_rm.token), "%s", token ? token : "");
-}
-
-bool hle_present_remote(void)
-{
-    return g_rm.on;
-}
-
-void hle_present_remote_size(uint32_t *w, uint32_t *h)
-{
-    *w = g_rm.sh ? g_rm.sh->cw : 0;
-    *h = g_rm.sh ? g_rm.sh->ch : 0;
-}
-
-void hle_present_remote_cursor(bool shown)
-{
-    if (g_rm.sh) {
-        g_rm.sh->cursor = shown ? 1 : 0;
-    }
-}
-
-/* the frame's mouse events since the last call (n at most), the next read's place in *at */
-uint32_t hle_present_remote_mouse(void *out, uint32_t n, int64_t *at)
-{
-    if (!g_rm.sh) {
-        return 0;
-    }
-    const int64_t head = g_rm.sh->mouse_head;
-    if (*at < head - HLE_SHARE_MICE) {
-        *at = head - HLE_SHARE_MICE;    /* fell behind: the newest */
-    }
-    uint32_t k = 0;
-    while (*at < head && k < n) {
-        ((HleShareMouse *)out)[k++] = g_rm.sh->mouse[*at % HLE_SHARE_MICE];
-        (*at)++;
-    }
-    return k;
-}
-
-static void remote_drop(void)
-{
-    if (g_rm.v) {
-        idle();
-    }
-    for (uint32_t i = 0; i < HLE_SHARE_IMAGES; i++) {
-        if (g_rm.view[i]) {
-            T.vkDestroyImageView(g_hvk.dev, g_rm.view[i], NULL);
-        }
-        if (g_rm.img[i]) {
-            T.vkDestroyImage(g_hvk.dev, g_rm.img[i], NULL);
-        }
-        if (g_rm.mem[i]) {
-            T.vkFreeMemory(g_hvk.dev, g_rm.mem[i], NULL);
-        }
-        if (g_rm.memh[i]) {
-            CloseHandle(g_rm.memh[i]);
-        }
-        g_rm.view[i] = VK_NULL_HANDLE;
-        g_rm.img[i] = VK_NULL_HANDLE;
-        g_rm.mem[i] = VK_NULL_HANDLE;
-        g_rm.memh[i] = NULL;
-        g_rm.val[i] = 0;
-    }
-    if (g_rm.drawn) {
-        T.vkDestroySemaphore(g_hvk.dev, g_rm.drawn, NULL);
-    }
-    if (g_rm.freed) {
-        T.vkDestroySemaphore(g_hvk.dev, g_rm.freed, NULL);
-    }
-    if (g_rm.drawn_h) {
-        CloseHandle(g_rm.drawn_h);
-    }
-    if (g_rm.freed_h) {
-        CloseHandle(g_rm.freed_h);
-    }
-    g_rm.drawn = g_rm.freed = VK_NULL_HANDLE;
-    g_rm.drawn_h = g_rm.freed_h = NULL;
-    g_rm.v = 0;
-    g_rm.on = false;
-}
-
-static bool export_sem(VkSemaphore *sem, HANDLE *h, const wchar_t *name)
-{
-    VkExportSemaphoreWin32HandleInfoKHR wi = { .sType = VK_STRUCTURE_TYPE_EXPORT_SEMAPHORE_WIN32_HANDLE_INFO_KHR,
-                                               .dwAccess = GENERIC_ALL, .name = name };
-    VkExportSemaphoreCreateInfo ei = { .sType = VK_STRUCTURE_TYPE_EXPORT_SEMAPHORE_CREATE_INFO, .pNext = &wi,
-                                       .handleTypes = VK_EXTERNAL_SEMAPHORE_HANDLE_TYPE_OPAQUE_WIN32_BIT };
-    VkSemaphoreTypeCreateInfo tci = { .sType = VK_STRUCTURE_TYPE_SEMAPHORE_TYPE_CREATE_INFO, .pNext = &ei,
-                                      .semaphoreType = VK_SEMAPHORE_TYPE_TIMELINE };
-    VkSemaphoreCreateInfo sci = { .sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO, .pNext = &tci };
-    if (T.vkCreateSemaphore(g_hvk.dev, &sci, NULL, sem) != VK_SUCCESS) {
-        return false;
-    }
-    VkSemaphoreGetWin32HandleInfoKHR gi = { .sType = VK_STRUCTURE_TYPE_SEMAPHORE_GET_WIN32_HANDLE_INFO_KHR,
-                                            .semaphore = *sem,
-                                            .handleType = VK_EXTERNAL_SEMAPHORE_HANDLE_TYPE_OPAQUE_WIN32_BIT };
-    return T.vkGetSemaphoreWin32HandleKHR(g_hvk.dev, &gi, h) == VK_SUCCESS;
-}
-
-/* our images at the frame's size, named, written into our source */
-static bool remote_make(uint32_t w, uint32_t h)
-{
-    remote_drop();
-    if (!g_rm.sh) {
-        wchar_t n[128];
-        swprintf(n, 128, HLE_SHARE_BLOCK_FMT, g_rm.token);
-        g_rm.map = OpenFileMappingW(FILE_MAP_ALL_ACCESS, FALSE, n);
-        g_rm.sh = g_rm.map ? (HleShare *)MapViewOfFile(g_rm.map, FILE_MAP_ALL_ACCESS, 0, 0, sizeof(HleShare)) : NULL;
-        swprintf(n, 128, HLE_SHARE_EVENT_FMT, g_rm.token);
-        g_rm.ev = OpenEventW(EVENT_MODIFY_STATE, FALSE, n);
-        if (!g_rm.sh || !g_rm.ev || g_rm.sh->magic != HLE_SHARE_MAGIC || g_rm.sh->version != HLE_SHARE_VERSION) {
-            hle_log("hakuX-hle-back", "present: the frame's block isn't there: the window's own swapchain");
-            return false;
-        }
-        /* the source not shown (an older run's, or none): the newest shows */
-        g_rm.slot = g_rm.sh->src[0].order > g_rm.sh->src[1].order ? 1 : 0;
-        g_rm.order = InterlockedIncrement64((volatile LONG64 *)&g_rm.sh->orders);
-    }
-    HleShareSrc *src = &g_rm.sh->src[g_rm.slot];
-    InterlockedExchange64((volatile LONG64 *)&src->gen, 0);    /* being made: not to be opened */
-    const int64_t gen = ++g_rm.gen;
-    const DWORD pid = GetCurrentProcessId();
-    const VkFormat fmt = VK_FORMAT_B8G8R8A8_UNORM;
-    swprintf((wchar_t *)src->drawn, HLE_SHARE_NAME, L"Local\\xbased-%hs-%lu-%lld-drawn", g_rm.token, pid, gen);
-    swprintf((wchar_t *)src->freed, HLE_SHARE_NAME, L"Local\\xbased-%hs-%lu-%lld-freed", g_rm.token, pid, gen);
-    if (!export_sem(&g_rm.drawn, &g_rm.drawn_h, (const wchar_t *)src->drawn) ||
-        !export_sem(&g_rm.freed, &g_rm.freed_h, (const wchar_t *)src->freed)) {
-        hle_log("hakuX-hle-back", "present: no shared timeline semaphores");
-        return false;
-    }
-    for (uint32_t i = 0; i < HLE_SHARE_IMAGES; i++) {
-        VkExternalMemoryImageCreateInfo xi = { .sType = VK_STRUCTURE_TYPE_EXTERNAL_MEMORY_IMAGE_CREATE_INFO,
-                                               .handleTypes = VK_EXTERNAL_MEMORY_HANDLE_TYPE_OPAQUE_WIN32_BIT };
-        VkImageCreateInfo ici = {
-            .sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO, .pNext = &xi, .imageType = VK_IMAGE_TYPE_2D,
-            .format = fmt, .extent = { w, h, 1 }, .mipLevels = 1, .arrayLayers = 1,
-            .samples = VK_SAMPLE_COUNT_1_BIT, .tiling = VK_IMAGE_TILING_OPTIMAL,
-            .usage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT,
-            .sharingMode = VK_SHARING_MODE_EXCLUSIVE, .initialLayout = VK_IMAGE_LAYOUT_UNDEFINED };
-        if (T.vkCreateImage(g_hvk.dev, &ici, NULL, &g_rm.img[i]) != VK_SUCCESS) {
-            return false;
-        }
-        VkMemoryRequirements mr;
-        T.vkGetImageMemoryRequirements(g_hvk.dev, g_rm.img[i], &mr);
-        uint32_t type = UINT32_MAX;
-        for (uint32_t t = 0; t < g_hvk.mem.memoryTypeCount; t++) {
-            if ((mr.memoryTypeBits & (1u << t)) &&
-                (g_hvk.mem.memoryTypes[t].propertyFlags & VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT)) {
-                type = t;
-                break;
-            }
-        }
-        swprintf((wchar_t *)src->mem[i], HLE_SHARE_NAME, L"Local\\xbased-%hs-%lu-%lld-img%u", g_rm.token, pid, gen, i);
-        VkExportMemoryWin32HandleInfoKHR wi = { .sType = VK_STRUCTURE_TYPE_EXPORT_MEMORY_WIN32_HANDLE_INFO_KHR,
-                                                .dwAccess = GENERIC_ALL, .name = (const wchar_t *)src->mem[i] };
-        VkExportMemoryAllocateInfo ei = { .sType = VK_STRUCTURE_TYPE_EXPORT_MEMORY_ALLOCATE_INFO, .pNext = &wi,
-                                          .handleTypes = VK_EXTERNAL_MEMORY_HANDLE_TYPE_OPAQUE_WIN32_BIT };
-        VkMemoryDedicatedAllocateInfo di = { .sType = VK_STRUCTURE_TYPE_MEMORY_DEDICATED_ALLOCATE_INFO, .pNext = &ei,
-                                             .image = g_rm.img[i] };
-        VkMemoryAllocateInfo ai = { .sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO, .pNext = &di,
-                                    .allocationSize = mr.size, .memoryTypeIndex = type };
-        if (type == UINT32_MAX || T.vkAllocateMemory(g_hvk.dev, &ai, NULL, &g_rm.mem[i]) != VK_SUCCESS ||
-            T.vkBindImageMemory(g_hvk.dev, g_rm.img[i], g_rm.mem[i], 0) != VK_SUCCESS) {
-            hle_log("hakuX-hle-back", "present: no shared image memory");
-            return false;
-        }
-        VkMemoryGetWin32HandleInfoKHR gi = { .sType = VK_STRUCTURE_TYPE_MEMORY_GET_WIN32_HANDLE_INFO_KHR,
-                                             .memory = g_rm.mem[i],
-                                             .handleType = VK_EXTERNAL_MEMORY_HANDLE_TYPE_OPAQUE_WIN32_BIT };
-        if (T.vkGetMemoryWin32HandleKHR(g_hvk.dev, &gi, &g_rm.memh[i]) != VK_SUCCESS) {
-            return false;
-        }
-        src->size[i] = mr.size;
-        VkImageViewCreateInfo vci = {
-            .sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO, .image = g_rm.img[i],
-            .viewType = VK_IMAGE_VIEW_TYPE_2D, .format = fmt,
-            .subresourceRange = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1 } };
-        if (T.vkCreateImageView(g_hvk.dev, &vci, NULL, &g_rm.view[i]) != VK_SUCCESS) {
-            return false;
-        }
-    }
-    src->pid = pid;
-    src->w = w;
-    src->h = h;
-    src->fmt = (uint32_t)fmt;
-    src->vsync = g_vsync ? 1 : 0;
-    memcpy(src->luid, g_hvk.caps.luid, 8);
-    src->luid_valid = g_hvk.caps.luid_valid;
-    src->latest = 0;
-    src->shown = 0;
-    src->order = g_rm.order;
-    InterlockedExchange64((volatile LONG64 *)&src->gen, gen);  /* there: the frame may open it */
-    g_rm.w = w;
-    g_rm.h = h;
-    g_rm.on = true;
-    /* the window's pass draws into them as into a swapchain's */
-    g_ps.ext = (VkExtent2D){ w, h };
-    g_ps.wsize = (VkExtent2D){ w, h };
-    g_ps.rot[0] = 1.0f;
-    g_ps.rot[1] = 0.0f;
-    g_ps.rot[2] = 0.0f;
-    g_ps.rot[3] = 1.0f;
-    g_ps.shot_can = true;
-    if (fmt != g_ps.pipe_fmt) {
-        for (unsigned i = 0; i < P_FXAA; i++) {
-            if (g_ps.pipe[i]) {
-                T.vkDestroyPipeline(g_hvk.dev, g_ps.pipe[i], NULL);
-            }
-            g_ps.pipe[i] = pipeline(g_ps.fs[i], fmt);
-        }
-        g_ps.pipe_fmt = fmt;
-    }
-    g_ps.fmt = fmt;
-    hle_log("hakuX-hle-back", "present: %ux%u pictures for the frame (source %d)", w, h, g_rm.slot);
-    return g_ps.pipe[P_BILINEAR] != VK_NULL_HANDLE;
-}
-
-/* the next of our images, once the frame has copied what it held */
-static bool remote_begin(struct ANativeWindow *win, uint32_t *w, uint32_t *h)
-{
-    if (!g_hvk.caps.share || (g_rm.sh && g_rm.sh->failed)) {
-        remote_drop();
-        g_rm.failed = true;     /* no sharing, or the frame has no presenter: the window's own swapchain */
-        return false;
-    }
-    uint32_t cw = g_rm.sh ? g_rm.sh->cw : 0, ch = g_rm.sh ? g_rm.sh->ch : 0;
-    if (!g_rm.sh || !cw || !ch) {
-        cw = cw ? cw : 1280;
-        ch = ch ? ch : 960;
-    }
-    if (!g_rm.on || cw != g_rm.w || ch != g_rm.h ||
-        (g_rm.sh && g_rm.sh->src[g_rm.slot].vsync != (g_vsync ? 1u : 0u))) {
-        if (!remote_make(cw, ch)) {
-            remote_drop();
-            g_rm.failed = true;
-            return false;
-        }
-    }
-    if (!g_ps.sc) {
-        /* only a window's swapchain goes out of date (V-Sync turned, a
-         * present out of date): the frame's pictures follow its size and
-         * V-Sync above. Left set, nothing ever looked unchanged and the
-         * same picture went to the frame as fast as the loop ran. */
-        g_ps.stale = false;
-    }
-    g_ps.win = win;
-    PsFrame *f = &g_ps.fr[g_ps.cur];
-    const int64_t tw0 = hle_now_ns();
-    if (!wait_value(f->value)) {
-        return false;
-    }
-    const uint32_t idx = g_rm.next % HLE_SHARE_IMAGES;
-    const VkSemaphoreWaitInfo wi = { .sType = VK_STRUCTURE_TYPE_SEMAPHORE_WAIT_INFO, .semaphoreCount = 1,
-                                     .pSemaphores = &g_rm.freed, .pValues = &g_rm.val[idx] };
-    const VkResult r = g_rm.val[idx] ? T.vkWaitSemaphores(g_hvk.dev, &wi, 100000000ull) : VK_SUCCESS;
-    g_acquire_ns += hle_now_ns() - tw0;
-    if (r == VK_TIMEOUT) {
-        /* the frame took none for a while (gone, or held up): drawn again over the oldest */
-        if (++g_rm.timeouts < 3) {
-            return false;
-        }
-    } else if (r != VK_SUCCESS) {
-        hle_vk_check(r, "vkWaitSemaphores (the frame's)");
-        return false;
-    }
-    g_rm.timeouts = 0;
-    g_rm.next++;
-    g_ps.idx = idx;
-    g_ps.img = g_rm.img;    /* the pass's target (not freed by drop_images: nimg stays 0) */
-    g_ps.view = g_rm.view;
-    *w = g_rm.w;
-    *h = g_rm.h;
-    return true;
-}
-#else
-int hle_present_remote_state(void)
-{
-    return -1;
-}
-
-static bool remote_images(void)
-{
-    return false;
-}
-
-void hle_present_set_remote(const char *token)
-{
-    (void)token;
-}
-
-bool hle_present_remote(void)
-{
-    return false;
-}
-
-void hle_present_remote_size(uint32_t *w, uint32_t *h)
-{
-    *w = *h = 0;
-}
-
-void hle_present_remote_cursor(bool shown)
-{
-    (void)shown;
-}
-
-uint32_t hle_present_remote_mouse(void *out, uint32_t n, int64_t *at)
-{
-    (void)out;
-    (void)n;
-    (void)at;
-    return 0;
-}
-#endif
 
 bool hle_present_begin(struct ANativeWindow *win, uint32_t *w, uint32_t *h)
 {
@@ -1392,17 +1017,6 @@ bool hle_present_begin(struct ANativeWindow *win, uint32_t *w, uint32_t *h)
             return false;
         }
     }
-#ifdef _WIN32
-    if (g_rm.want && !g_rm.failed) {
-        if (remote_begin(win, w, h)) {
-            return true;
-        }
-        if (!g_rm.failed) {
-            return false;   /* not this refresh */
-        }
-        hle_log("hakuX-hle-back", "present: the frame's pictures failed: the window's own swapchain");
-    }
-#endif
     /* a lost surface's window may come back at the same address: a while
      * later, whatever window there is gets a new one */
     if (win != g_ps.win && (!win || hle_now_ns() - g_ps.lost_ns > 250000000ll)) {
@@ -2285,76 +1899,6 @@ static void ov_draw(VkCommandBuffer cb, PsFrame *f, uint32_t iw, uint32_t ih, bo
     }
 }
 
-#ifdef _WIN32
-/* The pass done into a shared image: handed over to the frame (its queue
- * family the external's), our timeline and the frame's drawn one signalled,
- * the frame told. */
-static void remote_end(VkCommandBuffer cb, PsFrame *f, VkImage dst, bool shot, uint32_t iw, uint32_t ih, uint64_t key)
-{
-    VkImageLayout at = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
-    VkPipelineStageFlags2 st = VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT;
-    VkAccessFlags2 ac = VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT;
-    if (shot) {
-        barrier(cb, dst, at, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, st, ac, VK_PIPELINE_STAGE_2_COPY_BIT,
-                VK_ACCESS_2_TRANSFER_READ_BIT);
-        VkBufferImageCopy r = { .imageSubresource = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1 },
-                                .imageExtent = { iw, ih, 1 } };
-        T.vkCmdCopyImageToBuffer(cb, dst, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, g_ps.shot_buf, 1, &r);
-        at = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
-        st = VK_PIPELINE_STAGE_2_COPY_BIT;
-        ac = 0;
-    }
-    VkImageMemoryBarrier2 rel = {
-        .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2, .srcStageMask = st, .srcAccessMask = ac,
-        .dstStageMask = VK_PIPELINE_STAGE_2_NONE, .dstAccessMask = 0, .oldLayout = at,
-        .newLayout = VK_IMAGE_LAYOUT_GENERAL, .srcQueueFamilyIndex = g_hvk.qfam,
-        .dstQueueFamilyIndex = VK_QUEUE_FAMILY_EXTERNAL, .image = dst,
-        .subresourceRange = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1 } };
-    VkDependencyInfo di = { .sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO, .imageMemoryBarrierCount = 1,
-                            .pImageMemoryBarriers = &rel };
-    T.vkCmdPipelineBarrier2(cb, &di);
-    T.vkEndCommandBuffer(cb);
-    const uint64_t value = g_ps.submitted + 1, v = g_rm.v + 1;
-    VkSemaphoreSubmitInfo sig[2] = {
-        { .sType = VK_STRUCTURE_TYPE_SEMAPHORE_SUBMIT_INFO, .semaphore = g_ps.tl, .value = value,
-          .stageMask = VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT },
-        { .sType = VK_STRUCTURE_TYPE_SEMAPHORE_SUBMIT_INFO, .semaphore = g_rm.drawn, .value = v,
-          .stageMask = VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT } };
-    VkCommandBufferSubmitInfo cbi = { .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_SUBMIT_INFO, .commandBuffer = cb };
-    VkSubmitInfo2 si = { .sType = VK_STRUCTURE_TYPE_SUBMIT_INFO_2, .commandBufferInfoCount = 1,
-                         .pCommandBufferInfos = &cbi, .signalSemaphoreInfoCount = 2, .pSignalSemaphoreInfos = sig };
-    hle_vk_queue_lock();
-    const int64_t ts0 = hle_now_ns();
-    const VkResult r = T.vkQueueSubmit2(g_hvk.queue, 1, &si, VK_NULL_HANDLE);
-    g_submit_ns += hle_now_ns() - ts0;
-    hle_vk_queue_unlock();
-    if (g_ps.using) {
-        g_ps.using = false;
-        hle_disp_use_end();
-    }
-    if (r != VK_SUCCESS) {
-        hle_vk_check(r, "vkQueueSubmit2 (the frame's picture)");
-        g_ps.cur = (g_ps.cur + 1) % PS_FRAMES;
-        return;
-    }
-    g_ps.submitted = value;
-    f->value = value;
-    g_rm.v = v;
-    g_rm.val[g_ps.idx] = v;
-    if (shot && wait_value(value)) {
-        shot_write(iw, ih);
-        g_ps.shot_want = false;
-    }
-    /* the newest picture, then the frame woken (it takes the newest it finds) */
-    InterlockedExchange64((volatile LONG64 *)&g_rm.sh->src[g_rm.slot].latest, (LONG64)((v << 2) | g_ps.idx));
-    SetEvent(g_rm.ev);
-    g_ps.shown = true;
-    g_ps.shown_key = key;
-    g_ov.presented++;
-    g_ps.cur = (g_ps.cur + 1) % PS_FRAMES;
-}
-#endif
-
 void hle_present_end(float sx, float sy, bool fxaa, int upscale, bool average, uint64_t key)
 {
     g_ps.shown = false;
@@ -2474,12 +2018,6 @@ void hle_present_end(float sx, float sy, bool fxaa, int upscale, bool average, u
     }
     T.vkCmdEndRendering(cb);
     const bool shot = g_ps.shot_want && g_ps.shot_can && shot_buf((VkDeviceSize)iw * ih * 4);
-#ifdef _WIN32
-    if (g_rm.on) {
-        remote_end(cb, f, dst, shot, iw, ih, key);
-        return;
-    }
-#endif
     if (shot) {
         barrier(cb, dst, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
                 VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT, VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT,
