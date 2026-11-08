@@ -3,7 +3,9 @@
 ## 1.0.76.2 (Modern GUI fork)
 
 - The mouse pointer stays hidden while a game runs (it could come back after a message box, a focus
-  change or moving the mouse), with the keyboard and mouse or a controller.
+  change or moving the mouse), with the keyboard and mouse or a controller. A transparent pointer is
+  set over the game as well, and the log says "pointer: hidden over the game" (and "showed again" if it
+  ever has to hide it again).
 - Fixed "your Xbox doesn't have enough free blocks" in games: with a hard disk size set in Settings >
   System smaller than what the E: folder already holds (10 GB set, 15 GB of homebrew in it), the
   drive read 0 MB free. The data drive now always has room, as it already did on the automatic size.

@@ -569,11 +569,35 @@ static float g_mouse_sx, g_mouse_sy;    /* the stick it gives, smoothed */
 static Uint64 g_mouse_t;
 static Uint64 g_wheel_until[2];     /* the wheel's "buttons" last a moment */
 
+/* The pointer over the game: hidden, and a fully transparent one set as well, so a driver or a
+ * Windows state that ignores the hidden flag still shows nothing. The menus get the usual one back. */
+static SDL_Cursor *g_blank_cursor;
+static void pointer_hide(void)
+{
+    if (!g_blank_cursor) {
+        SDL_Surface *sf = SDL_CreateSurface(16, 16, SDL_PIXELFORMAT_ARGB8888);
+        if (sf) {
+            SDL_ClearSurface(sf, 0, 0, 0, 0);
+            g_blank_cursor = SDL_CreateColorCursor(sf, 0, 0);
+            SDL_DestroySurface(sf);
+        }
+    }
+    if (g_blank_cursor) {
+        SDL_SetCursor(g_blank_cursor);
+    }
+    SDL_HideCursor();
+}
+
+static void pointer_menu(void)
+{
+    SDL_SetCursor(SDL_GetDefaultCursor());
+}
+
 static void mouse_release(SDL_Window *win)
 {
     if (g_mouse_cap) {
         SDL_SetWindowRelativeMouseMode(win, false);
-        SDL_HideCursor();
+        pointer_hide();
     }
     g_mouse_cap = false;
     g_mouse_dx = g_mouse_dy = g_mouse_sx = g_mouse_sy = 0;
@@ -1211,7 +1235,8 @@ static void ingame_menu(SDL_Window *win, bool *paused, bool minimized)
         ui_overlay_off();
         g_ov_up = false;
         g_notice[0] = 0;
-        const int act = dash_ingame(win, g_key, title ? title + 1 : g_disc, NULL, &slot, live_cfg);
+        pointer_menu();
+    const int act = dash_ingame(win, g_key, title ? title + 1 : g_disc, NULL, &slot, live_cfg);
         SDL_HideCursor();
         nc_auto_resync();
         if (act == DASH_INGAME_QUIT && !start_quit_save(false)) {
@@ -1256,7 +1281,7 @@ static void ingame_menu(SDL_Window *win, bool *paused, bool minimized)
     if (act == DASH_INGAME_QUIT && !start_quit_save(false)) {
         quit_to_dash(win);
     }
-    SDL_HideCursor();   /* the game doesn't use the mouse; the menu may have shown it */
+    pointer_hide();     /* the game doesn't use the mouse; the menu may have shown it */
     nc_auto_resync();
     /* the presenter back on the window before anything is shown or saved */
     SDL_Delay(50);
@@ -1644,7 +1669,8 @@ int main(int argc, char *argv[])
         fatal_box("xbased", SDL_GetError());
         return 1;
     }
-    SDL_HideCursor();   /* the game doesn't use the mouse */
+    pointer_hide();     /* the game doesn't use the mouse */
+    nc_log("hakuX-app", "pointer: hidden over the game");
     {
         /* the run before's window's place (run_again), windowed */
         const char *r = getenv("XBASED_RECT");
@@ -1767,6 +1793,9 @@ int main(int argc, char *argv[])
                 }
                 break;
             case SDL_EVENT_MOUSE_MOTION:
+                if (!g_mouse_cap) {
+                    pointer_hide();
+                }
                 if (g_mouse_cap) {
                     g_mouse_dx += ev.motion.xrel;
                     g_mouse_dy += ev.motion.yrel;
@@ -1846,6 +1875,7 @@ int main(int argc, char *argv[])
                 break;
             case SDL_EVENT_WINDOW_FOCUS_GAINED:
                 focused = true;
+                pointer_hide();
                 nc_audio_set_volume(g_volume);
                 if (bg_paused) {
                     bg_paused = false;
@@ -1877,7 +1907,12 @@ int main(int argc, char *argv[])
             ingame_menu(win, &paused, minimized);
         }
         if (SDL_CursorVisible()) {
-            SDL_HideCursor();   /* the game doesn't draw one: a message box, a focus change or a mouse move shows it again */
+            static bool said;
+            if (!said) {
+                said = true;
+                nc_log("hakuX-app", "pointer: it showed again over the game and was hidden");
+            }
+            pointer_hide();     /* the game doesn't draw one: a message box, a focus change or a mouse move shows it again */
         }
         update_pads(focused);
         state_request_poll();
