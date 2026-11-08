@@ -25,6 +25,16 @@
   <a href="#credits">Credits</a>
 </p>
 
+> **Modern GUI fork.** This is an unofficial fork of [xbased](https://github.com/crazyriddler/xbased)
+> by crazyriddler (itself based on [hakuX](https://github.com/rfandango/hakuX)), kept in step with
+> upstream. It is not supported by the xbased project. What it adds: 11 dashboard styles in 3 themes,
+> an Insignia tab with the Setup Assistant, play time, Resume (auto-save when leaving a game),
+> floating covers and 3D cases, a Homebrew tab with a store, an OG Dashboard tab, GPU and disk-size
+> settings, Nearest and NVIDIA NIS upscaling, pause on focus loss, a keyboard/mouse/controller
+> setup like the [xemu Modern GUI](https://github.com/Prodigy488/xemu-modern-gui)'s (mouse as a
+> stick, WASD layouts, quick save buttons), and a check that skips discs that are not Xbox images.
+> Its update check follows this fork's releases. GPL-3.0, like upstream.
+
 <!-- trailer -->
 https://github.com/user-attachments/assets/bf62adff-002a-4dc6-9b28-eee775181646
 

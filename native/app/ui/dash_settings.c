@@ -4,7 +4,9 @@
  * remapping, online play.
  */
 #include "native/app/ui/console_cfg.h"
+#include "native/app/ui/homebrew.h"
 #include "native/app/ui/dash_int.h"
+#include "native/app/ui/skin.h"
 #include "native/app/ui/input_map.h"
 #include "native/app/mod_fit.h"
 #include "native/app/win_mods.h"
@@ -54,9 +56,10 @@ static void rows_video(List *l)
     static const char *anv[] = {"0", "2", "4", "8", "16"};
     const char *ann[] = {T(S_OFF), "2x", "4x", "8x", "16x"};
     opt_choice(l, S_ANISO, "aniso", anv, ann, 5, "0");
-    static const char *uv[] = {"bilinear", "fsr"};
-    const char *un[] = {T(S_BILINEAR), "AMD FSR 1"};
-    opt_choice(l, S_UPSCALE, "upscale", uv, un, 2, "bilinear");
+    static const char *uv[] = {"bilinear", "fsr", "nis", "nearest"};
+    const char *un[] = {T(S_BILINEAR), "AMD FSR 1", "NVIDIA NIS", T(S_NEAREST)};
+    opt_choice(l, S_UPSCALE, "upscale", uv, un, 4, "bilinear");
+    opt_int(l, S_NIS_SHARP, "nis.sharp", 0, 100, 5, 50, "%");
     static const char *cv[] = {"0", "1", "2", "3"};
     const char *cn[] = {T(S_OFF), T(S_CRT_SOFT), T(S_CRT_TV), T(S_CRT_ARCADE)};
     opt_choice(l, S_CRT, "crt", cv, cn, 4, "0");
@@ -124,7 +127,7 @@ static void tab_bar(const enum UiStr *tabs, int n)
             D.tab = i;
             D.sel[dash_top()] = 0;
         }
-        ui_round(x, 124, w, 44, 22, s ? (UiColor){0x3C, 0x9A, 0x12, 0xFF} : (UiColor){0x10, 0x2C, 0x07, 0xE0});
+        ui_round(x, 124, w, 44, 22, s ? ui_th(0x3C, 0x9A, 0x12, 0xFF) : ui_th(0x10, 0x2C, 0x07, 0xE0));
         ui_round_outline(x, 124, w, 44, 22, s ? 2 : 1, s ? UI_GREEN_HI : UI_GREEN_DIM);
         ui_text(x + w / 2, 132, t, 24, UI_FONT_BOLD, s ? UI_WHITE : UI_GREY, UI_ALIGN_CENTER);
         x += w + 12;
@@ -185,6 +188,51 @@ void dash_take_folder(void)
     }
 }
 
+
+/* ---- the mouse's and the quick save's rows, on the global Controls tab and a game's own controls */
+static void rows_mouse(List *l)
+{
+    opt_bool(l, S_MOUSE_STICK, "mouse", false, false);
+    const Config *c = D.editing_game ? &D.game : &D.global;
+    const char *on = cfg_get(c, "mouse");
+    const char *gon = cfg_get(&D.global, "mouse");
+    const bool shown = on ? strcmp(on, "0") != 0 : (!D.editing_game || (gon && strcmp(gon, "0") != 0));
+    if (!shown) {
+        return;
+    }
+    static const char *const sv[] = {"right", "left"};
+    const char *sn[] = {T(S_IN_RSTICK), T(S_IN_LSTICK)};
+    opt_choice(l, S_MOUSE_MOVES, "mouse.stick", sv, sn, 2, "right");
+    opt_int(l, S_MOUSE_SENS, "mouse.sens", 25, 300, 25, 100, "%");
+    opt_bool(l, S_MOUSE_INVERT, "mouse.invert", false, false);
+    static const enum UiStr lab[IM_MOUSE_BTNS] = {S_MOUSE_B0, S_MOUSE_B1, S_MOUSE_B2, S_MOUSE_B3,
+                                                  S_MOUSE_B4, S_MOUSE_B5, S_MOUSE_B6};
+    static const char *tv[IM_MOUSE_TARGETS];
+    static char tvb[IM_MOUSE_TARGETS][4];
+    const char *tn[IM_MOUSE_TARGETS];
+    for (int t = 0; t < IM_MOUSE_TARGETS; t++) {
+        snprintf(tvb[t], sizeof(tvb[t]), "%d", t);
+        tv[t] = tvb[t];
+        tn[t] = t == 0 ? T(S_NONE) : im_mouse_target_label(t);
+    }
+    for (int b = 0; b < IM_MOUSE_BTNS; b++) {
+        static char key[IM_MOUSE_BTNS][12];
+        static char def[IM_MOUSE_BTNS][4];
+        snprintf(key[b], sizeof(key[b]), "mouse.b%d", b);
+        snprintf(def[b], sizeof(def[b]), "%d", im_mouse_btn_default(b));
+        opt_choice(l, lab[b], key[b], tv, tn, IM_MOUSE_TARGETS, def[b]);
+    }
+}
+
+static void rows_quick(List *l)
+{
+    opt_int(l, S_RUMBLE_STR, "rumble.str", 0, 100, 10, 100, "%");
+    opt_bool(l, S_QUICK_BTN, "quick.btn", true, false);
+    static const char *const qv[] = {"bumpers", "triggers", "sticks", "dpad"};
+    const char *qn[] = {"LB / RB", "LT / RT", "L3 / R3 (stick clicks)", "D-pad left / right"};
+    opt_choice(l, S_QUICK_COMBO, "quick.combo", qv, qn, 4, "bumpers");
+}
+
 static const char *video_mode_name(void)
 {
     return "";
@@ -203,8 +251,20 @@ void scr_settings(void)
     switch (D.tab) {
     case 0:
         rows_video(&l);
-        opt_bool(&l, S_FULLSCREEN, "fullscreen", true, true);
+        opt_bool(&l, S_START_FULLSCREEN, "fullscreen", true, true);
         opt_bool(&l, S_SHOW_FPS, "showfps", false, false);
+        opt_bool(&l, S_PAUSE_BG, "pausebg", false, false);
+        opt_bool(&l, S_AUTOSAVE, "autosave", true, false);
+        {
+            static const char *gv[] = {"auto", "1", "2", "3", "4"};
+            static char gnames[5][40];
+            const char *gn[5] = {T(S_GPU_AUTO)};
+            for (int i = 1; i < 5; i++) {
+                snprintf(gnames[i], sizeof(gnames[i]), T(S_GPU_NTH), i);
+                gn[i] = gnames[i];
+            }
+            opt_choice(&l, S_GPU, "gpu", gv, gn, 5, "auto");
+        }
         opt_bool(&l, S_VSYNC, "vsync", true, false);
         break;
     case 1: {
@@ -215,7 +275,7 @@ void scr_settings(void)
         opt_choice(&l, S_AUDIO_OUTPUT, "audio", av, an, 2, "stereo");
         opt_int(&l, S_VOLUME, "volume", 0, 100, 5, 100, "%");
         opt_bool(&l, S_MUTE_BG, "mutebg", true, false);
-        opt_bool(&l, S_UI_SOUNDS, "ui.sounds", true, false);
+        opt_bool(&l, S_UI_SOUNDS, "ui.sounds", false, false);
         break;
     }
     case 2: {
@@ -226,6 +286,14 @@ void scr_settings(void)
         opt_videoflag(&l, S_I1080, 0x40000);
         rows_pal(&l);
         rows_ram(&l);
+        {
+            static const char *ev[] = {"auto", "10240", "20480", "51200", "131072"};
+            const char *en[] = {T(S_DISK_RETAIL), "10 GB", "20 GB", "50 GB", "128 GB"};
+            opt_choice(&l, S_DISK_E, "hdd.mb", ev, en, 5, "auto");
+            static const char *cv[] = {"2048", "1024", "750", "4096", "8192"};
+            const char *cn[] = {"2 GB", "1 GB", "750 MB (retail)", "4 GB", "8 GB"};
+            opt_choice(&l, S_DISK_CACHE, "cache.mb", cv, cn, 5, "2048");
+        }
         static const char *pv[] = {"hdtv", "standard", "svideo", "scart", "vga"};
         static const char *pn[] = {"HDTV (component)", "Standard (composite)", "S-Video", "SCART (RGB)", "VGA"};
         opt_choice(&l, S_AVPACK, "avpack", pv, pn, 5, "hdtv");
@@ -250,10 +318,28 @@ void scr_settings(void)
         if (now && strcmp(now, was)) {
             i18n_set(now);
         }
+        {
+            /* the skins: a colour theme and a dashboard style */
+            static const char *tv[UI_THEME_COUNT];
+            const char *tn[UI_THEME_COUNT] = {T(S_THEME_GREEN), T(S_THEME_NEON), T(S_THEME_RED)};
+            for (int i = 0; i < UI_THEME_COUNT; i++) {
+                tv[i] = ui_theme_name(i);
+            }
+            opt_choice(&l, S_THEME, "ui.theme", tv, tn, UI_THEME_COUNT, "green");
+            static const char *sv[SK_COUNT];
+            static const char *sn[SK_COUNT];
+            for (int i = 0; i < SK_COUNT; i++) {
+                sv[i] = skin_name(i);
+                sn[i] = skin_title(i);
+            }
+            opt_choice(&l, S_DASH_STYLE, "ui.style", sv, sn, SK_COUNT, "oblades");
+        }
         opt_bool(&l, S_COVERS_ONLINE, "covers", true, false);
         opt_bool(&l, S_ANIMATED_BG, "ui.anim", true, false);
+        opt_bool(&l, S_FLOAT_COVERS, "ui.float", true, false);
+        opt_bool(&l, S_CASE3D, "ui.case3d", true, false);
         opt_bool(&l, S_TRANSITIONS, "ui.fx", true, false);
-        opt_bool(&l, S_UI_SOUNDS, "ui.sounds", true, false);
+        opt_bool(&l, S_UI_SOUNDS, "ui.sounds", false, false);
         opt_bool(&l, S_CHECK_UPDATES, "update.check", true, false);
         opt_bool(&l, S_SHOW_HIDDEN, "ui.showhidden", false, false);
         opt_bool(&l, S_CLOCK_12H, "ui.clock12", false, false);
@@ -336,6 +422,12 @@ void scr_settings(void)
             }
         }
         opt_bool(&l, S_RUMBLE, "rumble", true, false);
+        rows_quick(&l);
+        rows_mouse(&l);
+        if (list_row(&l, T(S_WASD_LAYOUT), NULL, NULL)) {
+            im_apply_wasd_mouse(&D.global);
+            dash_toast(T(S_WASD_DONE));
+        }
         break;
     case 5:
         for (int h = 0; h < IM_HOTKEYS; h++) {
@@ -877,8 +969,8 @@ void scr_states(void)
     List l;
     list_begin(&l, 74, 150, W * 0.5f - 74, H - 244, 64);
     int chosen = -1, sel = 0;
-    bool sel_has = false;
-    for (int s = 1; s <= 10; s++) {
+    bool sel_has = false, sel_set = false;
+    for (int s = 0; s <= 10; s++) {     /* slot 0: the save made on leaving the game */
         char p[1200], label[64], when[64] = "";
         snprintf(p, sizeof(p), "%s/slot%d.hxs", dir, s);
         SDL_PathInfo pi;
@@ -888,12 +980,17 @@ void scr_states(void)
             SDL_TimeToDateTime(pi.modify_time, &dt, true);
             snprintf(when, sizeof(when), "%04d-%02d-%02d %s", dt.year, dt.month, dt.day, dash_hm(dt.hour, dt.minute));
         }
-        snprintf(label, sizeof(label), "%s %d", T(S_SLOT), s);
+        if (s == 0) {
+            snprintf(label, sizeof(label), "%s", T(S_AUTOSAVE_SLOT));
+        } else {
+            snprintf(label, sizeof(label), "%s %d", T(S_SLOT), s);
+        }
         if (list_row_icon(&l, g_thumb[s], label, has ? when : T(S_EMPTY), NULL, NULL) && has) {
             chosen = s;
         }
         if (list_selected(&l)) {
             sel = s;
+            sel_set = true;
             sel_has = has;
             if (D.in.x && has) {
                 g_del_slot = s;
@@ -903,7 +1000,7 @@ void scr_states(void)
     }
     list_end(&l);
     /* the preview: the selected slot's picture, large (outside the list's clip) */
-    if (sel) {
+    if (sel_set) {
         const float px = W * 0.5f + 30, pw = W * 0.5f - 104, ph = pw * 3 / 4;
         ui_round(px - 8, 142, pw + 16, ph + 16, 12, UI_PANEL);
         if (g_thumb[sel]) {
@@ -913,7 +1010,7 @@ void scr_states(void)
                     UI_ALIGN_CENTER);
         }
     }
-    if (chosen > 0) {
+    if (chosen >= 0) {
         char arg[1300];
         snprintf(arg, sizeof(arg), "loadstate=%s/slot%d.hxs", dir, chosen);
         launch_game(D.cur, arg);
@@ -996,6 +1093,35 @@ void scr_controls(void)
             if (list_selected(&l) && D.in.x) {
                 im_unbind(c, D.player, i);
             }
+        }
+        {
+            /* the keys for a kind of game: the suggestion for this game first; left and right choose,
+             * A sets them */
+            static int sel;
+            const char *sug = D.editing_game && D.cur ? D.cur->g.title : NULL;
+            const int suggested = sug ? im_preset_suggest(sug) : IM_PRESET_NONE;
+            const int n = IM_PRESETS;
+            int delta = 0;
+            if (sel < 0 || sel >= n) {
+                sel = 0;
+            }
+            int shown = (sel == 0 && suggested) ? suggested : sel;
+            char val[160];
+            if (sel == 0 && suggested) {
+                snprintf(val, sizeof(val), "%s: %s", T(S_LAYOUT_SUGGEST), im_preset_label(suggested));
+            } else {
+                snprintf(val, sizeof(val), "%s", im_preset_label(shown));
+            }
+            if (list_row(&l, T(S_LAYOUT_PRESET), val, &delta)) {
+                im_apply_preset(c, D.player, shown);
+                dash_toast(T(S_LAYOUT_SET));
+            }
+            if (delta) {
+                sel = (sel + delta + n) % n;
+            }
+        }
+        if (D.player == 0) {
+            rows_mouse(&l);
         }
         if (list_row(&l, T(S_RESET_DEFAULTS), NULL, NULL)) {
             im_clear_map(c, D.player);
@@ -1410,7 +1536,7 @@ void scr_online(void)
     draw_header(T(S_ONLINE), NULL);
     D.editing_game = false;
     List l;
-    list_begin(&l, 74, 150, W - 148, 330, 58);
+    list_begin(&l, 74, 150, W - 148, 355, 58);
     static const char *nv[] = {"off", "nat", "kai", "lan"};
     const char *nn[] = {T(S_NET_OFF), T(S_NET_INSIGNIA), T(S_NET_KAI), T(S_NET_LAN)};
     opt_choice(&l, S_NETWORK, "net", nv, nn, 4, "off");
@@ -1433,9 +1559,23 @@ void scr_online(void)
         SDL_OpenURL(site);
     }
     if (net && !strcmp(net, "nat")) {
+        /* register this console: Insignia's Setup Assistant, fetched and started */
+        const int is = isa_state();
+        const char *lbl = is % 10 == 1 ? T(S_ISA_DOWNLOADING) : (hb_busy() ? T(S_HB_PREPARING) : NULL);
+        if (list_row(&l, isa_installed() ? T(S_ISA_RUN) : T(S_ISA_GET), lbl, NULL) && !lbl) {
+            isa_run(false);
+        }
+        if (list_selected(&l)) {
+            help = T(S_ISA_HELP);
+        }
+        if (isa_installed() && !lbl &&
+            list_row(&l, T(S_ISA_AGAIN), NULL, NULL)) {
+            isa_run(true);
+        }
         /* Insignia's sign-up and the accounts: the Xbox dashboard's Xbox Live */
         if (list_row(&l, T(S_XBOX_DASH), dash_xbox_dashboard_installed() ? NULL : T(S_NOT_INSTALLED), NULL)) {
-            dash_open_xbox_dashboard();
+            D.sel[SCR_OGDASH] = 0;
+            dash_push(SCR_OGDASH);
         }
         if (list_selected(&l)) {
             help = T(S_XBOX_DASH_HELP);

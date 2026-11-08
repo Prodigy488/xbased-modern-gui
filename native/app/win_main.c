@@ -26,6 +26,8 @@
  * start the core again: the process runs itself again with the option the
  * Android app passes its activity (loadstate=, relaunch).
  */
+#include <math.h>
+
 #include "native/app/app.h"
 #include "native/app/ui/config.h"
 #include "native/app/ui/console_cfg.h"
@@ -180,8 +182,9 @@ static bool opt_flag(const char *name)
     return false;
 }
 
-/* Full screen (borderless, the desktop's mode) unless told otherwise
- * ("fullscreen=0"): a console's picture, not a window's. */
+/* Full screen (borderless, the desktop's mode) unless told otherwise (Settings > Video >
+ * "Start in full screen" off, or "fullscreen=0"): a console's picture, not a window's.
+ * F11 and Alt+Enter switch at any time. */
 static bool want_fullscreen(void)
 {
     const char *v = opt_value("fullscreen");
@@ -195,8 +198,14 @@ static bool want_fullscreen(void)
 static void game_options(const char *disc)
 {
     XdGame g;
-    xd_read_game(disc, &g);
-    xd_free_game(&g);
+    if (disc) {
+        xd_read_game(disc, &g);
+        xd_free_game(&g);
+    } else {
+        /* the Xbox dashboard (no disc): settings of its own ("dash"), the global ones under them */
+        memset(&g, 0, sizeof(g));
+        snprintf(g.key, sizeof(g.key), "dash");
+    }
     char path[MAX_PATH + 64];
     snprintf(path, sizeof(path), "%sgames/%s.ini", g_data_dir, g.key);
     Config c;
@@ -485,7 +494,7 @@ static void pads_changed(void)
     for (int p = 0; p < 4; p++) {
         const int d = g_map.device[p];
         /* player 1 always (the keyboard, unless set to none); the others with a pad */
-        if (d != -2 && (player_pad(p) || (p == 0 && d <= 0) || d == -1)) {
+        if (d != -2 && (player_pad(p) || (p == 0 && d <= 0) || d == -1 || d == -3)) {
             mask |= 1u << p;
         }
     }
@@ -547,17 +556,202 @@ static void pad_removed(SDL_JoystickID id)
     }
 }
 
+static SDL_AtomicInt g_saving;
+static void save_state(int slot);
+static void load_state(int slot);
+static void notice(const char *text, const char *after_file);
+
+/* ---- the mouse as a stick (Settings > Controls): a click on the game captures it, F3 or Esc lets go */
+static bool g_mouse_cap;            /* captured (relative mouse mode) */
+static bool g_mouse_skip;           /* the capturing click is still down: not the game's */
+static float g_mouse_dx, g_mouse_dy;    /* motion since the last poll, in pixels */
+static float g_mouse_sx, g_mouse_sy;    /* the stick it gives, smoothed */
+static Uint64 g_mouse_t;
+static Uint64 g_wheel_until[2];     /* the wheel's "buttons" last a moment */
+
+static void mouse_release(SDL_Window *win)
+{
+    if (g_mouse_cap) {
+        SDL_SetWindowRelativeMouseMode(win, false);
+        SDL_HideCursor();
+    }
+    g_mouse_cap = false;
+    g_mouse_dx = g_mouse_dy = g_mouse_sx = g_mouse_sy = 0;
+}
+
+static void mouse_capture(SDL_Window *win)
+{
+    if (SDL_SetWindowRelativeMouseMode(win, true)) {
+        g_mouse_cap = true;
+        g_mouse_skip = true;
+        g_mouse_dx = g_mouse_dy = g_mouse_sx = g_mouse_sy = 0;
+        g_mouse_t = SDL_GetTicks();
+        notice(T(S_MOUSE_CAPTURED), NULL);
+    }
+}
+
+/* the mouse's part of player 1's state: its stick, and its buttons as the pad's */
+static void mouse_apply(ImPad *m)
+{
+    const Uint64 now = SDL_GetTicks();
+    const float dt = (float)(now - g_mouse_t > 0 ? now - g_mouse_t : 1);
+    g_mouse_t = now;
+    /* pixels a millisecond: 1.5 of them (1500 a second) is the stick's full travel at 1x */
+    const float k = g_map.mouse_sens / 1.5f;
+    float tx = g_mouse_dx / dt * k, ty = -g_mouse_dy / dt * k * (g_map.mouse_invert ? -1.0f : 1.0f);
+    g_mouse_dx = g_mouse_dy = 0;
+    tx = tx < -1 ? -1 : tx > 1 ? 1 : tx;
+    ty = ty < -1 ? -1 : ty > 1 ? 1 : ty;
+    const float a = 1.0f - expf(-dt / 30.0f);   /* ~30 ms: the counts of a few polls make one move */
+    g_mouse_sx += (tx - g_mouse_sx) * a;
+    g_mouse_sy += (ty - g_mouse_sy) * a;
+    float sx = fabsf(g_mouse_sx) < 0.01f ? 0 : g_mouse_sx, sy = fabsf(g_mouse_sy) < 0.01f ? 0 : g_mouse_sy;
+    if (sx != 0 || sy != 0) {
+        /* past the game's own dead zone at once, as the sticks' anti dead zone does */
+        const float r = sqrtf(sx * sx + sy * sy);
+        const float lift = g_map.stick_antidz;
+        const float f = r > 0 ? (lift + (r > 1 ? 1 : r) * (1 - lift)) / r : 0;
+        sx = sx * f > 1 ? 1 : sx * f < -1 ? -1 : sx * f;
+        sy = sy * f > 1 ? 1 : sy * f < -1 ? -1 : sy * f;
+        int16_t *px = g_map.mouse_stick ? &m->lx : &m->rx, *py = g_map.mouse_stick ? &m->ly : &m->ry;
+        if (fabsf(sx * 32767) > abs(*px)) {
+            *px = (int16_t)(sx * 32767);
+        }
+        if (fabsf(sy * 32767) > abs(*py)) {
+            *py = (int16_t)(sy * 32767);
+        }
+    }
+    unsigned down = 0;
+    if (!g_mouse_skip) {
+        const SDL_MouseButtonFlags b = SDL_GetMouseState(NULL, NULL);
+        down |= (b & SDL_BUTTON_LMASK) ? 1u : 0u;
+        down |= (b & SDL_BUTTON_RMASK) ? 2u : 0u;
+        down |= (b & SDL_BUTTON_MMASK) ? 4u : 0u;
+        down |= (b & SDL_BUTTON_X1MASK) ? 8u : 0u;
+        down |= (b & SDL_BUTTON_X2MASK) ? 16u : 0u;
+    } else if (!(SDL_GetMouseState(NULL, NULL) & (SDL_BUTTON_LMASK | SDL_BUTTON_RMASK | SDL_BUTTON_MMASK))) {
+        g_mouse_skip = false;
+    }
+    down |= now < g_wheel_until[0] ? 32u : 0u;
+    down |= now < g_wheel_until[1] ? 64u : 0u;
+    for (int i = 0; i < IM_MOUSE_BTNS; i++) {
+        if (!(down & (1u << i))) {
+            continue;
+        }
+        switch (g_map.mouse_btn[i]) {
+        case 1: m->analog[0] = 255; break;                  /* A */
+        case 2: m->analog[1] = 255; break;                  /* B */
+        case 3: m->analog[2] = 255; break;                  /* X */
+        case 4: m->analog[3] = 255; break;                  /* Y */
+        case 5: m->buttons |= 0x20; break;                  /* Back */
+        case 6: m->buttons |= 0x10; break;                  /* Start */
+        case 7: m->buttons |= 0x40; break;                  /* left stick click */
+        case 8: m->buttons |= 0x80; break;                  /* right stick click */
+        case 9: m->analog[5] = 255; break;                  /* White */
+        case 10: m->analog[4] = 255; break;                 /* Black */
+        case 11: m->buttons |= 1; break;                    /* d-pad up, down, left, right */
+        case 12: m->buttons |= 2; break;
+        case 13: m->buttons |= 4; break;
+        case 14: m->buttons |= 8; break;
+        case 15: m->analog[6] = 255; break;                 /* left trigger */
+        case 16: m->analog[7] = 255; break;                 /* right trigger */
+        default: break;
+        }
+    }
+}
+
+/* The controller input of one port, from several sources: what is pressed on any of them */
+static void pad_merge(ImPad *to, const ImPad *from)
+{
+    to->buttons |= from->buttons;
+    for (int i = 0; i < 8; i++) {
+        if (from->analog[i] > to->analog[i]) {
+            to->analog[i] = from->analog[i];
+        }
+    }
+    if (abs(from->lx) + abs(from->ly) > abs(to->lx) + abs(to->ly)) {
+        to->lx = from->lx;
+        to->ly = from->ly;
+    }
+    if (abs(from->rx) + abs(from->ry) > abs(to->rx) + abs(to->ry)) {
+        to->rx = from->rx;
+        to->ry = from->ry;
+    }
+}
+
+/* Back held with a bumper (or the combo chosen): a quick save to slot 1, the other side loads it */
+static void quick_buttons(void)
+{
+    static bool was_save, was_load;
+    static Uint64 last;
+    bool save = false, load = false;
+    if (g_map.quick) {
+        for (int k = 0; k < 4; k++) {
+            SDL_Gamepad *pad = g_pads[k];
+            if (!pad || !SDL_GetGamepadButton(pad, SDL_GAMEPAD_BUTTON_BACK) ||
+                SDL_GetGamepadButton(pad, SDL_GAMEPAD_BUTTON_START)) {
+                continue;
+            }
+            switch (g_map.quick_combo) {
+            case 1:
+                save |= SDL_GetGamepadAxis(pad, SDL_GAMEPAD_AXIS_LEFT_TRIGGER) > 16000;
+                load |= SDL_GetGamepadAxis(pad, SDL_GAMEPAD_AXIS_RIGHT_TRIGGER) > 16000;
+                break;
+            case 2:
+                save |= SDL_GetGamepadButton(pad, SDL_GAMEPAD_BUTTON_LEFT_STICK);
+                load |= SDL_GetGamepadButton(pad, SDL_GAMEPAD_BUTTON_RIGHT_STICK);
+                break;
+            case 3:
+                save |= SDL_GetGamepadButton(pad, SDL_GAMEPAD_BUTTON_DPAD_LEFT);
+                load |= SDL_GetGamepadButton(pad, SDL_GAMEPAD_BUTTON_DPAD_RIGHT);
+                break;
+            default:
+                save |= SDL_GetGamepadButton(pad, SDL_GAMEPAD_BUTTON_LEFT_SHOULDER);
+                load |= SDL_GetGamepadButton(pad, SDL_GAMEPAD_BUTTON_RIGHT_SHOULDER);
+                break;
+            }
+        }
+    }
+    const Uint64 now = SDL_GetTicks();
+    const bool ready = now - last > 1500 && SDL_GetAtomicInt(&g_core_state) == 1 && !SDL_GetAtomicInt(&g_saving);
+    if (save && !was_save && ready) {
+        last = now;
+        save_state(1);
+    } else if (load && !was_load && ready) {
+        last = now;
+        load_state(1);
+    }
+    was_save = save;
+    was_load = load;
+}
+
 static void update_pads(bool focused)
 {
     const bool *keys = SDL_GetKeyboardState(NULL);
     for (unsigned i = 0; i < 4; i++) {
         NcPadState s;
         memset(&s, 0, sizeof(s));
+        const bool all = g_map.device[i] == -3;         /* the keyboard, the mouse and every controller */
         SDL_Gamepad *pad = player_pad((int)i);
         /* the keyboard: player 1 on auto, any player set to it */
-        const bool kb = focused && (g_map.device[i] == -1 || (i == 0 && g_map.device[i] == 0));
+        const bool kb = focused && (g_map.device[i] == -1 || all || (i == 0 && g_map.device[i] == 0));
         ImPad m;
-        im_read(&g_map, (int)i, kb ? keys : NULL, pad, &m);
+        if (all) {
+            im_read(&g_map, (int)i, kb ? keys : NULL, NULL, &m);
+            for (int k = 0; k < 4; k++) {
+                if (g_pads[k]) {
+                    ImPad t;
+                    im_read(&g_map, (int)i, NULL, g_pads[k], &t);
+                    pad_merge(&m, &t);
+                }
+            }
+        } else {
+            im_read(&g_map, (int)i, kb ? keys : NULL, pad, &m);
+        }
+        /* the mouse is the keyboard's: with it in play (player 1 on auto, keyboard or all) */
+        if (g_mouse_cap && g_map.mouse && kb && focused) {
+            mouse_apply(&m);
+        }
         s.buttons = m.buttons;
         memcpy(s.analog, m.analog, sizeof(s.analog));
         s.lx = m.lx;
@@ -572,13 +766,25 @@ static void update_pads(bool focused)
         nc_pad_rumble(i, &l, &r);
         if (!g_map.rumble) {
             l = r = 0;
+        } else if (g_map.rumble_scale < 0.999f) {
+            l = (uint16_t)(l * g_map.rumble_scale);
+            r = (uint16_t)(r * g_map.rumble_scale);
         }
-        if (pad && (l != g_rumble[i][0] || r != g_rumble[i][1])) {
-            SDL_RumbleGamepad(pad, l, r, l || r ? 1000 : 0);
+        if ((pad || all) && (l != g_rumble[i][0] || r != g_rumble[i][1])) {
+            if (all) {
+                for (int k = 0; k < 4; k++) {
+                    if (g_pads[k]) {
+                        SDL_RumbleGamepad(g_pads[k], l, r, l || r ? 1000 : 0);
+                    }
+                }
+            } else {
+                SDL_RumbleGamepad(pad, l, r, l || r ? 1000 : 0);
+            }
             g_rumble[i][0] = l;
             g_rumble[i][1] = r;
         }
     }
+    quick_buttons();
 }
 
 /* ------------------------------------------------------------ states */
@@ -659,6 +865,12 @@ static bool g_uncap;    /* the run's frame rate setting (fast forward goes back 
 static int g_fps_cap;   /* ... its limit, uncapped (0: none) */
 static float g_volume = 1.0f;
 static bool g_mute_bg = true;   /* silent while the window isn't the active one */
+static bool g_pause_bg;        /* hold the game while the window is in the background */
+static bool g_autosave = true; /* a save state of slot 0 when the game is left: "Resume" picks it up */
+static bool g_is_dash;         /* this process is the Xbox dashboard (no disc) */
+static bool g_quit_pending;    /* the exit's save is running; the loop leaves when it ends */
+static bool g_quit_close;      /* ... leaving the program, not just the game */
+static uint64_t g_quit_deadline;
 
 /* screenshots\<title>-<date>.bmp beside the executable */
 static void screenshot(void)
@@ -670,7 +882,7 @@ static void screenshot(void)
     GetLocalTime(&t);
     snprintf(p, sizeof(p), "%s/%s-%04d%02d%02d-%02d%02d%02d.bmp", dir, g_key, t.wYear, t.wMonth, t.wDay, t.wHour,
              t.wMinute, t.wSecond);
-    hle_present_shot(p);
+    hle_present_shot_full(p);       /* at the render scale's resolution, not the window's */
     notice(T(S_SHOT_SAVED), p);
 }
 
@@ -870,7 +1082,7 @@ static void overlay_tick(void)
         ui_set_alpha(a);
         const float sz = 22, w = ui_text_width(g_notice, sz, UI_FONT_REGULAR) + 56;
         const float x = (ui_w() - w) / 2, y = ui_h() - 96 + (1 - a) * 12;
-        ui_round(x, y, w, 46, 23, (UiColor){0x08, 0x16, 0x05, 0xE0});
+        ui_round(x, y, w, 46, 23, ui_th(0x08, 0x16, 0x05, 0xE0));
         ui_round_outline(x, y, w, 46, 23, 1.5f, ui_alpha(UI_GREEN, 0.7f));
         ui_glow(x + 24, y + 23, 14, ui_alpha(UI_GREEN, 0.8f));
         ui_text(x + 40, y + 10, g_notice, sz, UI_FONT_REGULAR, UI_WHITE, UI_ALIGN_LEFT);
@@ -908,6 +1120,9 @@ static void apply_cfg(const Config *global, const Config *game, bool sound)
         if ((v = cfg_get(c, "upscale"))) {
             nc_present_set_upscale(nc_upscale_from_name(v));
         }
+        if ((v = cfg_get(c, "nis.sharp"))) {
+            nc_present_set_nis_sharpness(atoi(v));
+        }
         if ((v = cfg_get(c, "crt"))) {
             hle_present_set_crt(atoi(v));
         }
@@ -926,6 +1141,12 @@ static void apply_cfg(const Config *global, const Config *game, bool sound)
         }
         if ((v = cfg_get(c, "mutebg"))) {
             g_mute_bg = atoi(v) != 0;
+        }
+        if ((v = cfg_get(c, "pausebg"))) {
+            g_pause_bg = atoi(v) != 0;
+        }
+        if ((v = cfg_get(c, "autosave"))) {
+            g_autosave = atoi(v) != 0;
         }
     }
     g_fx = cfg_bool(global, "ui.fx", true);
@@ -948,6 +1169,28 @@ static void quit_to_dash(SDL_Window *win)
     exit_now(0);
 }
 
+/* Leaving a game as xemu's "resume where you left off" does: the state saved to slot 0
+ * (it runs on its own thread, the loop keeps presenting) and the exit follows when it
+ * is done. False when there is nothing to save (the game just started, the core not
+ * running, the setting off): the caller leaves at once. */
+static bool start_quit_save(bool close)
+{
+    if (!g_autosave || g_is_dash || g_quit_pending || SDL_GetTicks() < 8000 ||
+        SDL_GetAtomicInt(&g_core_state) != 1 || !hle_pb_active()) {
+        return false;
+    }
+    nc_log("hakuX-app", "leaving: saving the state (slot 0) first");
+    g_quit_pending = true;
+    g_quit_close = close;
+    g_quit_deadline = SDL_GetTicks() + 25000;
+    save_state(0);
+    if (!SDL_GetAtomicInt(&g_saving)) {
+        g_quit_pending = false;     /* it didn't start */
+        return false;
+    }
+    return true;
+}
+
 /* The in-game menu: the emulation paused, the menu drawn by the game's own
  * presenter over its picture, blurred (the overlay). Without the overlay:
  * the presenter off the window (its Vulkan surface dropped) while the
@@ -958,6 +1201,7 @@ static void ingame_menu(SDL_Window *win, bool *paused, bool minimized)
     if (SDL_GetAtomicInt(&g_core_state) != 1) {
         return;
     }
+    mouse_release(win);
     nc_kernel_set_paused(&g_core.kernel, true);
     nc_audio_set_paused(true);
     int slot = 0;
@@ -969,7 +1213,7 @@ static void ingame_menu(SDL_Window *win, bool *paused, bool minimized)
         const int act = dash_ingame(win, g_key, title ? title + 1 : g_disc, NULL, &slot, live_cfg);
         SDL_HideCursor();
         nc_auto_resync();
-        if (act == DASH_INGAME_QUIT) {
+        if (act == DASH_INGAME_QUIT && !start_quit_save(false)) {
             fx_out();
             quit_to_dash(win);
         }
@@ -1008,7 +1252,7 @@ static void ingame_menu(SDL_Window *win, bool *paused, bool minimized)
     nc_present_frame(NULL);     /* the surface goes */
     const int act = dash_ingame(win, g_key, title ? title + 1 : g_disc, pic, &slot, NULL);
     remove(pic);
-    if (act == DASH_INGAME_QUIT) {
+    if (act == DASH_INGAME_QUIT && !start_quit_save(false)) {
         quit_to_dash(win);
     }
     SDL_HideCursor();   /* the game doesn't use the mouse; the menu may have shown it */
@@ -1117,7 +1361,7 @@ static const char *pick_disc(void)
 }
 
 #ifndef XBASED_VERSION
-#define XBASED_VERSION "1.0.76"
+#define XBASED_VERSION "1.0.76.1"
 #endif
 
 static void rm_tree(const char *path)
@@ -1234,7 +1478,7 @@ int main(int argc, char *argv[])
     if (again) {
         nc_log("hakuX-app", "---- started again (%s)", opt_flag("relaunch") ? "the title's relaunch" : "a state loaded");
     }
-    nc_log("hakuX-app", "xbased " XBASED_VERSION " (an original Xbox emulator by crazyriddler, based on hakuX), " NC_PLATFORM_NAME);
+    nc_log("hakuX-app", "xbased " XBASED_VERSION " (Modern GUI fork of xbased, an original Xbox emulator by crazyriddler, based on hakuX), " NC_PLATFORM_NAME);
     nc_win_mods_cleanup(g_exe_dir);     /* what an update took away (win_mods.h) */
 
     SDL_SetHint(SDL_HINT_JOYSTICK_ALLOW_BACKGROUND_EVENTS, "1");
@@ -1281,23 +1525,18 @@ int main(int argc, char *argv[])
             return r;
         }
     }
-    if (!xbox_dash) {
+    g_is_dash = xbox_dash;
+    if (xbox_dash) {
+        /* the same options, controller map, language and video flags as a game's: the
+         * dashboard took no input until the in-game menu had been opened and closed */
+        game_options(NULL);
+    } else {
         snprintf(g_disc, sizeof(g_disc), "%s", disc);
         game_options(g_disc);
         g_disc_fd = open(g_disc, O_RDONLY | O_BINARY);
         if (g_disc_fd < 0) {
             nc_log("hakuX-app", "can't open the disc %s", g_disc);
         }
-    } else {
-        /* the controls as a game's (game_options), xbased.ini's alone: left
-         * unresolved, the Xbox dashboard got no controller until the in-game
-         * menu resolved them on Resume (#124) */
-        char path[MAX_PATH + 16];
-        snprintf(path, sizeof(path), "%sxbased.ini", g_data_dir);
-        Config global, none;
-        cfg_load(&global, path);
-        memset(&none, 0, sizeof(none));
-        im_resolve(&g_map, &global, &none);
     }
     char hdd[1024];
     const char *hv = opt_value("hdd");
@@ -1362,6 +1601,8 @@ int main(int argc, char *argv[])
             nc_present_set_fxaa(atoi(a + 5) != 0);
         } else if (!strncmp(a, "upscale=", 8)) {
             nc_present_set_upscale(nc_upscale_from_name(a + 8));
+        } else if (!strncmp(a, "nis.sharp=", 10)) {
+            nc_present_set_nis_sharpness(atoi(a + 10));
         } else if (!strncmp(a, "crt=", 4)) {
             hle_present_set_crt(atoi(a + 4));
         } else if (!strncmp(a, "vsync=", 6)) {
@@ -1373,6 +1614,10 @@ int main(int argc, char *argv[])
             nc_present_set_show_fps(atoi(a + 8) != 0);
         } else if (!strncmp(a, "mutebg=", 7)) {
             g_mute_bg = atoi(a + 7) != 0;
+        } else if (!strncmp(a, "pausebg=", 8)) {
+            g_pause_bg = atoi(a + 8) != 0;
+        } else if (!strncmp(a, "autosave=", 9)) {
+            g_autosave = atoi(a + 9) != 0;
         }
     }
     nc_win_mods_prepare(g_exe_dir, g_disc_fd, g_args, g_nargs);
@@ -1418,6 +1663,35 @@ int main(int argc, char *argv[])
     g_nw.width = pw;
     g_nw.height = ph;
 
+    {
+        /* Settings > Video > Graphics card: the Nth Vulkan device (vkdev.c's HAKUX_GPU) */
+        char ip[MAX_PATH + 32];
+        snprintf(ip, sizeof(ip), "%sxbased.ini", g_data_dir);
+        Config gc;
+        cfg_load(&gc, ip);
+        const char *gv = cfg_get(&gc, "gpu");
+        if (gv && atoi(gv) > 0 && !getenv("HAKUX_GPU")) {
+            char b[16];
+            snprintf(b, sizeof(b), "%d", atoi(gv) - 1);
+#ifdef _WIN32
+            _putenv_s("HAKUX_GPU", b);
+#else
+            setenv("HAKUX_GPU", b, 0);
+#endif
+        }
+        /* Settings > System > disk sizes: what the title is told its drives hold (kernel/io.c) */
+        static const struct { const char *key, *env; } disks[] = {{"hdd.mb", "HAKUX_E_MB"}, {"cache.mb", "HAKUX_CACHE_MB"}};
+        for (int i = 0; i < 2; i++) {
+            const char *dv = cfg_get(&gc, disks[i].key);
+            if (dv && atoi(dv) > 0 && !getenv(disks[i].env)) {
+#ifdef _WIN32
+                _putenv_s(disks[i].env, dv);
+#else
+                setenv(disks[i].env, dv, 0);
+#endif
+            }
+        }
+    }
     if (!nc_present_init()) {
         return 1;
     }
@@ -1468,16 +1742,40 @@ int main(int argc, char *argv[])
     pthread_attr_destroy(&attr);
 
     nc_win_thread_name("window");
-    bool quit = false, paused = false, minimized = false, focused = true, told = false;
+    bool quit = false, paused = false, minimized = false, focused = true, told = false, bg_paused = false;
     while (!quit) {
         SDL_Event ev;
         while (SDL_PollEvent(&ev)) {
             switch (ev.type) {
             case SDL_EVENT_QUIT:
+                if (!g_quit_pending && start_quit_save(true)) {
+                    break;      /* leaves when the save is done */
+                }
                 quit = true;
+                break;
+            case SDL_EVENT_MOUSE_BUTTON_DOWN:
+                /* a click on the game takes the mouse, when it is set to be a stick */
+                if (g_map.mouse && !g_mouse_cap && focused && !minimized) {
+                    mouse_capture(win);
+                }
+                break;
+            case SDL_EVENT_MOUSE_MOTION:
+                if (g_mouse_cap) {
+                    g_mouse_dx += ev.motion.xrel;
+                    g_mouse_dy += ev.motion.yrel;
+                }
+                break;
+            case SDL_EVENT_MOUSE_WHEEL:
+                if (g_mouse_cap && ev.wheel.y != 0) {
+                    g_wheel_until[ev.wheel.y > 0 ? 0 : 1] = SDL_GetTicks() + 120;
+                }
                 break;
             case SDL_EVENT_KEY_DOWN:
                 if (ev.key.repeat) {
+                    break;
+                }
+                if (g_mouse_cap && (ev.key.key == SDLK_F3 || ev.key.key == SDLK_ESCAPE)) {
+                    mouse_release(win);     /* F3 or Esc lets go */
                     break;
                 }
                 /* the shortcuts (Settings > Shortcuts); Shift with quick save/load: slot 2 */
@@ -1542,11 +1840,25 @@ int main(int argc, char *argv[])
             case SDL_EVENT_WINDOW_FOCUS_GAINED:
                 focused = true;
                 nc_audio_set_volume(g_volume);
+                if (bg_paused) {
+                    bg_paused = false;
+                    minimized = false;
+                    nc_kernel_set_paused(&g_core.kernel, paused);
+                    nc_audio_set_paused(paused);
+                }
                 break;
             case SDL_EVENT_WINDOW_FOCUS_LOST:
                 focused = false;
+                mouse_release(win);
                 if (g_mute_bg) {
                     nc_audio_set_volume(0);
+                }
+                if (g_pause_bg && !bg_paused) {
+                    /* held like a minimized window (Settings > Video) */
+                    bg_paused = true;
+                    minimized = true;
+                    nc_kernel_set_paused(&g_core.kernel, true);
+                    nc_audio_set_paused(true);
                 }
                 break;
             default:
@@ -1589,6 +1901,13 @@ int main(int argc, char *argv[])
                     break;
                 }
             }
+        }
+        if (g_quit_pending && (!SDL_GetAtomicInt(&g_saving) || SDL_GetTicks() > g_quit_deadline)) {
+            g_quit_pending = false;
+            if (g_quit_close) {
+                break;
+            }
+            quit_to_dash(win);
         }
         overlay_tick();
         if (minimized || g_nw.width <= 0 || !nc_present_frame(&g_nw)) {

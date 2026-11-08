@@ -25,13 +25,20 @@ set(NC_APP_SOURCES
   "${CMAKE_CURRENT_SOURCE_DIR}/app/ui/xemu_import.c"
   "${CMAKE_CURRENT_SOURCE_DIR}/app/ui/update.c"
   "${CMAKE_CURRENT_SOURCE_DIR}/app/ui/shortcut.c"
+  "${CMAKE_CURRENT_SOURCE_DIR}/app/ui/skin.c"
+  "${CMAKE_CURRENT_SOURCE_DIR}/app/ui/insignia.c"
+  "${CMAKE_CURRENT_SOURCE_DIR}/app/ui/ogdash.c"
+  "${CMAKE_CURRENT_SOURCE_DIR}/app/ui/homebrew.c"
+  "${CMAKE_CURRENT_SOURCE_DIR}/app/ui/homebrew_ui.c"
+  "${CMAKE_CURRENT_SOURCE_DIR}/app/ui/xiso_build.c"
+  "${CMAKE_CURRENT_SOURCE_DIR}/app/ui/playtime.c"
 )
 if(WIN32)
   enable_language(RC)
   add_executable(hakux WIN32 ${NC_APP_SOURCES} "${CMAKE_CURRENT_SOURCE_DIR}/app/win/xbased.rc")
   # the linker's map: the profile's offsets resolved where there is no debug info (HAKUX_PROF)
   target_link_options(hakux PRIVATE "-Wl,-Map=$<TARGET_FILE_DIR:hakux>/xbased.map")
-  target_link_libraries(hakux PRIVATE ole32 uuid shell32 mpr)   # the desktop shortcuts (app/ui/shortcut.c); mpr: a network drive's share (dash_browse.c)
+  target_link_libraries(hakux PRIVATE ole32 uuid shell32 mpr ws2_32)   # the desktop shortcuts (app/ui/shortcut.c); mpr: a network drive's share (dash_browse.c)
 else()
   add_executable(hakux ${NC_APP_SOURCES})
 endif()

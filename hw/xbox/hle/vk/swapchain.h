@@ -12,7 +12,8 @@ struct ANativeWindow;
 
 /* A frame smaller than its place in the window: scaled up bilinearly, or by
  * AMD FidelityFX Super Resolution 1 (a larger one is always averaged down). */
-enum { HLE_UPSCALE_BILINEAR, HLE_UPSCALE_FSR };
+/* NIS: its sharpness (percent) in the bits above the kind (upscale >> 8) */
+enum { HLE_UPSCALE_BILINEAR, HLE_UPSCALE_FSR, HLE_UPSCALE_NEAREST, HLE_UPSCALE_NIS };
 
 /* This refresh would put up what win already shows (the same front frame,
  * gamma ramp, window and swapchain, and key: the caller's placement and
@@ -40,6 +41,7 @@ void hle_present_end(float sx, float sy, bool fxaa, int upscale, bool average, u
 /* A picture of the next refresh that goes through, as the window shows it,
  * written to path (a BMP) on the window's thread. */
 void hle_present_shot(const char *path);
+void hle_present_shot_full(const char *path);   /* at the game's own (render scale) resolution */
 /* The CRT filter on the window's picture: 0 none, 1 soft scanlines, 2 a
  * TV, 3 an arcade monitor (any thread; the next refresh). */
 void hle_present_set_crt(int kind);

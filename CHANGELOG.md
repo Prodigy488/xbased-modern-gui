@@ -1,5 +1,15 @@
 # xbased changelog
 
+## 1.0.76.1 (Modern GUI fork)
+
+Everything from xbased 1.0.76, plus the Modern GUI changes: dashboard styles and themes, Insignia tab
+and Setup Assistant, Homebrew tab and store, OG Dashboard tab, play time, Resume and auto-save,
+covers (floating and 3D), per-game cover keys for games without a title ID, Nearest and NVIDIA NIS
+upscaling (NIS: a GLSL port of NVIDIA Image Scaling's NVScaler, checked against the SDK on the CPU,
+not yet on a GPU), GPU and disk-size settings, pause on focus loss, keyboard / mouse / controller
+settings (mouse as a stick, layouts, quick save buttons), non-Xbox disc images skipped,
+interface sounds off by default. The update check follows this fork's releases.
+
 ## 1.0.76 (2026-11)
 
 ### New

@@ -6,7 +6,11 @@
 #include "native/app/ui/dash.h"
 #include "native/app/ui/console_cfg.h"
 #include "native/app/ui/dash_int.h"
+#include "native/app/ui/homebrew.h"
 #include "native/app/ui/shortcut.h"
+#include "native/app/ui/playtime.h"
+#include "native/app/ui/xemu_import.h"
+#include "native/app/ui/skin.h"
 #include "native/app/ui/sound.h"
 #include "native/app/ui/update.h"
 
@@ -22,7 +26,7 @@
 #endif
 
 #ifndef XBASED_VERSION
-#define XBASED_VERSION "1.0.76"
+#define XBASED_VERSION "1.0.76.1"
 #endif
 
 Dash D;
@@ -169,7 +173,7 @@ static void draw_toast(void)
         widest = w > widest ? w : widest;
     }
     const float tw = widest + 40, th = 14 + 30.0f * (float)nl, y = ui_h() - 76 - th;
-    ui_round((W - tw) / 2, y, tw, th, 22, (UiColor){0x10, 0x30, 0x08, 0xF0});
+    ui_round((W - tw) / 2, y, tw, th, 22, ui_th(0x10, 0x30, 0x08, 0xF0));
     ui_round_outline((W - tw) / 2, y, tw, th, 22, 1.5f, UI_GREEN);
     for (int i = 0; i < nl; i++) {
         ui_text(W / 2, y + 10 + 30.0f * (float)i, lines[i], 22, UI_FONT_REGULAR, UI_WHITE, UI_ALIGN_CENTER);
@@ -184,7 +188,7 @@ static void draw_scan_badge(void)
     char t[96];
     snprintf(t, sizeof(t), T(S_LOADING_GAMES), lib_count());
     const float tw = ui_text_width(t, 18, UI_FONT_REGULAR), w = tw + 58, x = W - 60 - w;
-    ui_round(x, y, w, h, h / 2, (UiColor){0x10, 0x30, 0x08, 0xE0});
+    ui_round(x, y, w, h, h / 2, ui_th(0x10, 0x30, 0x08, 0xE0));
     ui_round_outline(x, y, w, h, h / 2, 1, UI_GREEN_DIM);
     /* an orbit turning, as the menu's orb's: it's working */
     ui_ring(x + 19, y + h / 2, 9, 3.5f, (float)ui_time() * 4.0f, 2, UI_GREEN_HI);
@@ -647,7 +651,7 @@ void draw_button_glyph(float x, float y, int which, float size)
     if (D.in.pad && which >= 4) {
         /* the triggers, the View button: their names on a dark key */
         const float w = ui_text_width(k_pad_wide[which], size * 0.56f, UI_FONT_BOLD) + size * 0.7f;
-        ui_round(x, y + size * 0.08f, w, size * 0.84f, size * 0.42f, ui_alpha((UiColor){0x30, 0x34, 0x30, 0xFF}, 0.95f));
+        ui_round(x, y + size * 0.08f, w, size * 0.84f, size * 0.42f, ui_alpha(ui_th(0x30, 0x34, 0x30, 0xFF), 0.95f));
         ui_text(x + w / 2, y + size * 0.19f, k_pad_wide[which], size * 0.56f, UI_FONT_BOLD, UI_WHITE, UI_ALIGN_CENTER);
     } else if (D.in.pad) {
         ui_circle(x + size / 2, y + size / 2, size / 2, k_col[which]);
@@ -1069,6 +1073,7 @@ void states_dir(const LibGame *g, char *out, size_t n)
 }
 
 static SDL_Process *g_child;
+static struct { bool have, fs, max; int x, y, w, h; } g_wsave;  /* the dashboard window as it was hidden */
 static double g_hide_at;    /* the window's hiding: the game's taking over, or this time (0: hidden) */
 static bool child_running(void);
 
@@ -1083,10 +1088,12 @@ static struct {
     bool on;                /* breaking */
     double t0;              /* since (< 0: the screen's picture not taken yet) */
     double back;            /* coming back since (0: not) */
-    char path[1024], extra[1300];
+    char path[1024], extra[1300], key[24];
     bool has_extra;
     UiTex *pic;
 } g_go;
+static char g_play_key[24];   /* the game being timed (playtime.h), and since when */
+static time_t g_play_t0;
 
 #ifdef _WIN32
 static HANDLE g_follow;     /* the game's process on Windows (follow below) */
@@ -1150,6 +1157,8 @@ static void go_spawn(void)
         g_go.back = ui_time();      /* the screen back */
         return;
     }
+    snprintf(g_play_key, sizeof(g_play_key), "%s", g_go.key);
+    g_play_t0 = time(NULL);
     /* shown until the game's window takes the screen (no desktop between) */
     g_hide_at = ui_time() + 8.0;
 }
@@ -1192,6 +1201,59 @@ void dash_open_xbox_dashboard(void)
     g_go.t0 = -1;
 }
 
+/* ---- the dashboard added from a qcow2 hard disk image (xemu_import.c reads
+ * the C: drive's files into hdd/Partition2 on a thread; the outcome a toast) ---- */
+static void install_file_cb(void *ud, const char *const *files, int filter)
+{
+    (void)ud;
+    (void)filter;
+    if (!files || !files[0]) {
+        return;
+    }
+    const char *f = files[0];
+    const size_t n = strlen(f);
+    if (n < 6 || SDL_strcasecmp(f + n - 6, ".qcow2")) {
+        dash_toast(T(S_OG_ONLY_QCOW2));
+        return;
+    }
+    const char *hdd = cfg_get(&D.global, "hdd");
+    char dir[1200];
+    if (hdd && hdd[0]) {
+        snprintf(dir, sizeof(dir), "%s", hdd);
+    } else {
+        snprintf(dir, sizeof(dir), "%shdd", cfg_data_dir());
+    }
+    xi_dash_start(f, dir);
+    dash_toast(T(S_OG_READING));
+}
+
+void dash_install_xbox_dashboard(void)
+{
+    if (xi_dash_state() == 1) {
+        return;
+    }
+    dash_browse_file(T(S_OG_PICK), "qcow2", install_file_cb, NULL);
+}
+
+bool dash_install_busy(void)
+{
+    return xi_dash_state() == 1;
+}
+
+void dash_install_poll(void)
+{
+    const char *r = xi_dash_take();
+    if (r) {
+        char msg[400];
+        if (r[0]) {
+            snprintf(msg, sizeof(msg), "%s: %s", T(S_OG_FAIL), r);
+        } else {
+            snprintf(msg, sizeof(msg), "%s", T(S_OG_DONE));
+        }
+        dash_toast(msg);
+    }
+}
+
 void launch_game(LibGame *g, const char *extra)
 {
     if (g_go.on || child_running()) {
@@ -1200,6 +1262,7 @@ void launch_game(LibGame *g, const char *extra)
     dash_save_cfg();
     lib_set_played(g);      /* the last played first, when the Games screen wants it */
     snprintf(g_go.path, sizeof(g_go.path), "%s", g->g.path);
+    snprintf(g_go.key, sizeof(g_go.key), "%s", g->g.key);
     g_go.has_extra = extra != NULL;
     snprintf(g_go.extra, sizeof(g_go.extra), "%s", extra ? extra : "");
     snd_play(SND_LAUNCH);
@@ -1266,9 +1329,49 @@ static void wait_child(void)
     } else {
         return;
     }
+    if (g_play_key[0]) {
+        const time_t el = time(NULL) - g_play_t0;
+        if (el >= 20 && el < 7 * 24 * 3600) {
+            pt_add(g_play_key, (int64_t)el);
+        }
+        g_play_key[0] = 0;
+    }
     g_hide_at = 0;
     g_go.back = cfg_bool(&D.global, "ui.fx", true) ? ui_time() : 0;   /* the screen rushes back in */
     SDL_ShowWindow(g_win);
+    if (g_wsave.have) {
+        /* the window as it was: a game (the Xbox dashboard too) may have left it resized or
+         * its mode changed; only what differs is touched (a needless mode switch is what
+         * leaves a stale-sized frame behind) */
+        const SDL_WindowFlags wf = SDL_GetWindowFlags(g_win);
+        const bool is_fs = (wf & SDL_WINDOW_FULLSCREEN) != 0, is_max = (wf & SDL_WINDOW_MAXIMIZED) != 0;
+        int cw = 0, ch = 0;
+        SDL_GetWindowSize(g_win, &cw, &ch);
+        if (g_wsave.fs) {
+            if (!is_fs) {
+                SDL_SetWindowFullscreen(g_win, true);
+            }
+        } else {
+            if (is_fs) {
+                SDL_SetWindowFullscreen(g_win, false);
+            }
+            if (g_wsave.max) {
+                if (!is_max) {
+                    SDL_MaximizeWindow(g_win);
+                }
+            } else {
+                if (is_max) {
+                    SDL_RestoreWindow(g_win);
+                }
+                if (g_wsave.w > 0 && g_wsave.h > 0 && (cw != g_wsave.w || ch != g_wsave.h)) {
+                    SDL_SetWindowSize(g_win, g_wsave.w, g_wsave.h);
+                    SDL_SetWindowPosition(g_win, g_wsave.x, g_wsave.y);
+                }
+            }
+        }
+        SDL_SyncWindow(g_win);
+        g_wsave.have = false;
+    }
     /* the game had the screen: past Windows' lock on the foreground, so the
      * dashboard has the keyboard and the gamepads again, not just its picture
      * (the game grants it as it ends, this attaches to the foreground's input
@@ -1288,6 +1391,15 @@ static void wait_child(void)
 static const char *k_main_items[] = {NULL, NULL, NULL, NULL, NULL};
 
 /* Exit, confirmed: the app closes (from a gamepad too, full screen) */
+/* The theme and dashboard style from the settings (each frame: they are
+ * changed on the Interface tab and take effect at once). */
+void dash_apply_skin(void)
+{
+    ui_theme_set(ui_theme_from_name(cfg_get(&D.global, "ui.theme")));
+    skin_set(cfg_get(&D.global, "ui.style"));
+    ui_case3d_set(cfg_bool(&D.global, "ui.case3d", true));
+}
+
 static void exit_yes(Dash *d)
 {
     d->quit = true;
@@ -1296,54 +1408,32 @@ static void exit_yes(Dash *d)
 static void scr_main(void)
 {
     const float W = ui_w(), H = ui_h();
-    const enum UiStr items[] = {S_GAMES, S_MEMORY, S_SETTINGS, S_ONLINE, S_EXIT};
-    const int n = 5;
-    int *sel = &D.sel[SCR_MAIN];
+    static const struct { enum UiStr label, desc; } k_items[] = {
+        {S_GAMES, S_DESC_GAMES}, {S_HOMEBREW, S_DESC_HOMEBREW}, {S_MEMORY, S_DESC_MEMORY},
+        {S_INSIGNIA, S_DESC_INSIGNIA}, {S_OGDASH, S_DESC_OGDASH}, {S_ONLINE, S_DESC_ONLINE},
+        {S_SETTINGS, S_DESC_SETTINGS}, {S_EXIT, S_DESC_EXIT},
+    };
+    /* each item's colour and the Games tab's recents go by its id, not its place */
+    static const int k_ids[] = {0, 7, 1, 2, 3, 4, 5, 6};
+    enum { N_ITEMS = 8 };
+    SkinItem items[N_ITEMS];
+    for (int i = 0; i < N_ITEMS; i++) {
+        items[i].id = k_ids[i];
+        items[i].label = T(k_items[i].label);
+        items[i].desc = T(k_items[i].desc);
+    }
     (void)k_main_items;
-    /* a tall window: the orb on top, the menu under it */
-    const bool tall = W < H * 1.1f;
-    const float ox = tall ? W * 0.5f : W * 0.32f, oy = tall ? H * 0.27f : H * 0.5f;
-    const float orb_r = tall ? fminf(H * 0.11f, W * 0.18f) : H * 0.13f;
-    ui_orb(ox, oy, orb_r, 0);
-    /* the logo, over the orb */
-    ui_text(ox, oy - orb_r * 0.36f, "xbased", orb_r * 0.56f, UI_FONT_BOLD, UI_WHITE, UI_ALIGN_CENTER);
-    /* the items: green capsules fanned on the orb's right */
-    for (int i = 0; i < n; i++) {
-        const float t = ease(D.anim * 3 - i * 0.12f);
-        const float ang = (i - (n - 1) / 2.0f) * 0.32f;
-        const float bw = tall ? W * 0.7f : W * 0.30f, bh = 56;
-        const float bx = tall ? (W - bw) / 2 + (1 - t) * 60 : ox + orb_r * 1.5f + cosf(ang) * 40 - 30 + (1 - t) * 60;
-        const float by = tall ? oy + orb_r * 1.9f + i * (bh + 18) : oy + sinf(ang) * orb_r * 2.9f - 28;
-        const bool s = *sel == i;
-        const bool over = D.in.mx >= bx && D.in.mx < bx + bw && D.in.my >= by && D.in.my < by + bh;
-        if (over && D.in.moved) {
-            *sel = i;
-        }
-        if (!tall) {
-            ui_line(ox + orb_r * 0.9f * cosf(ang), oy + orb_r * 0.9f * sinf(ang), bx, by + bh / 2, s ? 3 : 1.5f,
-                    ui_alpha(UI_GREEN, (s ? 0.8f : 0.35f) * t));
-        }
-        if (s) {
-            ui_glow(bx + bw / 2, by + bh / 2, bw * 0.7f, ui_alpha(UI_GREEN, 0.25f * t));
-        }
-        ui_round(bx, by, bw, bh, bh / 2, ui_alpha(s ? (UiColor){0x3C, 0x9A, 0x12, 0xFF} : (UiColor){0x14, 0x3A, 0x08, 0xFF}, 0.92f * t));
-        ui_round_outline(bx, by, bw, bh, bh / 2, s ? 2.5f : 1.5f, ui_alpha(s ? UI_GREEN_HI : UI_GREEN_DIM, t));
-        ui_text(bx + 34, by + 11, T(items[i]), 32, UI_FONT_BOLD, ui_alpha(s ? UI_WHITE : UI_GREY, t), UI_ALIGN_LEFT);
-        if ((s && D.in.ok) || (over && D.in.click)) {
-            switch (items[i]) {
-            case S_GAMES: dash_push(SCR_GAMES); break;
-            case S_MEMORY: dash_push(SCR_MEMORY); break;
-            case S_SETTINGS: dash_push(SCR_SETTINGS); break;
-            case S_ONLINE: dash_push(SCR_ONLINE); break;
-            default: dash_ask(T(S_CONFIRM_EXIT), exit_yes); break;
-            }
-        }
-    }
-    if (D.in.up) {
-        *sel = (*sel + n - 1) % n;
-    }
-    if (D.in.down) {
-        *sel = (*sel + 1) % n;
+    const int pick = skin_main(items, N_ITEMS, &D.sel[SCR_MAIN]);
+    switch (pick) {
+    case 0: dash_push(SCR_GAMES); break;
+    case 1: D.sel[SCR_HOMEBREW] = D.scroll[SCR_HOMEBREW] = 0; dash_push(SCR_HOMEBREW); break;
+    case 2: dash_push(SCR_MEMORY); break;
+    case 3: dash_push(SCR_INSIGNIA); break;
+    case 4: dash_push(SCR_OGDASH); break;
+    case 5: dash_push(SCR_ONLINE); break;
+    case 6: dash_push(SCR_SETTINGS); break;
+    case 7: dash_ask(T(S_CONFIRM_EXIT), exit_yes); break;
+    default: break;
     }
     if (D.in.y) {
         dash_push(SCR_ABOUT);
@@ -1364,14 +1454,27 @@ static void draw_card(LibGame *g, float x, float y, float w, float h, bool sel, 
     if (sel) {
         ui_glow(x + w / 2, y + h / 2, w * 1.1f, ui_alpha(UI_GREEN, 0.35f * alpha));
     }
-    ui_round(x, y, w, h, 10, ui_alpha((UiColor){0x0E, 0x26, 0x07, 0xFF}, alpha));
     UiTex *cv = lib_cover(g);
+    if (ui_case3d_enabled() && h >= 90 && (cv || lib_cover3d(g))) {
+        /* a case standing on the shelf: the selected one turns to face you */
+        UiTex *own = lib_cover3d(g);
+        if (own) {
+            ui_image(own, x, y, w, h, alpha);
+        } else {
+            ui_case3d(cv, x, y, w, h, sel ? -0.34f : -0.62f, alpha);
+        }
+        if (sel) {
+            ui_round_outline(x, y, w, h, 10, 2, ui_alpha(UI_GREEN_HI, alpha * 0.55f));
+        }
+        return;
+    }
+    ui_round(x, y, w, h, 10, ui_alpha(ui_th(0x0E, 0x26, 0x07, 0xFF), alpha));
     if (cv) {
         ui_image(cv, x + 4, y + 4, w - 8, h - 8, alpha);
     } else {
         /* no box art: the disc's own icon on a green card, its title under */
-        ui_rect_grad(x + 4, y + 4, w - 8, h - 8, ui_alpha((UiColor){0x1E, 0x52, 0x0A, 0xFF}, alpha),
-                     ui_alpha((UiColor){0x06, 0x14, 0x03, 0xFF}, alpha));
+        ui_rect_grad(x + 4, y + 4, w - 8, h - 8, ui_alpha(ui_th(0x1E, 0x52, 0x0A, 0xFF), alpha),
+                     ui_alpha(ui_th(0x06, 0x14, 0x03, 0xFF), alpha));
         UiTex *ic = lib_icon(g);
         /* sized to the card: the small covers' view has them a third as big */
         const float fs = fminf(17, fmaxf(10, w * 0.13f)), is = fminf(w * 0.62f, h - fs * 4.2f);
@@ -1397,7 +1500,7 @@ static void draw_add_card(float x, float y, float w, float h, bool sel, float al
         if (sel) {
             ui_glow(x + w / 2, y + h / 2, w * 0.7f, ui_alpha(UI_GREEN, 0.3f * alpha));
         }
-        ui_round(x, y, w, h, 8, ui_alpha(sel ? (UiColor){0x1A, 0x44, 0x0C, 0xFF} : (UiColor){0x0E, 0x26, 0x07, 0xFF},
+        ui_round(x, y, w, h, 8, ui_alpha(sel ? ui_th(0x1A, 0x44, 0x0C, 0xFF) : ui_th(0x0E, 0x26, 0x07, 0xFF),
                                          alpha));
         const float is = h - 10, cx = x + 5 + is / 2, cy = y + h / 2, r = is * 0.36f;
         ui_ring(cx, cy, r, r, 0, 2.5f, fg);
@@ -1411,7 +1514,7 @@ static void draw_add_card(float x, float y, float w, float h, bool sel, float al
     if (sel) {
         ui_glow(x + w / 2, y + h / 2, w * 1.1f, ui_alpha(UI_GREEN, 0.35f * alpha));
     }
-    ui_round(x, y, w, h, 10, ui_alpha((UiColor){0x08, 0x16, 0x05, 0xE8}, alpha));
+    ui_round(x, y, w, h, 10, ui_alpha(ui_th(0x08, 0x16, 0x05, 0xE8), alpha));
     const float cx = x + w / 2, cy = y + h * 0.4f, r = w * 0.26f;
     ui_ring(cx, cy, r, r, 0, 3, ui_alpha(sel ? UI_GREEN_HI : UI_GREEN, alpha));
     ui_rect(cx - r * 0.5f, cy - 3, r, 6, ui_alpha(sel ? UI_GREEN_HI : UI_GREEN, alpha));
@@ -1424,7 +1527,7 @@ static void draw_add_card(float x, float y, float w, float h, bool sel, float al
 /* a favorite's star: five points on a dark disc, top right of a card */
 static void draw_star(float cx, float cy, float r, float alpha)
 {
-    ui_circle(cx, cy, r * 1.25f, ui_alpha((UiColor){0x08, 0x10, 0x04, 0xFF}, 0.85f * alpha));
+    ui_circle(cx, cy, r * 1.25f, ui_alpha(ui_th(0x08, 0x10, 0x04, 0xFF), 0.85f * alpha));
     SDL_FPoint p[10];
     for (int i = 0; i < 10; i++) {
         const float a = -1.5707963f + i * 0.6283185f, k = i % 2 ? r * 0.45f : r;
@@ -1468,13 +1571,13 @@ static void draw_tile(LibGame *g, float x, float y, float w, float h, bool sel, 
     if (sel) {
         ui_glow(x + w / 2, y + h / 2, w * 0.7f, ui_alpha(UI_GREEN, 0.3f * alpha));
     }
-    ui_round(x, y, w, h, 8, ui_alpha(sel ? (UiColor){0x1A, 0x44, 0x0C, 0xFF} : (UiColor){0x0E, 0x26, 0x07, 0xFF}, alpha));
+    ui_round(x, y, w, h, 8, ui_alpha(sel ? ui_th(0x1A, 0x44, 0x0C, 0xFF) : ui_th(0x0E, 0x26, 0x07, 0xFF), alpha));
     const float is = h - 10;
     UiTex *ic = lib_icon(g);
     if (ic) {
         ui_image(ic, x + 5, y + 5, is, is, alpha);
     } else {
-        ui_round(x + 5, y + 5, is, is, 6, ui_alpha((UiColor){0x1E, 0x52, 0x0A, 0xFF}, alpha));
+        ui_round(x + 5, y + 5, is, is, 6, ui_alpha(ui_th(0x1E, 0x52, 0x0A, 0xFF), alpha));
         ui_text(x + 5 + is / 2, y + 5 + is * 0.18f, "X", is * 0.6f, UI_FONT_BOLD, ui_alpha(UI_GREEN, alpha),
                 UI_ALIGN_CENTER);
     }
@@ -1511,6 +1614,11 @@ static void open_game(LibGame *g)
     }
     D.sel[SCR_GAME] = 0;
     dash_push(SCR_GAME);
+}
+
+void dash_open_game(LibGame *g)
+{
+    open_game(g);
 }
 
 #define MAX_SHOWN 16384
@@ -1736,7 +1844,7 @@ static void scr_games(void)
     if (s_jump[0] && ui_time() - s_jump_at < 0.9) {
         const float t = (float)(ui_time() - s_jump_at), al = t < 0.6f ? 1 : 1 - (t - 0.6f) / 0.3f;
         const float tw = ui_text_width(s_jump, 64, UI_FONT_BOLD), bw = fmaxf(tw + 60, 130), bh = 104;
-        ui_round((W - bw) / 2, (H - bh) / 2 - 20, bw, bh, 18, ui_alpha((UiColor){0x08, 0x1A, 0x04, 0xF0}, al));
+        ui_round((W - bw) / 2, (H - bh) / 2 - 20, bw, bh, 18, ui_alpha(ui_th(0x08, 0x1A, 0x04, 0xF0), al));
         ui_round_outline((W - bw) / 2, (H - bh) / 2 - 20, bw, bh, 18, 2, ui_alpha(UI_GREEN_HI, al));
         ui_text(W / 2, (H - bh) / 2 - 2, s_jump, 64, UI_FONT_BOLD, ui_alpha(UI_WHITE, al), UI_ALIGN_CENTER);
     }
@@ -1865,8 +1973,49 @@ static void scr_game(void)
     for (int i = 0; i < 3; i++) {
         ui_text_fit(70, 160 + ch + 26 * i, info[i], 18, UI_FONT_REGULAR, UI_GREY, UI_ALIGN_LEFT, cw + 20);
     }
+    {
+        /* the play time, a line more under the facts */
+        const char *pt = pt_text(pt_get(g->g.key));
+        if (pt[0]) {
+            char line[96];
+            snprintf(line, sizeof(line), "%s %s", T(S_PLAYTIME), pt);
+            ui_text_fit(70, 160 + ch + 26 * 3, line, 18, UI_FONT_REGULAR, UI_GREEN, UI_ALIGN_LEFT, cw + 20);
+        }
+    }
     List l;
     list_begin(&l, 110 + cw, 150, W - 180 - cw, ch, 60);
+    /* the latest savestate: pick the game up where it was left */
+    {
+        static char key[24];
+        static char arg[1300], when[48];
+        static double checked;
+        static bool have;
+        const double now = ui_time();
+        if (strcmp(key, g->g.key) || now - checked > 2.0) {     /* a look at the disk twice a second at most */
+            checked = now;
+            snprintf(key, sizeof(key), "%s", g->g.key);
+            char dir[1100];
+            states_dir(g, dir, sizeof(dir));
+            int64_t best = 0;
+            have = false;
+            for (int i = 0; i <= 10; i++) {     /* slot 0: the save made on leaving the game */
+                char p[1200];
+                snprintf(p, sizeof(p), "%s/slot%d.hxs", dir, i);
+                SDL_PathInfo pi;
+                if (SDL_GetPathInfo(p, &pi) && (!have || pi.modify_time > best)) {
+                    best = pi.modify_time;
+                    have = true;
+                    snprintf(arg, sizeof(arg), "loadstate=%s", p);
+                    SDL_DateTime dt;
+                    SDL_TimeToDateTime(pi.modify_time, &dt, true);
+                    snprintf(when, sizeof(when), "%04d-%02d-%02d %s", dt.year, dt.month, dt.day, dash_hm(dt.hour, dt.minute));
+                }
+            }
+        }
+        if (have && list_row(&l, T(S_RESUME), when, NULL)) {
+            launch_game(g, arg);
+        }
+    }
     if (list_row(&l, T(S_PLAY), NULL, NULL)) {
         launch_game(g, NULL);
     }
@@ -1941,7 +2090,8 @@ static void scr_about(void)
     ui_text(W / 2, H * 0.52f, "xbased", 54, UI_FONT_BOLD, UI_GREEN_HI, UI_ALIGN_CENTER);
     ui_text(W / 2, H * 0.62f, v, 22, UI_FONT_REGULAR, UI_WHITE, UI_ALIGN_CENTER);
     ui_text_fit(W / 2, H * 0.67f, T(S_BASED_ON), 20, UI_FONT_REGULAR, UI_GREY, UI_ALIGN_CENTER, W - 80);
-    ui_text(W / 2, H * 0.715f, "github.com/crazyriddler/xbased", 20, UI_FONT_REGULAR, UI_GREY, UI_ALIGN_CENTER);
+    ui_text(W / 2, H * 0.715f, "github.com/Prodigy488/xbased-modern-gui  (a fork of github.com/crazyriddler/xbased)", 20,
+            UI_FONT_REGULAR, UI_GREY, UI_ALIGN_CENTER);
     ui_text(W / 2, H * 0.77f, "Fonts: Play (SIL OFL). Box art: libretro-thumbnails.", 18, UI_FONT_REGULAR, UI_GREY,
             UI_ALIGN_CENTER);
     if (D.in.back || D.in.ok) {
@@ -1964,7 +2114,7 @@ static void draw_ask(void)
     const float extra = (nq > 1 ? nq - 1 : 0) * (fs + 8);
     const float h = 230 + extra, x = (W - w) / 2, y = (H - h) / 2;
     ui_glow(W / 2, H / 2, w * 0.8f, ui_alpha(UI_GREEN, 0.18f));
-    ui_round(x, y, w, h, 18, (UiColor){0x0A, 0x1C, 0x06, 0xF4});
+    ui_round(x, y, w, h, 18, ui_th(0x0A, 0x1C, 0x06, 0xF4));
     ui_round_outline(x, y, w, h, 18, 2, UI_GREEN);
     for (int i = 0; i < nq; i++) {
         ui_text_fit(W / 2, y + 50 + i * (fs + 8), qlines[i], fs, UI_FONT_BOLD, UI_WHITE, UI_ALIGN_CENTER, w - 40);
@@ -1993,7 +2143,7 @@ static void draw_ask(void)
             sel = i;
         }
         const bool s = i == sel;
-        ui_round(bx, by, bw, bh, 28, s ? (UiColor){0x3C, 0x9A, 0x12, 0xFF} : (UiColor){0x14, 0x3A, 0x08, 0xFF});
+        ui_round(bx, by, bw, bh, 28, s ? ui_th(0x3C, 0x9A, 0x12, 0xFF) : ui_th(0x14, 0x3A, 0x08, 0xFF));
         ui_round_outline(bx, by, bw, bh, 28, 2, s ? UI_GREEN_HI : UI_GREEN_DIM);
         ui_text_fit(bx + bw / 2, by + 14, opts[i], n == 3 ? 22 : 28, UI_FONT_BOLD, UI_WHITE, UI_ALIGN_CENTER,
                     bw - 16);
@@ -2144,6 +2294,16 @@ int dash_run(SDL_Window *win, const char *exe)
                 }
             }
             if (g_hide_at > 0 && ui_time() >= g_hide_at) {
+                {
+                    const SDL_WindowFlags wf = SDL_GetWindowFlags(g_win);
+                    g_wsave.fs = (wf & SDL_WINDOW_FULLSCREEN) != 0;
+                    g_wsave.max = (wf & SDL_WINDOW_MAXIMIZED) != 0;
+                    if (!g_wsave.fs && !g_wsave.max) {
+                        SDL_GetWindowSize(g_win, &g_wsave.w, &g_wsave.h);
+                        SDL_GetWindowPosition(g_win, &g_wsave.x, &g_wsave.y);
+                    }
+                    g_wsave.have = true;
+                }
                 SDL_HideWindow(g_win);
                 g_hide_at = 0;
             }
@@ -2182,7 +2342,7 @@ int dash_run(SDL_Window *win, const char *exe)
                 snd_play(SND_MOVE);
             }
         }
-        snd_enable(cfg_bool(&D.global, "ui.sounds", true));
+        snd_enable(cfg_bool(&D.global, "ui.sounds", false));
         if (g_go.on && g_go.t0 >= 0) {
             /* into the game: the screen's picture breaks; the game's window
              * comes up on the black it leaves */
@@ -2208,7 +2368,10 @@ int dash_run(SDL_Window *win, const char *exe)
         if (go_pic || go_back) {
             g_go.pic = ui_layer_begin(g_go.pic);
         }
-        ui_backdrop(cfg_bool(&D.global, "ui.anim", true) ? 1.0f : 0.0f);
+        dash_apply_skin();
+        dash_install_poll();
+        hb_poll();
+        skin_backdrop(cfg_bool(&D.global, "ui.anim", true) ? 1.0f : 0.0f);
         /* the screen's foreground in a layer: the transitions turn it in 3D */
         g_layer = ui_layer_begin(g_layer);
         lib_show_hidden(true);     /* the Games screen leaves hidden games out while it draws */
@@ -2227,6 +2390,11 @@ int dash_run(SDL_Window *win, const char *exe)
         case SCR_MEMORY: scr_memory(); break;
         case SCR_MEMORY_TITLE: scr_memory_title(); break;
         case SCR_ONLINE: scr_online(); break;
+        case SCR_INSIGNIA: scr_insignia(); break;
+        case SCR_OGDASH: scr_ogdash(); break;
+        case SCR_HOMEBREW: scr_homebrew(); break;
+        case SCR_STORE: scr_store(); break;
+        case SCR_STORE_APP: scr_store_app(); break;
         case SCR_ABOUT: scr_about(); break;
         case SCR_BROWSE: scr_browse(); break;
         case SCR_FIND: scr_find(); break;
@@ -2478,7 +2646,7 @@ int dash_ingame(SDL_Window *win, const char *key, const char *title, const char 
         }
     }
     snd_init();
-    snd_enable(cfg_bool(&D.global, "ui.sounds", true));
+    snd_enable(cfg_bool(&D.global, "ui.sounds", false));
     UiTex *frame = ov ? NULL : load_bmp(frame_bmp);
     g_ig_done = false;
     g_ig_result = DASH_INGAME_RESUME;
@@ -2526,6 +2694,7 @@ int dash_ingame(SDL_Window *win, const char *key, const char *title, const char 
                 snd_play(SND_MOVE);
             }
         }
+        dash_apply_skin();
         ui_begin();
         /* the paused game under a green veil: blurred, over the overlay */
         if (ov) {
@@ -2536,7 +2705,7 @@ int dash_ingame(SDL_Window *win, const char *key, const char *title, const char 
         } else if (frame) {
             ui_fill(frame, UI_WHITE);
         }
-        ui_rect_grad(0, 0, ui_w(), ui_h(), (UiColor){0, 12, 0, ov ? 150 : 200}, (UiColor){0, 24, 0, ov ? 190 : 225});
+        ui_rect_grad(0, 0, ui_w(), ui_h(), ui_th(0, 12, 0, ov ? 150 : 200), ui_th(0, 24, 0, ov ? 190 : 225));
         ui_glow(ui_w() / 2, ui_h() / 2, ui_h() * 0.8f, ui_alpha(UI_GREEN, 0.10f));
         switch (dash_top()) {
         case SCR_INGAME: scr_ingame(); break;

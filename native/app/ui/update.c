@@ -23,7 +23,7 @@
 #include <sys/stat.h>
 #endif
 
-#define REPO "crazyriddler/xbased"
+#define REPO "Prodigy488/xbased-modern-gui"   /* this fork's releases (upstream: crazyriddler/xbased) */
 #define API "https://api.github.com/repos/" REPO "/releases/latest"
 #define UPD_OLD ".xbased-old"
 #ifdef _WIN32

@@ -86,6 +86,125 @@ UiColor ui_mix(UiColor a, UiColor b, float t)
                      (uint8_t)(a.b + (b.b - a.b) * t), (uint8_t)(a.a + (b.a - a.a) * t)};
 }
 
+/* ------------------------------------------------------------ themes */
+
+#define C(r, g, b, a) ((UiColor){r, g, b, a})
+static const UiTheme k_themes[UI_THEME_COUNT] = {
+    /* Green: the original Xbox dashboard's greens on black */
+    {C(0x8C, 0xF0, 0x2A, 0xFF), C(0xD8, 0xFF, 0x7A, 0xFF), C(0x3E, 0x7A, 0x12, 0xFF), C(0x0C, 0x24, 0x06, 0xFF),
+     C(0x08, 0x16, 0x05, 0xD8), C(0xF2, 0xFF, 0xEA, 0xFF), C(0x9A, 0xB0, 0x90, 0xFF), C(0xFF, 0x60, 0x50, 0xFF),
+     C(0x2E, 0x7F, 0xE0, 0xFF), C(0x8C, 0xF0, 0x2A, 0xFF), -1.0f, false},
+    /* Neon: electric cyan and hot magenta on blue-black */
+    {C(0x00, 0xE5, 0xFF, 0xFF), C(0xA6, 0xF7, 0xFF, 0xFF), C(0x0B, 0x7C, 0x8E, 0xFF), C(0x03, 0x16, 0x20, 0xFF),
+     C(0x0E, 0x0D, 0x1A, 0xD8), C(0xE4, 0xE8, 0xF5, 0xFF), C(0x76, 0x80, 0xA2, 0xFF), C(0xFF, 0x3B, 0x3B, 0xFF),
+     C(0xFF, 0x2E, 0x88, 0xFF), C(0x39, 0xFF, 0x88, 0xFF), 188.0f, true},
+    /* Tron Red: Ares red with amber, on black */
+    {C(0xFF, 0x34, 0x28, 0xFF), C(0xFF, 0xA8, 0x94, 0xFF), C(0x8A, 0x1E, 0x16, 0xFF), C(0x28, 0x07, 0x05, 0xFF),
+     C(0x1A, 0x0C, 0x0C, 0xD8), C(0xF5, 0xE8, 0xE4, 0xFF), C(0xA5, 0x7E, 0x78, 0xFF), C(0xFF, 0x5A, 0x50, 0xFF),
+     C(0xFF, 0x96, 0x28, 0xFF), C(0x39, 0xFF, 0x88, 0xFF), 5.0f, true},
+};
+#undef C
+static int g_theme_id;
+
+const UiTheme *ui_theme(void)
+{
+    return &k_themes[g_theme_id];
+}
+
+int ui_theme_id(void)
+{
+    return g_theme_id;
+}
+
+void ui_theme_set(int id)
+{
+    g_theme_id = id >= 0 && id < UI_THEME_COUNT ? id : 0;
+}
+
+static const char *const k_theme_names[UI_THEME_COUNT] = {"green", "neon", "red"};
+
+int ui_theme_from_name(const char *name)
+{
+    for (int i = 0; name && i < UI_THEME_COUNT; i++) {
+        if (!strcmp(name, k_theme_names[i])) {
+            return i;
+        }
+    }
+    return UI_THEME_GREEN;
+}
+
+const char *ui_theme_name(int id)
+{
+    return k_theme_names[id >= 0 && id < UI_THEME_COUNT ? id : 0];
+}
+
+/* A literal of the green theme turned to the theme's hue: what is not
+ * coloured (whites, greys, blacks) stays, and the hue's spread is halved so
+ * the greens' light and dark shades stay apart. */
+static UiColor th_calc(int r, int g, int b, int a)
+{
+    UiColor out = {(uint8_t)r, (uint8_t)g, (uint8_t)b, (uint8_t)a};
+    const float target = g_theme_id ? k_themes[g_theme_id].hue : -1.0f;
+    if (target < 0) {
+        return out;
+    }
+    const float fr = r / 255.f, fg = g / 255.f, fb = b / 255.f;
+    const float mx = fmaxf(fr, fmaxf(fg, fb)), mn = fminf(fr, fminf(fg, fb)), d = mx - mn;
+    if (mx <= 0 || d / mx < 0.12f) {
+        return out;
+    }
+    const float sat = d / mx;
+    float h;
+    if (mx == fr) {
+        h = fmodf((fg - fb) / d, 6.f);
+    } else if (mx == fg) {
+        h = (fb - fr) / d + 2;
+    } else {
+        h = (fr - fg) / d + 4;
+    }
+    h *= 60;
+    float nh = target + (95.0f - h) * 0.5f;
+    nh -= 360.0f * floorf(nh / 360.0f);
+    const float hh = nh / 60.f, cc = mx * sat, xx = cc * (1 - fabsf(fmodf(hh, 2.f) - 1)), m = mx - cc;
+    float rr = 0, gg = 0, bb = 0;
+    switch ((int)hh) {
+    case 0: rr = cc; gg = xx; break;
+    case 1: rr = xx; gg = cc; break;
+    case 2: gg = cc; bb = xx; break;
+    case 3: gg = xx; bb = cc; break;
+    case 4: rr = xx; bb = cc; break;
+    default: rr = cc; bb = xx; break;
+    }
+    out.r = (uint8_t)lrintf((rr + m) * 255);
+    out.g = (uint8_t)lrintf((gg + m) * 255);
+    out.b = (uint8_t)lrintf((bb + m) * 255);
+    return out;
+}
+
+/* The same few hundred literals are asked for every frame: remembered
+ * (direct-mapped, keyed by the colour and the theme), the hue maths done once. */
+UiColor ui_th(int r, int g, int b, int a)
+{
+    if (!g_theme_id) {
+        return (UiColor){(uint8_t)r, (uint8_t)g, (uint8_t)b, (uint8_t)a};
+    }
+    static struct {
+        uint32_t key;
+        UiColor c;
+    } memo[512];
+    const uint32_t key = ((uint32_t)(r & 255) << 16) | ((uint32_t)(g & 255) << 8) | (uint32_t)(b & 255) |
+                         ((uint32_t)g_theme_id << 24);
+    const uint32_t at = (key * 2654435761u) >> 23;      /* 9 bits */
+    if (memo[at].key != key) {
+        memo[at].key = key;
+        memo[at].c = th_calc(r, g, b, 255);
+    }
+    UiColor out = memo[at].c;
+    out.a = (uint8_t)a;
+    return out;
+}
+
+
 static SDL_FColor fc(UiColor c)
 {
     return (SDL_FColor){c.r / 255.f, c.g / 255.f, c.b / 255.f, c.a / 255.f};
@@ -491,6 +610,13 @@ void ui_begin(void)
         memset(U.clip, 0, sizeof(U.clip));
         U.cover = false;
     } else {
+        /* A frame always starts from the window itself, whole: a target, viewport or clip
+         * left over from before (the window hidden for a game, resized or changed mode
+         * on the way back) must not cut the new frame to a corner. */
+        SDL_SetRenderTarget(U.r, NULL);
+        U.ntargets = 0;
+        SDL_SetRenderViewport(U.r, NULL);
+        SDL_SetRenderClipRect(U.r, NULL);
         SDL_GetCurrentRenderOutputSize(U.r, &U.pw, &U.ph);
     }
     U.scale = U.ph / 720.0f;
@@ -670,6 +796,31 @@ static const Glyph *glyph(uint32_t cp, int style, int px)
     return glyph(cp, style, px);
 }
 
+/* Text turned a quarter turn up (ui_text_up): set while it is drawn. */
+static bool g_text_up;
+static float g_up_ox, g_up_oy;
+
+/* A glyph of the atlas drawn turned -90 degrees about (g_up_ox, g_up_oy):
+ * dst is where it would sit unturned. Not in the overlay (no turned quads). */
+static void blit_up(const SDL_FRect *src, const SDL_FRect *dst, UiColor c)
+{
+    UiTex *t = U.atlas;
+    if (!t || U.ov || !t->t) {
+        return;
+    }
+    const float rx = dst->x + dst->w / 2 - g_up_ox, ry = dst->y + dst->h / 2 - g_up_oy;
+    const SDL_FRect d = {g_up_ox + ry - dst->w / 2, g_up_oy - rx - dst->h / 2, dst->w, dst->h};
+    const float a = c.a / 255.f * U.alpha;
+    if (t->blend == UB_PREMUL) {
+        c.r = (uint8_t)(c.r * a);
+        c.g = (uint8_t)(c.g * a);
+        c.b = (uint8_t)(c.b * a);
+    }
+    SDL_SetTextureColorMod(t->t, c.r, c.g, c.b);
+    SDL_SetTextureAlphaModFloat(t->t, a);
+    SDL_RenderTextureRotated(U.r, t->t, src, &d, -90.0, NULL, SDL_FLIP_NONE);
+}
+
 static float text_run(float x, float y, const char *s, float size, int font, UiColor c, bool draw, float max_w,
                       const char **stop)
 {
@@ -692,7 +843,11 @@ static float text_run(float x, float y, const char *s, float size, int font, UiC
         if (draw && g->w) {
             const SDL_FRect src = {g->x, g->y, g->w, g->h};
             const SDL_FRect dst = {floorf(pen) + g->xoff, floorf(y * U.scale) + g->yoff, g->w, g->h};
-            blit(U.atlas, &src, &dst, c);
+            if (g_text_up) {
+                blit_up(&src, &dst, c);
+            } else {
+                blit(U.atlas, &src, &dst, c);
+            }
         }
         pen += g->adv;
     }
@@ -731,6 +886,18 @@ float ui_text_fit(float x, float y, const char *s, float size, int font, UiColor
     return ui_text(x, y, buf, size, font, c, align == UI_ALIGN_CENTER ? UI_ALIGN_CENTER : align);
 }
 
+/* Text reading upward (a vertical strip's label): x is the left edge of
+ * the line, y the bottom where it starts. Returns its length. */
+float ui_text_up(float x, float y, const char *s, float size, int font, UiColor c)
+{
+    g_text_up = true;
+    g_up_ox = x * U.scale;
+    g_up_oy = y * U.scale;
+    const float w = text_run(x, y, s, size, font, c, true, 0, NULL);
+    g_text_up = false;
+    return w;
+}
+
 /* ------------------------------------------------------------ shapes */
 
 static void quad(float x, float y, float w, float h, UiColor c0, UiColor c1, UiColor c2, UiColor c3)
@@ -751,6 +918,33 @@ void ui_rect(float x, float y, float w, float h, UiColor c)
     quad(x, y, w, h, c, c, c, c);
 }
 
+/* A smooth vertical band: at each y[k] it spans xl[k]..xr[k], shaded from cl
+ * (left) to cr (right); n points, 2..UI_BAND_MAX (one draw, no stepping). */
+void ui_band(const float *xl, const float *xr, const float *y, int n, UiColor cl, UiColor cr)
+{
+    if (n < 2 || n > UI_BAND_MAX) {
+        return;
+    }
+    const float s = U.scale;
+    SDL_Vertex v[2 * UI_BAND_MAX];
+    int idx[6 * (UI_BAND_MAX - 1)];
+    for (int k = 0; k < n; k++) {
+        v[2 * k] = (SDL_Vertex){{xl[k] * s, y[k] * s}, fc(cl), {0, 0}};
+        v[2 * k + 1] = (SDL_Vertex){{xr[k] * s, y[k] * s}, fc(cr), {0, 0}};
+    }
+    int m = 0;
+    for (int k = 0; k + 1 < n; k++) {
+        const int a = 2 * k;
+        idx[m++] = a;
+        idx[m++] = a + 1;
+        idx[m++] = a + 3;
+        idx[m++] = a;
+        idx[m++] = a + 3;
+        idx[m++] = a + 2;
+    }
+    geom(NULL, v, 2 * n, idx, m);
+}
+
 void ui_rect_grad(float x, float y, float w, float h, UiColor top, UiColor bottom)
 {
     quad(x, y, w, h, top, top, bottom, bottom);
@@ -761,10 +955,161 @@ void ui_rect_hgrad(float x, float y, float w, float h, UiColor left, UiColor rig
     quad(x, y, w, h, left, right, right, left);
 }
 
+/* ------------------------------------------------------------ 3D case */
+
+static bool g_case3d_on = true;
+
+void ui_case3d_set(bool on)
+{
+    g_case3d_on = on;
+}
+
+bool ui_case3d_enabled(void)
+{
+    return g_case3d_on;
+}
+
+/* A game's case from its cover: the cover is the front face, a spine at the left in
+ * the theme's colour, the box turned by yaw (radians; negative shows the spine, the
+ * far edge smaller as perspective has it). The front is cut into strips, each with
+ * its own texture coordinates, so the picture isn't skewed across two triangles. It
+ * is fitted and centred in (x, y, w, h); a soft shadow under it, a gloss over the
+ * front. */
+void ui_case3d(UiTex *t, float x, float y, float w, float h, float yaw, float alpha)
+{
+    if (!t || w < 4 || h < 4) {
+        return;
+    }
+    alpha = clamp01(alpha);
+    const float aspect = t->h > 0 ? (float)t->w / (float)t->h : 0.72f;
+    const float c = cosf(yaw), sn = sinf(yaw), asn = fabsf(sn);
+    float fh = h * 0.9f, fw = fh * aspect, dd = fh * 0.14f;
+    const float tot = fw * c + dd * asn;
+    const float k = fminf(1.0f, w * 0.96f / tot);
+    fh *= k;
+    fw *= k;
+    dd *= k;
+    const float f = fh * 5.0f;
+#define COLS 10
+    /* the points: rows 0 (top) and 1 (bottom), the front's columns, then the spine's two ends */
+    float px[COLS + 3][2], py[COLS + 3][2], pz[COLS + 3];
+    for (int i = 0; i <= COLS + 2; i++) {
+        float X, Z;
+        if (i <= COLS) {
+            X = -fw / 2 + fw * (float)i / COLS;
+            Z = -dd / 2;
+        } else {
+            X = -fw / 2;
+            Z = i == COLS + 1 ? dd / 2 : -dd / 2;   /* COLS + 1: the spine's back edge */
+        }
+        const float xr = X * c + Z * sn, zr = -X * sn + Z * c;
+        const float sp = f / (f + zr);
+        pz[i] = zr;
+        px[i][0] = px[i][1] = xr * sp;
+        py[i][0] = -fh / 2 * sp;
+        py[i][1] = fh / 2 * sp;
+    }
+    float minx = 1e9f, maxx = -1e9f, miny = 1e9f, maxy = -1e9f;
+    for (int i = 0; i <= COLS + 1; i++) {
+        minx = fminf(minx, px[i][0]);
+        maxx = fmaxf(maxx, px[i][0]);
+        miny = fminf(miny, py[i][0]);
+        maxy = fmaxf(maxy, py[i][1]);
+    }
+    const float ox = x + w / 2 - (minx + maxx) / 2, oy = y + h / 2 - (miny + maxy) / 2, sc = U.scale;
+    for (int i = 0; i <= COLS + 2; i++) {
+        for (int r = 0; r < 2; r++) {
+            px[i][r] = (px[i][r] + ox) * sc;
+            py[i][r] = (py[i][r] + oy) * sc;
+        }
+    }
+    /* the shadow on the ground */
+    {
+        const float sw = (maxx - minx) * 0.9f, sy = oy + maxy + 2;
+        ui_round(x + w / 2 - sw / 2, sy, sw, fmaxf(6.0f, fh * 0.05f), fmaxf(3.0f, fh * 0.025f),
+                 (UiColor){0, 0, 0, (uint8_t)lrintf(70 * alpha)});
+    }
+    /* the spine (the cover's picture is not on it): the theme's colour, darker toward the back */
+    {
+        const UiColor a = ui_mix(UI_GREEN_DARK, UI_BLACK, 0.25f), b = ui_mix(UI_GREEN_DARK, UI_BLACK, 0.7f);
+        const SDL_FColor fa = fc((UiColor){a.r, a.g, a.b, (uint8_t)lrintf(255 * alpha)}),
+                         fb = fc((UiColor){b.r, b.g, b.b, (uint8_t)lrintf(255 * alpha)});
+        SDL_Vertex v[4] = {
+            {{px[COLS + 1][0], py[COLS + 1][0]}, fb, {0, 0}},
+            {{px[0][0], py[0][0]}, fa, {0, 0}},
+            {{px[0][1], py[0][1]}, fa, {0, 0}},
+            {{px[COLS + 1][1], py[COLS + 1][1]}, fb, {0, 0}},
+        };
+        static const int idx[6] = {0, 1, 2, 0, 2, 3};
+        if (sn < -0.02f) {
+            geom(NULL, v, 4, idx, 6);
+        }
+    }
+    /* the front: strips, shaded darker toward the far edge */
+    {
+        SDL_Vertex v[2 * (COLS + 1)];
+        int idx[6 * COLS];
+        for (int i = 0; i <= COLS; i++) {
+            const float far_k = clamp01((pz[i] - pz[0]) / fmaxf(1.0f, fabsf(pz[COLS] - pz[0]) + 1e-3f));
+            const float sh = 1.0f - 0.16f * far_k * (yaw < 0 ? 1 : 0);
+            const SDL_FColor col = {sh, sh, sh, alpha};
+            const float u = (float)i / COLS;
+            v[2 * i] = (SDL_Vertex){{px[i][0], py[i][0]}, col, {u, 0}};
+            v[2 * i + 1] = (SDL_Vertex){{px[i][1], py[i][1]}, col, {u, 1}};
+        }
+        for (int i = 0; i < COLS; i++) {
+            const int a = 2 * i, b = 2 * i + 1, c2 = 2 * i + 2, d = 2 * i + 3;
+            int *q = idx + 6 * i;
+            q[0] = a; q[1] = c2; q[2] = d;
+            q[3] = a; q[4] = d; q[5] = b;
+        }
+        geom(t, v, 2 * (COLS + 1), idx, 6 * COLS);
+        /* the gloss: a pale wedge from the top left corner fading out */
+        const SDL_FColor g0 = {1, 1, 1, 0.26f * alpha}, g1 = {1, 1, 1, 0};
+        const int m = COLS / 2;
+        SDL_Vertex gl[4] = {
+            {{px[0][0], py[0][0]}, g0, {0, 0}},
+            {{px[m + 2][0], py[m + 2][0]}, g1, {0, 0}},
+            {{px[m - 2][1], py[m - 2][1]}, g1, {0, 0}},
+            {{px[0][1], py[0][1]}, g1, {0, 0}},
+        };
+        static const int gi[6] = {0, 1, 2, 0, 2, 3};
+        geom(NULL, gl, 4, gi, 6);
+        /* a bright edge where spine and front meet, and a dark rim around it all */
+        const SDL_FColor e0 = {1, 1, 1, 0.45f * alpha};
+        SDL_Vertex ed[4] = {
+            {{px[0][0] - sc * 0.5f, py[0][0]}, e0, {0, 0}},
+            {{px[0][0] + sc * 1.0f, py[0][0]}, e0, {0, 0}},
+            {{px[0][1] + sc * 1.0f, py[0][1]}, e0, {0, 0}},
+            {{px[0][1] - sc * 0.5f, py[0][1]}, e0, {0, 0}},
+        };
+        geom(NULL, ed, 4, gi, 6);
+    }
+#undef COLS
+}
+
 #define ARC 8   /* segments a corner */
+
+static bool g_round_only;   /* ui_circle: a circle stays round in the cut themes */
+
+/* The corners cut, top left and bottom right (the cut themes): 6 points. */
+static int cut_path(float x, float y, float w, float h, float r, SDL_FPoint *pt)
+{
+    const float c = fminf(r * 0.9f, fminf(w, h) * 0.3f);
+    pt[0] = (SDL_FPoint){x + c, y};
+    pt[1] = (SDL_FPoint){x + w, y};
+    pt[2] = (SDL_FPoint){x + w, y + h - c};
+    pt[3] = (SDL_FPoint){x + w - c, y + h};
+    pt[4] = (SDL_FPoint){x, y + h};
+    pt[5] = (SDL_FPoint){x, y + c};
+    return 6;
+}
 
 static int round_path(float x, float y, float w, float h, float r, SDL_FPoint *pt)
 {
+    if (ui_theme()->cut && r >= 6 && !g_round_only) {
+        return cut_path(x, y, w, h, r, pt);
+    }
     r = fminf(r, fminf(w, h) / 2);
     const float cx[4] = {x + w - r, x + w - r, x + r, x + r}, cy[4] = {y + r, y + h - r, y + h - r, y + r};
     int n = 0;
@@ -863,7 +1208,9 @@ void ui_glow(float cx, float cy, float r, UiColor c)
 
 void ui_circle(float cx, float cy, float r, UiColor c)
 {
+    g_round_only = true;
     ui_round(cx - r, cy - r, 2 * r, 2 * r, r, c);
+    g_round_only = false;
 }
 
 void ui_ring(float cx, float cy, float rx, float ry, float rot, float t, UiColor c)
@@ -935,6 +1282,8 @@ UiTex *ui_layer_begin(UiTex *layer)
         U.targets[U.ntargets++] = SDL_GetRenderTarget(U.r);
     }
     SDL_SetRenderTarget(U.r, layer->t);
+    SDL_SetRenderViewport(U.r, NULL);
+    SDL_SetRenderClipRect(U.r, NULL);
     SDL_SetRenderDrawColor(U.r, 0, 0, 0, 0);
     SDL_RenderClear(U.r);
     return layer;
@@ -1126,12 +1475,12 @@ void ui_backdrop(float k)
 {
     const float W = ui_w(), H = ui_h();
     const double t = ui_time();
-    ui_rect_grad(0, 0, W, H, (UiColor){0x02, 0x0A, 0x02, 0xFF}, (UiColor){0x04, 0x16, 0x03, 0xFF});
+    ui_rect_grad(0, 0, W, H, ui_th(0x02, 0x0A, 0x02, 0xFF), ui_th(0x04, 0x16, 0x03, 0xFF));
     /* the fog: slow green lights drifting */
     for (int i = 0; i < 6; i++) {
         const float ph = (float)(t * (0.05 + i * 0.013) + i * 1.7);
         const float x = W * (0.5f + 0.42f * sinf(ph * 1.3f + i)), y = H * (0.5f + 0.38f * cosf(ph + i * 2.1f));
-        ui_glow(x, y, H * (0.55f + 0.15f * sinf(ph * 2)), ui_alpha((UiColor){0x3C, 0xA0, 0x10, 0xFF}, 0.22f * k));
+        ui_glow(x, y, H * (0.55f + 0.15f * sinf(ph * 2)), ui_alpha(ui_th(0x3C, 0xA0, 0x10, 0xFF), 0.22f * k));
     }
     /* the linked hexagons, drifting and pulsing (the original dashboard's backdrop) */
     {
@@ -1180,9 +1529,9 @@ void ui_orb(float cx, float cy, float r, float pulse)
 {
     const double t = ui_time();
     const float p = 0.85f + 0.15f * sinf((float)t * 2.2f) + pulse * 0.3f;
-    ui_glow(cx, cy, r * 3.2f, ui_alpha((UiColor){0x50, 0xD0, 0x10, 0xFF}, 0.35f * p));
-    ui_glow(cx, cy, r * 1.9f, ui_alpha((UiColor){0x80, 0xFF, 0x30, 0xFF}, 0.45f * p));
-    ui_circle(cx, cy, r, (UiColor){0x1A, 0x50, 0x06, 0xFF});
+    ui_glow(cx, cy, r * 3.2f, ui_alpha(ui_th(0x50, 0xD0, 0x10, 0xFF), 0.35f * p));
+    ui_glow(cx, cy, r * 1.9f, ui_alpha(ui_th(0x80, 0xFF, 0x30, 0xFF), 0.45f * p));
+    ui_circle(cx, cy, r, ui_th(0x1A, 0x50, 0x06, 0xFF));
     ui_glow(cx - r * 0.25f, cy - r * 0.3f, r * 0.9f, ui_alpha(UI_GREEN_HI, 0.55f));
     ui_glow(cx, cy, r * 1.05f, ui_alpha(UI_GREEN, 0.5f * p));
     for (int i = 0; i < 3; i++) {

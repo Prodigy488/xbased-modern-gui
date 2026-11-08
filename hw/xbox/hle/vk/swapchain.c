@@ -49,7 +49,7 @@ enum { SET_WINDOW, SET_FXAA, SET_EASU, SET_OSD, PS_SETS };  /* a frame's descrip
 #define PS_RAMP 1024            /* a frame's share of the ramp buffer (768 used) */
 
 /* the window's pipelines, then those into images of ours (R8G8B8A8) */
-enum { P_BILINEAR, P_AREA, P_RCAS, P_CRT, P_OSD, P_KDOWN, P_KUP, P_FXAA, P_EASU, P_COUNT };
+enum { P_BILINEAR, P_AREA, P_RCAS, P_CRT, P_OSD, P_KDOWN, P_KUP, P_FXAA, P_EASU, P_NIS, P_COUNT };
 
 /* An image of ours a pass draws into and the window's pass samples. */
 typedef struct PsImg {
@@ -60,6 +60,7 @@ typedef struct PsImg {
     VkFormat fmt;
     uint64_t serial;            /* the frame it holds (0: none) */
     bool fxaa;                  /* FSR's: made from FXAA's */
+    unsigned kind;              /* which pass made it: 0 FSR's EASU, else NIS's with its sharpness (1 + percent) */
 } PsImg;
 
 typedef struct PsFrame {
@@ -88,7 +89,7 @@ static struct {
     bool inited, failed;
     VkSemaphore tl;             /* timeline: each submit's value */
     uint64_t submitted;
-    VkSampler smp;
+    VkSampler smp, smp_near;    /* smp_near: the picture's pass with "nearest" upscaling */
     VkDescriptorSetLayout dsl;
     VkPipelineLayout pl;
     VkDescriptorPool dp;
@@ -131,6 +132,8 @@ static struct {
      * into buf after the pass */
     char shot_path[512];
     bool shot_want, shot_can;   /* asked; the images can be copied from */
+    bool shot_full;             /* the frame at its own size (the render scale's), not the window's */
+    PsImg shotimg;              /* ... drawn into this, then copied */
     VkBuffer shot_buf;
     VkDeviceMemory shot_mem;
     VkDeviceSize shot_size;
@@ -484,6 +487,167 @@ static const char k_fs_rcas[] =
     "  o = ramp((lobe * (b + d + h + f) + e) / (4.0 * lobe + 1.0));\n"
     "}\n";
 
+#include "hw/xbox/hle/vk/nis_coef.inc"
+/* NVIDIA Image Scaling (NIS_Scaler.h's NVScaler, MIT: licenses/nvidia-nis.license.txt) as a fragment
+ * pass: the SDK's compute shader shares a tile of luma and its edge map between a block's threads;
+ * here each output pixel gathers its own 6x6 luma support (the tile's p[0][0] is texel floor(src) - 2) and
+ * works the 2x2 edge map around it out itself, the same arithmetic otherwise. The scale is 1 to 2
+ * (the SDK's range; swapchain.c leaves larger ones to FSR). extra = the frame's width and height,
+ * the image's width plus the sharpness (percent / 128, in the fraction) and its height. */
+static const char k_fs_nis[] =
+    "const float kDetectRatio = 2.0 * 1127.0 / 1024.0, kDetectThres = 64.0 / 1024.0;\n"
+    "const float kMinContrastRatio = 2.0, kRatioNorm = 1.0 / 8.0, kContrastBoost = 1.0, kEps = 1.0 / 255.0;\n"
+    "const float kSharpStartY = 0.45, kSharpScaleY = 1.0 / 0.45;\n"
+    "float kSharpStrengthMin, kSharpStrengthScale, kSharpLimitMin, kSharpLimitScale;\n"
+    "float getY(vec3 c) { return 0.2126 * c.r + 0.7152 * c.g + 0.0722 * c.b; }\n"
+    "vec4 edgeMap(float p[6][6], int i, int j) {\n"
+    "  float g0 = abs(p[0 + i][0 + j] + p[0 + i][1 + j] + p[0 + i][2 + j] - p[2 + i][0 + j] - p[2 + i][1 + j] - p[2 + i][2 + j]);\n"
+    "  float g45 = abs(p[1 + i][0 + j] + p[0 + i][0 + j] + p[0 + i][1 + j] - p[2 + i][1 + j] - p[2 + i][2 + j] - p[1 + i][2 + j]);\n"
+    "  float g90 = abs(p[0 + i][0 + j] + p[1 + i][0 + j] + p[2 + i][0 + j] - p[0 + i][2 + j] - p[1 + i][2 + j] - p[2 + i][2 + j]);\n"
+    "  float g135 = abs(p[1 + i][0 + j] + p[2 + i][0 + j] + p[2 + i][1 + j] - p[0 + i][1 + j] - p[0 + i][2 + j] - p[1 + i][2 + j]);\n"
+    "  float g0_90_max = max(g0, g90), g0_90_min = min(g0, g90);\n"
+    "  float g45_135_max = max(g45, g135), g45_135_min = min(g45, g135);\n"
+    "  if (g0_90_max + g45_135_max == 0.0) return vec4(0.0);\n"
+    "  float e_0_90 = min(g0_90_max / (g0_90_max + g45_135_max), 1.0);\n"
+    "  float e_45_135 = 1.0 - e_0_90;\n"
+    "  bool c_0_90 = (g0_90_max > (g0_90_min * kDetectRatio)) && (g0_90_max > kDetectThres) && (g0_90_max > g45_135_min);\n"
+    "  bool c_45_135 = (g45_135_max > (g45_135_min * kDetectRatio)) && (g45_135_max > kDetectThres) && (g45_135_max > g0_90_min);\n"
+    "  bool c_g_0_90 = g0_90_max == g0;\n"
+    "  bool c_g_45_135 = g45_135_max == g45;\n"
+    "  float f_e_0_90 = (c_0_90 && c_45_135) ? e_0_90 : 1.0;\n"
+    "  float f_e_45_135 = (c_0_90 && c_45_135) ? e_45_135 : 1.0;\n"
+    "  return vec4((c_0_90 && c_g_0_90) ? f_e_0_90 : 0.0, (c_0_90 && !c_g_0_90) ? f_e_0_90 : 0.0,\n"
+    "              (c_45_135 && c_g_45_135) ? f_e_45_135 : 0.0, (c_45_135 && !c_g_45_135) ? f_e_45_135 : 0.0);\n"
+    "}\n"
+    "float calcLTI(float p0, float p1, float p2, float p3, float p4, float p5, int phase) {\n"
+    "  bool selector = phase <= 32;\n"
+    "  float sel = selector ? p0 : p3;\n"
+    "  float a_min = min(min(p1, p2), sel), a_max = max(max(p1, p2), sel);\n"
+    "  sel = selector ? p2 : p5;\n"
+    "  float b_min = min(min(p3, p4), sel), b_max = max(max(p3, p4), sel);\n"
+    "  float a_cont = a_max - a_min, b_cont = b_max - b_min;\n"
+    "  float cont_ratio = max(a_cont, b_cont) / (min(a_cont, b_cont) + kEps);\n"
+    "  return (1.0 - clamp((cont_ratio - kMinContrastRatio) * kRatioNorm, 0.0, 1.0)) * kContrastBoost;\n"
+    "}\n"
+    "float evalPoly6(float pxl[6], int phase) {\n"
+    "  float y = 0.0, y_usm = 0.0;\n"
+    "  for (int i = 0; i < 6; ++i) {\n"
+    "    y += NIS_COEF_SCALE[phase * 6 + i] * pxl[i];\n"
+    "    y_usm += NIS_COEF_USM[phase * 6 + i] * pxl[i];\n"
+    "  }\n"
+    "  float y_scale = 1.0 - clamp((y - kSharpStartY) * kSharpScaleY, 0.0, 1.0);\n"
+    "  float y_sharpness = y_scale * kSharpStrengthScale + kSharpStrengthMin;\n"
+    "  y_usm *= y_sharpness;\n"
+    "  float y_sharpness_limit = (y_scale * kSharpLimitScale + kSharpLimitMin) * y;\n"
+    "  y_usm = min(y_sharpness_limit, max(-y_sharpness_limit, y_usm));\n"
+    "  y_usm *= calcLTI(pxl[0], pxl[1], pxl[2], pxl[3], pxl[4], pxl[5], phase);\n"
+    "  return y + y_usm;\n"
+    "}\n"
+    "float filterNormal(float p[6][6], int px, int py) {\n"
+    "  float cv[6], ch[6];\n"
+    "  for (int k = 0; k < 6; ++k) {\n"
+    "    cv[k] = NIS_COEF_SCALE[py * 6 + k];\n"
+    "    ch[k] = NIS_COEF_SCALE[px * 6 + k];\n"
+    "  }\n"
+    "  float h_acc = 0.0;\n"
+    "  for (int j = 0; j < 6; ++j) {\n"
+    "    float v_acc = 0.0;\n"
+    "    for (int i = 0; i < 6; ++i) v_acc += p[i][j] * cv[i];\n"
+    "    h_acc += v_acc * ch[j];\n"
+    "  }\n"
+    "  return h_acc;\n"
+    "}\n"
+    "float addDirFilters(float p[6][6], float fx, float fy, int fxi, int fyi, vec4 w) {\n"
+    "  float f = 0.0;\n"
+    "  if (w.x > 0.0) {\n"
+    "    float t[6];\n"
+    "    for (int i = 0; i < 6; ++i) t[i] = mix(p[i][2], p[i][3], fx);\n"
+    "    f += evalPoly6(t, fyi) * w.x;\n"
+    "  }\n"
+    "  if (w.y > 0.0) {\n"
+    "    float t[6];\n"
+    "    for (int i = 0; i < 6; ++i) t[i] = mix(p[2][i], p[3][i], fy);\n"
+    "    f += evalPoly6(t, fxi) * w.y;\n"
+    "  }\n"
+    "  if (w.z > 0.0) {\n"
+    "    float b = 0.5 + 0.5 * (fx - fy);\n"
+    "    float t7[7];\n"
+    "    t7[1] = mix(p[2][1], p[1][2], b);\n"
+    "    t7[3] = mix(p[3][2], p[2][3], b);\n"
+    "    t7[5] = mix(p[4][3], p[3][4], b);\n"
+    "    b -= 0.5;\n"
+    "    float a0 = (b >= 0.0) ? p[0][2] : p[2][0], b0 = (b >= 0.0) ? p[1][3] : p[3][1];\n"
+    "    float c0 = (b >= 0.0) ? p[2][4] : p[4][2], d0 = (b >= 0.0) ? p[3][5] : p[5][3];\n"
+    "    t7[0] = mix(p[1][1], a0, abs(b));\n"
+    "    t7[2] = mix(p[2][2], b0, abs(b));\n"
+    "    t7[4] = mix(p[3][3], c0, abs(b));\n"
+    "    t7[6] = mix(p[4][4], d0, abs(b));\n"
+    "    float t[6];\n"
+    "    float ph = fx + fy;\n"
+    "    int s = 0;\n"
+    "    if (ph >= 1.0) { s = 1; ph -= 1.0; }\n"
+    "    for (int i = 0; i < 6; i++) t[i] = t7[i + s];\n"
+    "    f += evalPoly6(t, min(int(ph * 64.0), 63)) * w.z;\n"
+    "  }\n"
+    "  if (w.w > 0.0) {\n"
+    "    float b = 0.5 * (fx + fy);\n"
+    "    float t7[7];\n"
+    "    t7[1] = mix(p[3][1], p[4][2], b);\n"
+    "    t7[3] = mix(p[2][2], p[3][3], b);\n"
+    "    t7[5] = mix(p[1][3], p[2][4], b);\n"
+    "    b -= 0.5;\n"
+    "    float a0 = (b >= 0.0) ? p[5][2] : p[3][0], b0 = (b >= 0.0) ? p[4][3] : p[2][1];\n"
+    "    float c0 = (b >= 0.0) ? p[3][4] : p[1][2], d0 = (b >= 0.0) ? p[2][5] : p[0][3];\n"
+    "    t7[0] = mix(p[4][1], a0, abs(b));\n"
+    "    t7[2] = mix(p[3][2], b0, abs(b));\n"
+    "    t7[4] = mix(p[2][3], c0, abs(b));\n"
+    "    t7[6] = mix(p[1][4], d0, abs(b));\n"
+    "    float t[6];\n"
+    "    float ph = 1.0 + (fx - fy);\n"
+    "    int s = 0;\n"
+    "    if (ph >= 1.0) { s = 1; ph -= 1.0; }\n"
+    "    for (int i = 0; i < 6; i++) t[i] = t7[i + s];\n"
+    "    f += evalPoly6(t, min(int(ph * 64.0), 63)) * w.w;\n"
+    "  }\n"
+    "  return f;\n"
+    "}\n"
+    "void main() {\n"
+    "  vec2 inSz = pc.extra.xy;\n"
+    "  float outW = floor(pc.extra.z), sharp = (pc.extra.z - outW) * (128.0 / 100.0);\n"
+    "  vec2 scale = inSz / vec2(outW, pc.extra.w);\n"
+    "  float slider = sharp - 0.5;\n"
+    "  float maxScale = slider >= 0.0 ? 1.25 : 1.75, minScale = slider >= 0.0 ? 1.25 : 1.0, limScale = slider >= 0.0 ? 1.25 : 1.0;\n"
+    "  kSharpStrengthMin = max(0.0, 0.4 + slider * minScale * 1.2);\n"
+    "  kSharpStrengthScale = 1.6 + slider * maxScale * 1.8 - kSharpStrengthMin;\n"
+    "  kSharpLimitMin = max(0.1, 0.14 + slider * limScale * 0.32);\n"
+    "  kSharpLimitScale = 0.5 + slider * limScale * 0.6 - kSharpLimitMin;\n"
+    "  vec2 src = (floor(gl_FragCoord.xy) + 0.5) * scale - 0.5;\n"
+    "  vec2 fl = floor(src), fr = src - fl;\n"
+    "  ivec2 base = ivec2(fl), top = ivec2(inSz) - 1;\n"
+    "  int fxi = min(int(fr.x * 64.0), 63), fyi = min(int(fr.y * 64.0), 63);\n"
+    "  float p[6][6];\n"
+    "  /* the 6x6 support as nine 2x2 gathers of each channel (27 gathers where there were 36 fetches);\n"
+    "   * a gather's x y z w are the block's bottom-left, bottom-right, top-right and top-left texels, the edge\n"
+    "   * ones clamped as a fetch's are */\n"
+    "  vec2 g0 = (vec2(base) + vec2(-1.0)) / inSz;\n"
+    "  for (int b = 0; b < 3; ++b)\n"
+    "    for (int a = 0; a < 3; ++a) {\n"
+    "      vec2 at = g0 + vec2(2.0 * float(a), 2.0 * float(b)) / inSz;\n"
+    "      vec4 r = textureGather(u_tex, at, 0), g = textureGather(u_tex, at, 1), bl = textureGather(u_tex, at, 2);\n"
+    "      vec4 y = 0.2126 * r + 0.7152 * g + 0.0722 * bl;\n"
+    "      p[2 * b][2 * a] = y.w;\n"
+    "      p[2 * b][2 * a + 1] = y.z;\n"
+    "      p[2 * b + 1][2 * a] = y.x;\n"
+    "      p[2 * b + 1][2 * a + 1] = y.y;\n"
+    "    }\n"
+    "  vec4 e00 = edgeMap(p, 1, 1), e01 = edgeMap(p, 1, 2), e10 = edgeMap(p, 2, 1), e11 = edgeMap(p, 2, 2);\n"
+    "  vec4 w = mix(mix(e00, e01, fr.x), mix(e10, e11, fr.x), fr.y);\n"
+    "  float bw = 1.0 - w.x - w.y - w.z - w.w;\n"
+    "  float opY = (bw > 0.0 ? filterNormal(p, fxi, fyi) * bw : 0.0) + addDirFilters(p, fr.x, fr.y, fxi, fyi, w);\n"
+    "  vec3 op = textureLod(u_tex, (src + 0.5) / inSz, 0.0).rgb;\n"
+    "  o = vec4(clamp(op + (opY - getY(op)), 0.0, 1.0), 1.0);\n"
+    "}\n";
+
 static VkShaderModule module(HleShaderStage stage, const char *head, const char *body)
 {
     g_autofree char *src = g_strdup_printf("%s%s", head, body);
@@ -560,6 +724,9 @@ static bool init(void)
         .addressModeU = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE,
         .addressModeV = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE,
         .addressModeW = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE, .maxLod = 0.0f };
+    VkSamplerCreateInfo nci = sci;
+    nci.magFilter = VK_FILTER_NEAREST;
+    nci.minFilter = VK_FILTER_NEAREST;
     VkDescriptorSetLayoutBinding b[2] = {
         { 0, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 1, VK_SHADER_STAGE_FRAGMENT_BIT, NULL },
         { 1, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 1, VK_SHADER_STAGE_FRAGMENT_BIT, NULL } };
@@ -567,6 +734,7 @@ static bool init(void)
         .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO, .bindingCount = 2, .pBindings = b };
     if (T.vkCreateSemaphore(g_hvk.dev, &tsi, NULL, &g_ps.tl) != VK_SUCCESS ||
         T.vkCreateSampler(g_hvk.dev, &sci, NULL, &g_ps.smp) != VK_SUCCESS ||
+        T.vkCreateSampler(g_hvk.dev, &nci, NULL, &g_ps.smp_near) != VK_SUCCESS ||
         T.vkCreateDescriptorSetLayout(g_hvk.dev, &dci, NULL, &g_ps.dsl) != VK_SUCCESS) {
         return false;
     }
@@ -625,16 +793,23 @@ static bool init(void)
     }
     g_ps.vs = module(HLE_SHADER_VERTEX, k_vs, "");
     static const char *const body[P_COUNT] = { k_fs_bilinear, k_fs_area, k_fs_rcas, k_fs_crt, k_fs_osd,
-                                               k_fs_kdown, k_fs_kup, k_fs_fxaa, k_fs_easu };
+                                               k_fs_kdown, k_fs_kup, k_fs_fxaa, k_fs_easu, NULL };
     for (unsigned i = 0; i < P_COUNT; i++) {
-        g_ps.fs[i] = module(HLE_SHADER_FRAGMENT, k_fs_head, body[i]);
+        if (i == P_NIS) {
+            /* its filter banks ahead of the shader (the head's functions first) */
+            g_autofree char *nis = g_strdup_printf("%s%s", k_nis_coef, k_fs_nis);
+            g_ps.fs[i] = module(HLE_SHADER_FRAGMENT, k_fs_head, nis);
+        } else {
+            g_ps.fs[i] = module(HLE_SHADER_FRAGMENT, k_fs_head, body[i]);
+        }
     }
     g_ps.pipe[P_FXAA] = pipeline(g_ps.fs[P_FXAA], VK_FORMAT_R8G8B8A8_UNORM);
     g_ps.pipe[P_EASU] = pipeline(g_ps.fs[P_EASU], VK_FORMAT_R8G8B8A8_UNORM);
-    hle_log("hakuX-hle-back", "present: ready (shaders: bilinear %d, averaging %d, FSR %d, FXAA %d)",
+    g_ps.pipe[P_NIS] = pipeline(g_ps.fs[P_NIS], VK_FORMAT_R8G8B8A8_UNORM);
+    hle_log("hakuX-hle-back", "present: ready (shaders: bilinear %d, averaging %d, FSR %d, FXAA %d, NIS %d)",
             g_ps.fs[P_BILINEAR] != VK_NULL_HANDLE, g_ps.fs[P_AREA] != VK_NULL_HANDLE,
             g_ps.fs[P_RCAS] != VK_NULL_HANDLE && g_ps.pipe[P_EASU] != VK_NULL_HANDLE,
-            g_ps.pipe[P_FXAA] != VK_NULL_HANDLE);
+            g_ps.pipe[P_FXAA] != VK_NULL_HANDLE, g_ps.pipe[P_NIS] != VK_NULL_HANDLE);
     return g_ps.fs[P_BILINEAR] != VK_NULL_HANDLE;
 }
 
@@ -896,6 +1071,16 @@ void hle_present_set_crt(int kind)
 void hle_present_shot(const char *path)
 {
     snprintf(g_ps.shot_path, sizeof(g_ps.shot_path), "%s", path);
+    g_ps.shot_full = false;
+    g_ps.shot_want = true;
+}
+
+/* The same, at the game's own resolution (the render scale's: 4x is 2560x1920),
+ * whatever size the window is; the window's when there is no frame yet. */
+void hle_present_shot_full(const char *path)
+{
+    snprintf(g_ps.shot_path, sizeof(g_ps.shot_path), "%s", path);
+    g_ps.shot_full = true;
     g_ps.shot_want = true;
 }
 
@@ -1113,7 +1298,7 @@ static bool img_target(PsImg *t, uint32_t w, uint32_t h, VkFormat fmt, const cha
         .sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO, .imageType = VK_IMAGE_TYPE_2D,
         .format = fmt, .extent = { w, h, 1 }, .mipLevels = 1, .arrayLayers = 1,
         .samples = VK_SAMPLE_COUNT_1_BIT, .tiling = VK_IMAGE_TILING_OPTIMAL,
-        .usage = VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT,
+        .usage = VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT,
         .initialLayout = VK_IMAGE_LAYOUT_UNDEFINED };
     if (T.vkCreateImage(g_hvk.dev, &ici, NULL, &t->img) != VK_SUCCESS) {
         t->img = VK_NULL_HANDLE;
@@ -1158,10 +1343,12 @@ static void barrier(VkCommandBuffer cb, VkImage img, VkImageLayout from, VkImage
     T.vkCmdPipelineBarrier2(cb, &di);
 }
 
+static bool g_near;     /* the picture's own pass samples without blending its pixels */
+
 /* Set ds to sample src (and the frame's share of the ramp). */
 static void set_src(PsFrame *f, VkDescriptorSet ds, VkImageView src)
 {
-    VkDescriptorImageInfo ii = { g_ps.smp, src, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL };
+    VkDescriptorImageInfo ii = { g_near ? g_ps.smp_near : g_ps.smp, src, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL };
     VkDescriptorBufferInfo bi = { g_ps.ubo, (VkDeviceSize)(f - g_ps.fr) * PS_RAMP, 768 };
     VkWriteDescriptorSet wr[2] = {
         { .sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET, .dstSet = ds, .dstBinding = 0,
@@ -1229,22 +1416,23 @@ static void img_pass(VkCommandBuffer cb, PsFrame *f, unsigned set, PsImg *t, VkP
 }
 
 /* How the frame meets the window, logged when that changes. */
-static void log_path(unsigned p, bool fxaa, uint32_t vw, uint32_t vh)
+static void log_path(unsigned p, bool fxaa, uint32_t vw, uint32_t vh, bool nis)
 {
     static unsigned s_p = ~0u;
-    static bool s_fxaa;
+    static bool s_fxaa, s_nis;
     static uint32_t s_w, s_h, s_vw, s_vh;
-    if (p == s_p && fxaa == s_fxaa && g_ps.f.w == s_w && g_ps.f.h == s_h && vw == s_vw && vh == s_vh) {
+    if (p == s_p && fxaa == s_fxaa && nis == s_nis && g_ps.f.w == s_w && g_ps.f.h == s_h && vw == s_vw && vh == s_vh) {
         return;
     }
     s_p = p;
     s_fxaa = fxaa;
+    s_nis = nis;
     s_w = g_ps.f.w;
     s_h = g_ps.f.h;
     s_vw = vw;
     s_vh = vh;
     hle_log("hakuX-hle-back", "present: %ux%u%s into %ux%u: %s", s_w, s_h, fxaa ? " after FXAA" : "", vw, vh,
-            p == P_AREA ? "averaged down" : p == P_RCAS ? "scaled up by FSR" : "bilinear");
+            p == P_AREA ? "averaged down" : p == P_RCAS ? (nis ? "scaled up by NIS" : "scaled up by FSR") : "bilinear");
 }
 
 /* ---- the overlay (swapchain.h) ----
@@ -1861,8 +2049,35 @@ static void ov_draw(VkCommandBuffer cb, PsFrame *f, uint32_t iw, uint32_t ih, bo
     }
 }
 
+/* The frame at its own size through the picture's plain pass (its gamma ramp
+ * on, nothing of the window's: no aspect, overscan, FXAA or CRT) into an image
+ * of ours and copied out; false: not possible now (the window's is taken). */
+static bool shot_internal(VkCommandBuffer cb, PsFrame *f, VkImageView src)
+{
+    const uint32_t w = g_ps.f.w, h = g_ps.f.h;
+    if (!g_ps.have || !src || !w || !h || !g_ps.shot_can || !g_ps.pipe[P_BILINEAR] ||
+        !img_target(&g_ps.shotimg, w, h, g_ps.pipe_fmt, "screenshot") || !shot_buf((VkDeviceSize)w * h * 4)) {
+        return false;
+    }
+    const float pc[12] = { -1.0f, -1.0f, 1.0f, 1.0f, 0, 0, 0, 0, 1.0f, 0.0f, 0.0f, 1.0f };
+    barrier(cb, g_ps.shotimg.img, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
+            VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT, 0, VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
+            VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT);
+    rendering(cb, g_ps.shotimg.view, w, h, true);
+    quad(cb, f, SET_FXAA, g_ps.pipe[P_BILINEAR], src, pc, w, h);   /* SET_FXAA: the same source as its own pass */
+    T.vkCmdEndRendering(cb);
+    barrier(cb, g_ps.shotimg.img, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+            VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT, VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT,
+            VK_PIPELINE_STAGE_2_COPY_BIT, VK_ACCESS_2_TRANSFER_READ_BIT);
+    VkBufferImageCopy r = { .imageSubresource = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1 }, .imageExtent = { w, h, 1 } };
+    T.vkCmdCopyImageToBuffer(cb, g_ps.shotimg.img, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, g_ps.shot_buf, 1, &r);
+    return true;
+}
+
 void hle_present_end(float sx, float sy, bool fxaa, int upscale, bool average, uint64_t key)
 {
+    const int nis_sharp = (upscale >> 8) & 0xFF;     /* NIS's sharpness (percent) rides above the kind */
+    upscale &= 0xFF;
     g_ps.shown = false;
     PsFrame *f = &g_ps.fr[g_ps.cur];
     const uint32_t ww = g_ps.wsize.width, wh = g_ps.wsize.height, iw = g_ps.ext.width, ih = g_ps.ext.height;
@@ -1915,17 +2130,29 @@ void hle_present_end(float sx, float sy, bool fxaa, int upscale, bool average, u
     const float vw = sx * (float)ww, vh = sy * (float)wh;
     const float rx = g_ps.have ? (float)g_ps.f.w / vw : 1.0f, ry = g_ps.have ? (float)g_ps.f.h / vh : 1.0f;
     const bool down = (rx > 1.01f || ry > 1.01f) && average && g_ps.pipe[P_AREA];
-    bool fsr = g_ps.have && !down && !g_crt && (rx < 0.99f || ry < 0.99f) && upscale == HLE_UPSCALE_FSR &&
-               g_ps.pipe[P_EASU] && g_ps.pipe[P_RCAS];
-    if (fsr && !img_target(&g_ps.up, (uint32_t)(vw + 0.5f), (uint32_t)(vh + 0.5f), VK_FORMAT_R8G8B8A8_UNORM, "FSR")) {
-        g_ps.pipe[P_EASU] = VK_NULL_HANDLE;         /* no image for it: bilinear */
-        fsr = false;
+    /* NIS scales 1x to 2x (the SDK's range) with its own sharpening; beyond that, or without its
+     * pass, FSR scales instead */
+    const bool nis_range = rx >= 0.499f && ry >= 0.499f && rx <= 1.0f && ry <= 1.0f;
+    bool nis = g_ps.have && !down && !g_crt && (rx < 0.99f || ry < 0.99f) && upscale == HLE_UPSCALE_NIS &&
+               nis_range && g_ps.pipe[P_NIS] && g_ps.pipe[P_RCAS];
+    bool fsr = g_ps.have && !down && !g_crt && !nis && (rx < 0.99f || ry < 0.99f) &&
+               (upscale == HLE_UPSCALE_FSR || upscale == HLE_UPSCALE_NIS) && g_ps.pipe[P_EASU] && g_ps.pipe[P_RCAS];
+    if ((fsr || nis) && !img_target(&g_ps.up, (uint32_t)(vw + 0.5f), (uint32_t)(vh + 0.5f), VK_FORMAT_R8G8B8A8_UNORM,
+                                    nis ? "NIS" : "FSR")) {
+        g_ps.pipe[P_EASU] = g_ps.pipe[P_NIS] = VK_NULL_HANDLE;   /* no image for it: bilinear */
+        fsr = nis = false;
     }
-    if (fsr && (g_ps.up.serial != g_ps.serial || g_ps.up.fxaa != fxaa_done)) {
-        const float extra[4] = { (float)g_ps.f.w, (float)g_ps.f.h, (float)g_ps.up.w, (float)g_ps.up.h };
-        img_pass(cb, f, SET_EASU, &g_ps.up, g_ps.pipe[P_EASU], src, extra);
+    const unsigned up_kind = nis ? 1u + (unsigned)(nis_sharp > 100 ? 100 : nis_sharp) : 0u;
+    if ((fsr || nis) && (g_ps.up.serial != g_ps.serial || g_ps.up.fxaa != fxaa_done || g_ps.up.kind != up_kind)) {
+        float extra[4] = { (float)g_ps.f.w, (float)g_ps.f.h, (float)g_ps.up.w, (float)g_ps.up.h };
+        if (nis) {
+            /* the width carries the sharpness in its fraction (percent / 128: exact in a float) */
+            extra[2] += (float)(nis_sharp > 100 ? 100 : nis_sharp) / 128.0f;
+        }
+        img_pass(cb, f, SET_EASU, &g_ps.up, g_ps.pipe[nis ? P_NIS : P_EASU], src, extra);
         g_ps.up.serial = g_ps.serial;
         g_ps.up.fxaa = fxaa_done;
+        g_ps.up.kind = up_kind;
     }
     /* the picture's pass: p over the frame's place, from `from` */
     unsigned p = P_BILINEAR;
@@ -1935,9 +2162,10 @@ void hle_present_end(float sx, float sy, bool fxaa, int upscale, bool average, u
         p = P_AREA;
         pc[4] = rx;
         pc[5] = ry;
-    } else if (fsr) {
+    } else if (fsr || nis) {
         p = P_RCAS;
-        pc[4] = 0.8705506f;                 /* sharpness 0.2 stops: 2^-0.2 (FsrRcasCon, AMD's sample's) */
+        pc[4] = nis ? 0.0f                  /* NIS sharpened already: RCAS at 0 hands the pixel on (the gamma ramp's) */
+                    : 0.8705506f;           /* sharpness 0.2 stops: 2^-0.2 (FsrRcasCon, AMD's sample's) */
         from = g_ps.up.view;
     }
     if (g_crt && g_ps.pipe[P_CRT]) {
@@ -1965,7 +2193,9 @@ void hle_present_end(float sx, float sy, bool fxaa, int upscale, bool average, u
             VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT);
     rendering(cb, g_ps.view[g_ps.idx], iw, ih, true);
     if (g_ps.have && !cover) {
+        g_near = upscale == HLE_UPSCALE_NEAREST && p == P_BILINEAR;
         quad(cb, f, SET_WINDOW, g_ps.pipe[p], from, pc, iw, ih);
+        g_near = false;
         if (g_osd > 0 && g_ps.pipe[P_OSD]) {
             /* top left, 4 digits each 0.022 of the window's height wide */
             const float dh = 0.045f, dw = dh * 0.62f * (float)wh / (float)ww;
@@ -1973,13 +2203,14 @@ void hle_present_end(float sx, float sy, bool fxaa, int upscale, bool average, u
                              g_ps.rot[0], g_ps.rot[1], g_ps.rot[2], g_ps.rot[3] };
             quad(cb, f, SET_OSD, g_ps.pipe[P_OSD], src, oc, iw, ih);
         }
-        log_path(p, fxaa_done, (uint32_t)(vw + 0.5f), (uint32_t)(vh + 0.5f));
+        log_path(p, fxaa_done, (uint32_t)(vw + 0.5f), (uint32_t)(vh + 0.5f), nis);
     }
     if (ov) {
         ov_draw(cb, f, iw, ih, scene_ok);
     }
     T.vkCmdEndRendering(cb);
-    const bool shot = g_ps.shot_want && g_ps.shot_can && shot_buf((VkDeviceSize)iw * ih * 4);
+    const bool shot_in = g_ps.shot_want && g_ps.shot_full && shot_internal(cb, f, src);
+    const bool shot = g_ps.shot_want && g_ps.shot_can && !shot_in && shot_buf((VkDeviceSize)iw * ih * 4);
     if (shot) {
         barrier(cb, dst, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
                 VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT, VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT,
@@ -2033,7 +2264,10 @@ void hle_present_end(float sx, float sy, bool fxaa, int upscale, bool average, u
     if (r == VK_SUCCESS) {
         g_ps.submitted = value;
         f->value = value;
-        if (shot && wait_value(value)) {
+        if (shot_in && wait_value(value)) {
+            shot_write(g_ps.shotimg.w, g_ps.shotimg.h);
+            g_ps.shot_want = false;
+        } else if (shot && wait_value(value)) {
             shot_write(iw, ih);
             g_ps.shot_want = false;
         }
