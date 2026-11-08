@@ -22,7 +22,7 @@
 #endif
 
 #ifndef XBASED_VERSION
-#define XBASED_VERSION "1.0.80"
+#define XBASED_VERSION "1.0.81"
 #endif
 
 Dash D;
@@ -292,6 +292,7 @@ static void poll_input(void)
             in->pad = false;
             cursor(false);
             in->key = e.key.key;
+            in->mod = e.key.mod;
             in->repeat |= e.key.repeat;
             in->any = true;
             const SDL_Keycode k = e.key.key;
@@ -957,6 +958,8 @@ void opt_choice(List *l, enum UiStr label, const char *key, const char *const *v
             dash_toast(T(S_DISC_WARN));     /* a few titles need the drive's time (native/kernel/io.c) */
         } else if (!strcmp(key, "ram") && !strcmp(now_v, "128")) {
             dash_toast(T(S_RAM_WARN));      /* retail titles meet a debug kit's memory map */
+        } else if (!strcmp(key, "fsrate") && !strcmp(now_v, "60")) {
+            dash_toast(T(S_FSRATE_TIP));    /* what it does, and the switch's black moment */
         }
     }
 }
@@ -1455,17 +1458,44 @@ static const char *region_text(uint32_t regions)
 }
 
 /* Another game in the library has g's name (two releases, two versions):
- * its tile tells them apart by region and version */
-static bool title_repeats(const LibGame *g)
+ * its tile tells them apart by region and version (1), or by the file's
+ * name when those are the same too (2: a modified disc beside the game) */
+static int title_repeats(const LibGame *g)
 {
     const int n = lib_count();
+    int r = 0;
     for (int i = 0; i < n; i++) {
         const LibGame *o = lib_get(i);
         if (o && o != g && !o->hidden && !SDL_strcasecmp(o->g.title, g->g.title)) {
-            return true;
+            if (o->g.regions == g->g.regions && o->g.version == g->g.version) {
+                return 2;
+            }
+            r = 1;
         }
     }
-    return false;
+    return r;
+}
+
+/* g's file's name, whole (a modded copy's name is often in brackets),
+ * without the folder or the extension: what tells apart two discs of the
+ * same name, region and version (title_repeats 2) */
+static void file_label(const LibGame *g, char *info, size_t n)
+{
+    const char *b = g->g.path;
+    for (const char *q = b; *q; q++) {
+        if (*q == '/' || *q == '\\') {
+            b = q + 1;
+        }
+    }
+    snprintf(info, n, "%s", b);
+    char *dot = strrchr(info, '.');
+    if (dot && dot != info) {
+        *dot = 0;
+        char *x = strrchr(info, '.');
+        if (x && x != info && !SDL_strcasecmp(x, ".xiso")) {
+            *x = 0;         /* name.xiso.iso */
+        }
+    }
 }
 
 /* the icons view's tile: the disc's icon, the title, the publisher and year under */
@@ -1492,7 +1522,10 @@ static void draw_tile(LibGame *g, float x, float y, float w, float h, bool sel, 
                 UI_ALIGN_LEFT, tw);
     char info[120];
     const char *pub = lib_publisher(g);
-    if (title_repeats(g)) {
+    const int rep = title_repeats(g);
+    if (rep == 2) {
+        file_label(g, info, sizeof(info));
+    } else if (rep) {
         /* the same name twice: what tells them apart, region and version */
         snprintf(info, sizeof(info), "%s · v%u%s%.0d", region_text(g->g.regions), g->g.version,
                  g->g.year ? " · " : "", g->g.year);
@@ -1767,7 +1800,12 @@ static void scr_games(void)
         if (g->g.year) {
             snprintf(year, sizeof(year), "%d  ", g->g.year);
         }
-        snprintf(info, sizeof(info), "%s%s%s%s  v%u  %.1f GB", pub, *pub ? "  " : "", year,
+        char file[160] = "";
+        if (title_repeats(g) == 2) {
+            file_label(g, file, sizeof(file) - 2);
+            strcat(file, "  ");
+        }
+        snprintf(info, sizeof(info), "%s%s%s%s%s  v%u  %.1f GB", file, pub, *pub ? "  " : "", year,
                  region_text(g->g.regions), g->g.version, g->g.size / 1073741824.0);
         ui_text_fit(W - 60, H - 120, info, 20, UI_FONT_REGULAR, UI_GREY, UI_ALIGN_RIGHT, 480);
         if (D.in.ok) {

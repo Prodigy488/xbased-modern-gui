@@ -47,9 +47,16 @@ static void rows_video(List *l)
     /* overscan as a TV's, in any shape: the share of the picture hidden
      * past the screen's edges (a CRT hid some 5-10%; 7% and 10% the
      * action-safe areas, EBU's and the classic), or underscan's border */
-    static const char *const ov[] = {"-10", "-5", "-3", "0", "3", "5", "7", "10", "15"};
-    const char *on[] = {"-10%", "-5%", "-3%", T(S_OFF), "3%", "5%", "7%", "10%", "15%"};
-    opt_choice(l, S_OVERSCAN, "overscan", ov, on, 9, "0");
+    static const char *const ov[] = {"-10", "-5", "-3", "0", "3", "5", "7", "10", "15", "20"};
+    const char *on[] = {"-10%", "-5%", "-3%", T(S_OFF), "3%", "5%", "7%", "10%", "15%", "20%"};
+    opt_choice(l, S_OVERSCAN, "overscan", ov, on, 10, "0");
+    /* a game's black borders cut off, the sides and the top and bottom
+     * apart (in console pixels each side, of 640x480): what overscan, the
+     * same all round, doesn't fit */
+    static const char *const crv[] = {"0", "2", "4", "8", "12", "16", "24", "32", "48"};
+    const char *crn[] = {T(S_OFF), "2 px", "4 px", "8 px", "12 px", "16 px", "24 px", "32 px", "48 px"};
+    opt_choice(l, S_CROP_H, "croph", crv, crn, 9, "0");
+    opt_choice(l, S_CROP_V, "cropv", crv, crn, 9, "0");
     opt_bool(l, S_FXAA, "fxaa", false, false);
     static const char *anv[] = {"0", "2", "4", "8", "16"};
     const char *ann[] = {T(S_OFF), "2x", "4x", "8x", "16x"};
@@ -206,6 +213,17 @@ void scr_settings(void)
         opt_bool(&l, S_FULLSCREEN, "fullscreen", true, true);
         opt_bool(&l, S_SHOW_FPS, "showfps", false, false);
         opt_bool(&l, S_VSYNC, "vsync", true, false);
+        {
+            /* full screen at the panel's highest refresh a multiple of 60
+             * Hz (win_main.c fs_mode), and the limit of the games set to
+             * Uncapped (never under 60: the console's own rate) */
+            static const char *const fv[] = {"desktop", "60"};
+            const char *fn[] = {T(S_FSRATE_DESKTOP), T(S_FSRATE_60)};
+            opt_choice(&l, S_FSRATE, "fsrate", fv, fn, 2, "desktop");
+            static const char *const mv[] = {"refresh", "60", "120", "144", "240", "0"};
+            const char *mn[] = {T(S_MAXFPS_REFRESH), "60 fps", "120 fps", "144 fps", "240 fps", T(S_MAXFPS_NONE)};
+            opt_choice(&l, S_MAXFPS, "maxfps", mv, mn, 6, "refresh");
+        }
         break;
     case 1: {
         /* the console's audio setting and the speakers it plays on: stereo,
@@ -348,6 +366,9 @@ void scr_settings(void)
         opt_bool(&l, S_RUMBLE, "rumble", true, false);
         break;
     case 5:
+        /* the keyboard's (a key, Ctrl/Alt/Shift with it if held), then the
+         * controller's: Guide with a button, the touchpad or Share, buttons
+         * the Xbox controller hasn't (no game means them) */
         for (int h = 0; h < IM_HOTKEYS; h++) {
             char val[64];
             im_hotkey_name(&D.global, h, val, sizeof(val));
@@ -355,6 +376,30 @@ void scr_settings(void)
                 D.remap_target = 1000 + h;
                 D.remap_since = ui_time();
                 dash_push(SCR_REMAP);
+            }
+        }
+        for (int h = 0; h < IM_HOTKEYS; h++) {
+            static const char *const k_names[IM_HOTKEYS] = {"menu", "save", "load", "turbo", "pause", "shot", "full"};
+            char key[24], label[96];
+            snprintf(key, sizeof(key), "hkpad.%s", k_names[h]);
+            snprintf(label, sizeof(label), "%s  (%s)", T(im_hotkey_label(h)), T(S_HK_PAD));
+            const char *v = cfg_get(&D.global, key);
+            if (!v) {
+                v = im_hkpad_default(h);
+            }
+            const int n = im_hkpad_count();
+            int cur = 0;
+            for (int i = 0; i < n; i++) {
+                if (!SDL_strcasecmp(v, im_hkpad_value(i))) {
+                    cur = i;
+                }
+            }
+            int delta = 0;
+            if (list_row(&l, label, im_hkpad_label(cur), &delta)) {
+                delta = 1;
+            }
+            if (delta) {
+                cfg_set(&D.global, key, im_hkpad_value((cur + (delta > 0 ? 1 : n - 1)) % n));
             }
         }
         break;
@@ -1351,11 +1396,16 @@ void scr_remap(void)
         return;     /* the press that opened it */
     }
     bool done = left <= 0;
+    const SDL_Keycode k = D.in.key;
+    const bool modifier = k == SDLK_LCTRL || k == SDLK_RCTRL || k == SDLK_LALT || k == SDLK_RALT ||
+                          k == SDLK_LSHIFT || k == SDLK_RSHIFT || k == SDLK_LGUI || k == SDLK_RGUI;
     if (D.in.key == SDLK_ESCAPE) {
         done = true;
+    } else if (hotkey && modifier) {
+        /* Ctrl, Alt or Shift: the key that goes with them still to come */
     } else if (D.in.key) {
         if (hotkey) {
-            im_set_hotkey(c, D.remap_target - 1000, D.in.key);
+            im_set_hotkey(c, D.remap_target - 1000, D.in.key, D.in.mod);
         } else {
             im_bind_key(c, D.player, D.remap_target, D.in.key);
         }

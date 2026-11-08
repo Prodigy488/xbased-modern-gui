@@ -29,6 +29,10 @@ void nc_present_set_widescreen(bool on);
  * frame grown about its middle to do it; pct < 0 underscan, the frame
  * shrunk to leave that much border. Any shape (4:3, 16:9, ...). */
 void nc_present_set_overscan(int pct);
+/* The frame's borders cut off, h console pixels off each side and v off the
+ * top and bottom (of 640x480; 0 none): a game's black edges hidden, the
+ * rest filling the frame's place. */
+void nc_present_set_crop(int h, int v);
 /* FXAA over each frame before it's scaled to the window. */
 void nc_present_set_fxaa(bool on);
 /* The frame rate in the window's corner. */

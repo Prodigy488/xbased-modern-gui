@@ -1,5 +1,37 @@
 # xbased changelog
 
+## 1.0.81 (2026-11)
+
+### Fixes
+- Modified copies of a game (same title ID, version and region) are no
+  longer folded into one entry with the original. The library tells two
+  dumps of the same disc (an XISO and a full image) from a changed one by
+  the game's executable headers and its root folder, and shows each modded
+  copy with its file's name to tell them apart. Each can be renamed or
+  hidden on its own.
+- Overscan now really hides the picture's edges: around a 4:3 picture in a
+  wide window they spilled into the black bars instead of being cut off.
+
+### Changes
+- Crop: the sides, and the top and bottom, can be cut by a number of
+  console pixels each, globally or per game (Settings › Video), for games
+  whose borders aren't the same all round. Overscan goes up to 20%.
+- Shortcuts can use Ctrl, Alt and Shift (Ctrl+1 and the like; the game
+  doesn't get the key while a shortcut has it), and each one can also be on
+  the controller: Guide plus a button, the touchpad or Share. The Guide
+  button's tap still opens the menu, now when it's let go, and Share takes a
+  screenshot by default.
+- Uncapped games' limit (Settings › Video): a game set to Uncapped is held
+  to the monitor's refresh rate by default, or 60, 120, 144, 240 fps, or no
+  limit. Some games have no frame cap of their own and ran at hundreds of
+  frames a second.
+- Full screen refresh (Settings › Video): full screen can switch the monitor
+  to its highest mode that's a multiple of 60 Hz (120 Hz on a 144 or 165 Hz
+  monitor, 240 on a 280). The console's 60 Hz then lines up with every
+  refresh and frames show for an even time without G-Sync or FreeSync. Off
+  by default (the screen goes black for a moment when the mode switches).
+- The README explains how to get on Insignia.
+
 ## 1.0.80 (2026-11)
 
 ### Fixes

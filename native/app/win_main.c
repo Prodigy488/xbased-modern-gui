@@ -547,9 +547,36 @@ static void pad_removed(SDL_JoystickID id)
     }
 }
 
+/* Keys a shortcut with Ctrl or Alt took: the game doesn't see them until
+ * they're let go (Ctrl+1 a shortcut, 1 the left trigger) */
+static bool g_hk_eaten[SDL_SCANCODE_COUNT];
+static bool g_hk_any_eaten;
+/* Gamepads whose Guide button is held: the shortcuts' layer, the game
+ * seeing that pad let go meanwhile (Guide + A no A in the game) */
+static bool pad_guide_held(SDL_Gamepad *pad)
+{
+    return pad && SDL_GetGamepadButton(pad, SDL_GAMEPAD_BUTTON_GUIDE);
+}
+
 static void update_pads(bool focused)
 {
     const bool *keys = SDL_GetKeyboardState(NULL);
+    static bool kept[SDL_SCANCODE_COUNT];
+    if (g_hk_any_eaten) {
+        memcpy(kept, keys, sizeof(kept));
+        bool any = false;
+        for (int i = 0; i < SDL_SCANCODE_COUNT; i++) {
+            if (g_hk_eaten[i] && !keys[i]) {
+                g_hk_eaten[i] = false;      /* let go */
+            }
+            if (g_hk_eaten[i]) {
+                kept[i] = false;
+                any = true;
+            }
+        }
+        g_hk_any_eaten = any;
+        keys = kept;
+    }
     for (unsigned i = 0; i < 4; i++) {
         NcPadState s;
         memset(&s, 0, sizeof(s));
@@ -557,7 +584,7 @@ static void update_pads(bool focused)
         /* the keyboard: player 1 on auto, any player set to it */
         const bool kb = focused && (g_map.device[i] == -1 || (i == 0 && g_map.device[i] == 0));
         ImPad m;
-        im_read(&g_map, (int)i, kb ? keys : NULL, pad, &m);
+        im_read(&g_map, (int)i, kb ? keys : NULL, pad_guide_held(pad) ? NULL : pad, &m);
         s.buttons = m.buttons;
         memcpy(s.analog, m.analog, sizeof(s.analog));
         s.lx = m.lx;
@@ -656,6 +683,71 @@ static void load_state(int slot)
 }
 
 static bool g_uncap;    /* the run's frame rate setting (fast forward goes back to it) */
+static int g_crop[2];   /* croph=, cropv= of the run's options */
+static int g_maxfps = -1;   /* maxfps=: an uncapped game's limit (-1 the display's refresh, 0 none) */
+static bool g_fs60;         /* fsrate=60: full screen in the panel's highest mode a multiple of 60 Hz */
+
+/* The display's refresh rate (Hz, rounded; 60 if unknown) */
+static int display_hz(SDL_Window *w)
+{
+    const SDL_DisplayMode *m = SDL_GetDesktopDisplayMode(w ? SDL_GetDisplayForWindow(w) : SDL_GetPrimaryDisplay());
+    const int hz = m && m->refresh_rate > 0 ? (int)(m->refresh_rate + 0.5f) : 60;
+    return hz < 60 ? 60 : hz;
+}
+
+/* Full screen, fsrate=60: the display's highest mode at its desktop size
+ * whose refresh is a whole number of 60 Hz (59.94 too), no faster than the
+ * desktop's: 120 Hz on a 144 or 165 Hz panel, 240 on a 280. The emulated
+ * vblank then keeps to the panel's (nv2a.c), and every frame shows for as
+ * long as on the console; at 144 Hz a 30 fps game's frames showed 28 and 35
+ * ms in turn. Already a multiple, or none: the desktop's, borderless. */
+static void fs_mode(SDL_Window *w)
+{
+    if (!g_fs60) {
+        SDL_SetWindowFullscreenMode(w, NULL);
+        return;
+    }
+    const SDL_DisplayID d = SDL_GetDisplayForWindow(w);
+    const SDL_DisplayMode *dm = SDL_GetDesktopDisplayMode(d);
+    if (!dm || dm->refresh_rate <= 0) {
+        SDL_SetWindowFullscreenMode(w, NULL);
+        return;
+    }
+    /* the desktop's own rate: a run started again (a state loaded) comes
+     * up while the last one's mode is still on the panel, and took that
+     * for the desktop's (the game then stayed at the desktop's 280 Hz) */
+    const char *was = getenv("XBASED_DESKTOP_HZ");
+    const float r0 = was && atof(was) > 0 ? (float)atof(was) : dm->refresh_rate;
+    if (!was) {
+        char hz[24];
+        snprintf(hz, sizeof(hz), "%.3f", r0);
+        setenv("XBASED_DESKTOP_HZ", hz, 1);  /* for the runs this one starts */
+    }
+    const int k0 = (int)(r0 / 60.0f + 0.5f);
+    if (k0 >= 1 && k0 <= 4 && fabsf(r0 - 60.0f * (float)k0) <= 0.01f * 60.0f * (float)k0) {
+        SDL_SetWindowFullscreenMode(w, NULL);  /* the desktop's is one */
+        return;
+    }
+    int n = 0;
+    SDL_DisplayMode **ms = SDL_GetFullscreenDisplayModes(d, &n);
+    const SDL_DisplayMode *best = NULL;
+    for (int i = 0; ms && i < n; i++) {
+        const SDL_DisplayMode *m = ms[i];
+        const int k = (int)(m->refresh_rate / 60.0f + 0.5f);
+        if (m->w == dm->w && m->h == dm->h && k >= 1 && k <= 4 && m->refresh_rate <= r0 + 0.5f &&
+            fabsf(m->refresh_rate - 60.0f * (float)k) <= 0.01f * 60.0f * (float)k &&
+            (!best || m->refresh_rate > best->refresh_rate)) {
+            best = m;
+        }
+    }
+    SDL_SetWindowFullscreenMode(w, best);
+    nc_log("hakuX-app", "full screen: %s", best ? "the panel's highest mode a multiple of 60 Hz" : "the desktop's");
+    if (best) {
+        nc_log("hakuX-app", "full screen mode %dx%d at %.2f Hz (the desktop's %.2f)", best->w, best->h,
+               best->refresh_rate, r0);
+    }
+    SDL_free(ms);
+}
 static int g_fps_cap;   /* ... its limit, uncapped (0: none) */
 static float g_volume = 1.0f;
 static bool g_mute_bg = true;   /* silent while the window isn't the active one */
@@ -892,6 +984,7 @@ static void overlay_tick(void)
 static void apply_cfg(const Config *global, const Config *game, bool sound)
 {
     const Config *pick[2] = {game, global};
+    int crop_h = 0, crop_v = 0;     /* none unless set (a game's back to "global" leaves none) */
     for (int k = 1; k >= 0; k--) {
         const Config *c = pick[k];
         const char *v;
@@ -901,6 +994,12 @@ static void apply_cfg(const Config *global, const Config *game, bool sound)
         }
         if ((v = cfg_get(c, "overscan"))) {
             nc_present_set_overscan(atoi(v));
+        }
+        if ((v = cfg_get(c, "croph"))) {
+            crop_h = atoi(v);
+        }
+        if ((v = cfg_get(c, "cropv"))) {
+            crop_v = atoi(v);
         }
         if ((v = cfg_get(c, "fxaa"))) {
             nc_present_set_fxaa(atoi(v) != 0);
@@ -928,6 +1027,7 @@ static void apply_cfg(const Config *global, const Config *game, bool sound)
             g_mute_bg = atoi(v) != 0;
         }
     }
+    nc_present_set_crop(crop_h, crop_v);
     g_fx = cfg_bool(global, "ui.fx", true);
 }
 
@@ -1117,7 +1217,7 @@ static const char *pick_disc(void)
 }
 
 #ifndef XBASED_VERSION
-#define XBASED_VERSION "1.0.80"
+#define XBASED_VERSION "1.0.81"
 #endif
 
 static void rm_tree(const char *path)
@@ -1192,6 +1292,54 @@ static void shader_cache_by_version(const char *base)
 #else
 #define NC_PLATFORM_NAME "Linux"
 #endif
+
+/* A shortcut pressed (down) or let go: only fast forward lasts while held;
+ * slot: quick save and load's (Shift with the key: 2) */
+static int g_pad_held_hk = -1, g_pad_held_code;
+static bool g_guide_alone;      /* Guide pressed, nothing with it yet: a tap opens the menu */
+
+static void hotkey_do(SDL_Window *win, int h, bool down, int slot, bool *paused, bool minimized)
+{
+    if (!down) {
+        if (h == IM_HK_TURBO) {
+            nc_win_prop_set("debug.hakux.uncap", g_uncap ? "1" : "0");
+            char cap[16];
+            snprintf(cap, sizeof(cap), "%d", g_fps_cap);
+            nc_win_prop_set("debug.hakux.fpscap", cap);
+        }
+        return;
+    }
+    switch (h) {
+    case IM_HK_FULL:
+        fs_mode(win);
+        SDL_SetWindowFullscreen(win, !(SDL_GetWindowFlags(win) & SDL_WINDOW_FULLSCREEN));
+        break;
+    case IM_HK_PAUSE:
+        *paused = !*paused;
+        nc_kernel_set_paused(&g_core.kernel, *paused || minimized);
+        nc_audio_set_paused(*paused || minimized);
+        nc_log("hakuX-app", "%s", *paused ? "paused" : "resumed");
+        break;
+    case IM_HK_SAVE:
+        save_state(slot);
+        break;
+    case IM_HK_LOAD:
+        load_state(slot);
+        break;
+    case IM_HK_TURBO:
+        nc_win_prop_set("debug.hakux.uncap", "1");  /* frames as fast as they come, while held */
+        nc_win_prop_set("debug.hakux.fpscap", "0");
+        break;
+    case IM_HK_SHOT:
+        screenshot();
+        break;
+    case IM_HK_MENU:
+        ingame_menu(win, paused, minimized);
+        break;
+    default:
+        break;
+    }
+}
 
 int main(int argc, char *argv[])
 {
@@ -1358,6 +1506,16 @@ int main(int argc, char *argv[])
                                                           : NC_ASPECT_AUTO);
         } else if (!strncmp(a, "overscan=", 9)) {
             nc_present_set_overscan(atoi(a + 9));
+        } else if (!strncmp(a, "maxfps=", 7)) {
+            g_maxfps = !strcmp(a + 7, "refresh") ? -1 : atoi(a + 7);
+        } else if (!strncmp(a, "fsrate=", 7)) {
+            g_fs60 = !strcmp(a + 7, "60");
+        } else if (!strncmp(a, "croph=", 6)) {
+            g_crop[0] = atoi(a + 6);
+            nc_present_set_crop(g_crop[0], g_crop[1]);
+        } else if (!strncmp(a, "cropv=", 6)) {
+            g_crop[1] = atoi(a + 6);
+            nc_present_set_crop(g_crop[0], g_crop[1]);
         } else if (!strncmp(a, "fxaa=", 5)) {
             nc_present_set_fxaa(atoi(a + 5) != 0);
         } else if (!strncmp(a, "upscale=", 8)) {
@@ -1376,6 +1534,11 @@ int main(int argc, char *argv[])
         }
     }
     nc_win_mods_prepare(g_exe_dir, g_disc_fd, g_args, g_nargs);
+    if (opt.uncap && opt.fps_cap <= 0 && g_maxfps != 0) {
+        /* uncapped with no limit of the game's own: the global one, never
+         * under 60 (games without a frame cap of their own ran at hundreds) */
+        opt.fps_cap = g_maxfps < 0 ? display_hz(NULL) : g_maxfps < 60 ? 60 : g_maxfps;
+    }
     nc_options_apply(&opt);
     g_uncap = opt.uncap;
     g_fps_cap = opt.fps_cap;
@@ -1392,11 +1555,14 @@ int main(int argc, char *argv[])
 #else
     const SDL_WindowFlags vk_flag = SDL_WINDOW_VULKAN; /* SDL_Vulkan_CreateSurface's (swapchain.c) */
 #endif
-    SDL_Window *win = SDL_CreateWindow(wtitle, 1280, 960, vk_flag | SDL_WINDOW_RESIZABLE | SDL_WINDOW_HIGH_PIXEL_DENSITY |
-                                                              (want_fullscreen() ? SDL_WINDOW_FULLSCREEN : 0));
+    SDL_Window *win = SDL_CreateWindow(wtitle, 1280, 960, vk_flag | SDL_WINDOW_RESIZABLE | SDL_WINDOW_HIGH_PIXEL_DENSITY);
     if (!win) {
         fatal_box("xbased", SDL_GetError());
         return 1;
+    }
+    fs_mode(win);       /* the full screen's mode before it's full screen */
+    if (want_fullscreen()) {
+        SDL_SetWindowFullscreen(win, true);
     }
     SDL_HideCursor();   /* the game doesn't use the mouse */
     {
@@ -1476,47 +1642,86 @@ int main(int argc, char *argv[])
             case SDL_EVENT_QUIT:
                 quit = true;
                 break;
-            case SDL_EVENT_KEY_DOWN:
+            case SDL_EVENT_KEY_DOWN: {
                 if (ev.key.repeat) {
                     break;
                 }
-                /* the shortcuts (Settings > Shortcuts); Shift with quick save/load: slot 2 */
-                if (ev.key.key == g_map.hotkey[IM_HK_FULL] ||
-                    (ev.key.key == SDLK_RETURN && (ev.key.mod & SDL_KMOD_ALT))) {
-                    SDL_SetWindowFullscreen(win, !(SDL_GetWindowFlags(win) & SDL_WINDOW_FULLSCREEN));
-                } else if (ev.key.key == g_map.hotkey[IM_HK_PAUSE]) {
-                    paused = !paused;
-                    nc_kernel_set_paused(&g_core.kernel, paused || minimized);
-                    nc_audio_set_paused(paused || minimized);
-                    nc_log("hakuX-app", "%s", paused ? "paused" : "resumed");
-                } else if (ev.key.key == g_map.hotkey[IM_HK_SAVE]) {
-                    save_state(ev.key.mod & SDL_KMOD_SHIFT ? 2 : 1);
-                } else if (ev.key.key == g_map.hotkey[IM_HK_LOAD]) {
-                    load_state(ev.key.mod & SDL_KMOD_SHIFT ? 2 : 1);
-                } else if (ev.key.key == g_map.hotkey[IM_HK_TURBO]) {
-                    nc_win_prop_set("debug.hakux.uncap", "1");  /* frames as fast as they come, while held */
-                    nc_win_prop_set("debug.hakux.fpscap", "0");
-                } else if (ev.key.key == g_map.hotkey[IM_HK_SHOT]) {
-                    screenshot();
-                } else if (ev.key.key == g_map.hotkey[IM_HK_MENU]) {
-                    ingame_menu(win, &paused, minimized);
+                /* the shortcuts (Settings > Shortcuts): the key with the
+                 * Ctrl and Alt it was set with (exactly), Shift too if it
+                 * was; Shift with quick save/load otherwise: slot 2 */
+                const uint8_t held = ((ev.key.mod & SDL_KMOD_CTRL) ? 1 : 0) | ((ev.key.mod & SDL_KMOD_ALT) ? 2 : 0) |
+                                     ((ev.key.mod & SDL_KMOD_SHIFT) ? 4 : 0);
+                if (ev.key.key == SDLK_RETURN && (held & 2) && !(held & 1)) {
+                    hotkey_do(win, IM_HK_FULL, true, 1, &paused, minimized);
+                    break;
+                }
+                for (int h = 0; h < IM_HOTKEYS; h++) {
+                    const uint8_t need = g_map.hk_mod[h];
+                    if (ev.key.key == g_map.hotkey[h] && (held & 3) == (need & 3) && (!(need & 4) || (held & 4))) {
+                        if (need & 3) {
+                            g_hk_eaten[ev.key.scancode] = true;   /* the game doesn't get the key */
+                            g_hk_any_eaten = true;
+                        }
+                        hotkey_do(win, h, true, (held & 4) && !(need & 4) ? 2 : 1, &paused, minimized);
+                        break;
+                    }
                 }
                 break;
+            }
             case SDL_EVENT_KEY_UP:
                 if (ev.key.key == g_map.hotkey[IM_HK_TURBO]) {
-                    nc_win_prop_set("debug.hakux.uncap", g_uncap ? "1" : "0");
-                    char cap[16];
-                    snprintf(cap, sizeof(cap), "%d", g_fps_cap);
-                    nc_win_prop_set("debug.hakux.fpscap", cap);
+                    hotkey_do(win, IM_HK_TURBO, false, 1, &paused, minimized);
                 }
                 break;
             case SDL_EVENT_GAMEPAD_BUTTON_DOWN: {
-                /* the menu: the Guide button, or Back with Start */
+                /* the controller's shortcuts: Guide with a button (Guide
+                 * alone, a tap: on its release, nothing else pressed), the
+                 * touchpad, Share; and the menu with Back and Start */
                 SDL_Gamepad *gp = SDL_GetGamepadFromID(ev.gbutton.which);
-                if (ev.gbutton.button == SDL_GAMEPAD_BUTTON_GUIDE ||
-                    (gp && SDL_GetGamepadButton(gp, SDL_GAMEPAD_BUTTON_BACK) &&
-                     SDL_GetGamepadButton(gp, SDL_GAMEPAD_BUTTON_START))) {
+                const int b = ev.gbutton.button;
+                int code = IM_HKP_NONE;
+                if (b == SDL_GAMEPAD_BUTTON_GUIDE) {
+                    g_guide_alone = true;
+                } else if (b == SDL_GAMEPAD_BUTTON_TOUCHPAD) {
+                    code = IM_HKP_TOUCHPAD;
+                } else if (b == SDL_GAMEPAD_BUTTON_MISC1) {
+                    code = IM_HKP_SHARE;
+                } else if (pad_guide_held(gp)) {
+                    code = IM_HKP_WITH + b;
+                    g_guide_alone = false;
+                } else if (gp && SDL_GetGamepadButton(gp, SDL_GAMEPAD_BUTTON_BACK) &&
+                           SDL_GetGamepadButton(gp, SDL_GAMEPAD_BUTTON_START)) {
                     ingame_menu(win, &paused, minimized);
+                }
+                for (int h = 0; code != IM_HKP_NONE && h < IM_HOTKEYS; h++) {
+                    if (g_map.hk_pad[h] == code) {
+                        g_pad_held_hk = h;
+                        g_pad_held_code = code;
+                        hotkey_do(win, h, true, 1, &paused, minimized);
+                        break;
+                    }
+                }
+                break;
+            }
+            case SDL_EVENT_GAMEPAD_BUTTON_UP: {
+                const int b = ev.gbutton.button;
+                if (b == SDL_GAMEPAD_BUTTON_GUIDE && g_guide_alone) {
+                    g_guide_alone = false;
+                    for (int h = 0; h < IM_HOTKEYS; h++) {
+                        if (g_map.hk_pad[h] == IM_HKP_GUIDE) {
+                            hotkey_do(win, h, true, 1, &paused, minimized);
+                            hotkey_do(win, h, false, 1, &paused, minimized);
+                            break;
+                        }
+                    }
+                }
+                /* a held shortcut (fast forward) ends with either button let go */
+                if (g_pad_held_hk >= 0 &&
+                    (b == SDL_GAMEPAD_BUTTON_GUIDE || IM_HKP_WITH + b == g_pad_held_code ||
+                     (b == SDL_GAMEPAD_BUTTON_TOUCHPAD && g_pad_held_code == IM_HKP_TOUCHPAD) ||
+                     (b == SDL_GAMEPAD_BUTTON_MISC1 && g_pad_held_code == IM_HKP_SHARE))) {
+                    hotkey_do(win, g_pad_held_hk, false, 1, &paused, minimized);
+                    g_pad_held_hk = -1;
                 }
                 break;
             }

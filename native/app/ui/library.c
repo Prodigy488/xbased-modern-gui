@@ -94,7 +94,7 @@ static void cover_path(const XdGame *g, char *out, size_t n)
  * 0), its name ("" for the disc's), then 1 if a favorite and when it was
  * last played (a time_t; both left out by older versions) */
 typedef struct {
-    char key[40];
+    char key[48];       /* user_key's */
     bool hidden, fav;
     char name[128];
     int64_t played;
@@ -216,25 +216,36 @@ static const char *cert_title(const LibGame *g)
  * keyed by the id alone, hiding one hid both. An older custom.txt's line
  * (the id and version alone) still applies to a game with none of its own,
  * and is where a new line starts from. */
-static void user_key(const LibGame *g, char *out, size_t n)
+static void user_key(const LibGame *g, char *out, size_t n, bool disc)
 {
     uint32_t h = 2166136261u;
     for (const unsigned char *t = (const unsigned char *)cert_title(g); *t; t++) {
         h = (h ^ (uint32_t)SDL_tolower(*t)) * 16777619u;
     }
-    snprintf(out, n, "%s#%08x", g->g.key, h);
+    if (disc && g->g.disc_sig) {
+        snprintf(out, n, "%s#%08x#%08x", g->g.key, h, g->g.disc_sig);   /* a modified disc its own */
+    } else {
+        snprintf(out, n, "%s#%08x", g->g.key, h);
+    }
 }
 
 /* L.mu held: the user's for g (made if want, from the id's own line) */
 static Custom *custom_get(const LibGame *g, bool want)
 {
-    char k[40];
-    user_key(g, k, sizeof(k));
+    char k[48], k2[48];
+    user_key(g, k, sizeof(k), true);
+    user_key(g, k2, sizeof(k2), false);
     Custom *c = custom_of(k, false);
     if (c || !want) {
+        if (!c) {
+            c = custom_of(k2, false);   /* a line from before the disc's signature */
+        }
         return c ? c : custom_of(g->g.key, false);
     }
-    const Custom *old = custom_of(g->g.key, false);
+    const Custom *old = custom_of(k2, false);
+    if (!old) {
+        old = custom_of(g->g.key, false);
+    }
     Custom from = old ? *old : (Custom){0};
     c = custom_of(k, true);
     if (c) {
@@ -338,13 +349,20 @@ static void insert(LibGame *g)
     L.by_path[h] = g;
 }
 
+/* two dumps of one disc, as far as their signatures tell (either unknown: alike) */
+static bool same_disc(const LibGame *a, const LibGame *b)
+{
+    return !a->g.disc_sig || !b->g.disc_sig || a->g.disc_sig == b->g.disc_sig;
+}
+
 static bool better(const LibGame *a, const LibGame *b)
 {
     return a->g.size != b->g.size ? a->g.size < b->g.size : strcmp(a->g.path, b->g.path) < 0;
 }
 
 /* L.mu held: one entry a game, version and regions shown, the smallest
- * file of those there (an XISO before a full dump of the same disc) */
+ * file of those there (an XISO before a full dump of the same disc); a
+ * modified disc of the same game (its own signature) an entry of its own */
 static void dedupe(LibGame *g)
 {
     g->dup = false;
@@ -355,7 +373,7 @@ static void dedupe(LibGame *g)
     for (int i = 0; i < L.n; i++) {
         LibGame *e = L.games[i];
         if (e->g.title_id == g->g.title_id && e->g.version == g->g.version && e->g.regions == g->g.regions &&
-            !SDL_strcasecmp(cert_title(e), cert_title(g))) {
+            !SDL_strcasecmp(cert_title(e), cert_title(g)) && same_disc(e, g)) {
             e->dup = true;
             if (!e->gone && (!best || better(e, best))) {
                 best = e;
@@ -383,6 +401,9 @@ static int cmp_key(const void *a, const void *b)
     if (t) {
         return t;
     }
+    if (x->g.disc_sig != y->g.disc_sig) {
+        return x->g.disc_sig < y->g.disc_sig ? -1 : 1;
+    }
     if (x->gone != y->gone) {
         return x->gone ? 1 : -1;
     }
@@ -401,7 +422,8 @@ static void dedupe_all(void)
     for (int i = 0; i < L.n; i++) {
         const bool first = !i || v[i]->g.title_id != v[i - 1]->g.title_id || v[i]->g.version != v[i - 1]->g.version ||
                            v[i]->g.regions != v[i - 1]->g.regions ||
-                           SDL_strcasecmp(cert_title(v[i]), cert_title(v[i - 1]));
+                           SDL_strcasecmp(cert_title(v[i]), cert_title(v[i - 1])) ||
+                           v[i]->g.disc_sig != v[i - 1]->g.disc_sig;
         v[i]->dup = v[i]->g.title_id && (!first || v[i]->gone);
     }
     free(v);
@@ -461,9 +483,9 @@ static void cache_load(const ScanArgs *a, const bool *there)
     }
     char line[1600];
     while (L.n < MAX_GAMES && fgets(line, sizeof(line), f)) {
-        char *fld[8];
+        char *fld[9];
         int k = 0;
-        for (char *s = line, *t; k < 8 && (t = tok(&s, "\t")); k++) {
+        for (char *s = line, *t; k < 9 && (t = tok(&s, "\t")); k++) {
             fld[k] = t;
         }
         if (k < 7) {
@@ -485,10 +507,13 @@ static void cache_load(const ScanArgs *a, const bool *there)
         g->version = (uint32_t)strtoul(fld[4], NULL, 10);
         g->regions = (uint32_t)strtoul(fld[5], NULL, 10);
         const char *title = fld[k - 1];
-        if (k == 8) {
+        if (k >= 8) {
             g->year = atoi(fld[6]);
+        }
+        if (k == 9) {
+            g->disc_sig = (uint32_t)strtoul(fld[7], NULL, 16);
         } else {
-            e->mtime = -1;      /* written before the year was: read again */
+            e->mtime = -1;      /* written before the year or the disc's signature were: read again */
         }
         snprintf(g->title, sizeof(g->title), "%.*s", (int)strcspn(title, "\r\n"), title);
         snprintf(g->key, sizeof(g->key), "%08X.%u", g->title_id, g->version);
@@ -524,8 +549,9 @@ static void cache_save(const ScanArgs *a)
                 continue;
             }
         }
-        fprintf(f, "%s\t%lld\t%lld\t%08X\t%u\t%u\t%d\t%s\n", g->g.path, (long long)g->g.size, (long long)g->mtime,
-                g->g.title_id, g->g.version, g->g.regions, g->g.year, g->orig[0] ? g->orig : g->g.title);
+        fprintf(f, "%s\t%lld\t%lld\t%08X\t%u\t%u\t%d\t%08X\t%s\n", g->g.path, (long long)g->g.size,
+                (long long)g->mtime, g->g.title_id, g->g.version, g->g.regions, g->g.year, g->g.disc_sig,
+                g->orig[0] ? g->orig : g->g.title);
     }
     SDL_UnlockMutex(L.mu);
     const bool ok = fclose(f) == 0;
@@ -892,7 +918,8 @@ UiTex *lib_cover(LibGame *g)
 /* the same game as g (its key), not merely two discs that couldn't be read */
 static bool same_game(const LibGame *e, const LibGame *g)
 {
-    return g->g.title_id && !strcmp(e->g.key, g->g.key) && !SDL_strcasecmp(cert_title(e), cert_title(g));
+    return g->g.title_id && !strcmp(e->g.key, g->g.key) && !SDL_strcasecmp(cert_title(e), cert_title(g)) &&
+           same_disc(e, g);
 }
 
 void lib_set_name(LibGame *g, const char *name)

@@ -47,6 +47,9 @@ void hle_present_set_crt(int kind);
 void hle_present_set_vsync(bool on);
 /* The frame rate shown in the window's corner, 0 none (any thread). */
 void hle_present_set_osd(float fps);
+/* The picture's pass cut to its middle cx by cy (clip space half sizes, 1:
+ * the whole window): the frame grown past its place shows no more of it. */
+void hle_present_set_clip(float cx, float cy);
 
 /* The overlay: the front end's interface composited over the picture by the
  * presenter itself (the in-game menu, the transitions, notices), so the

@@ -876,6 +876,14 @@ static void lose_window(void)
 static int g_crt;   /* the CRT filter's kind, 0 none */
 static float g_osd; /* the frame rate shown, 0 none */
 
+static float g_clip_x = 1.0f, g_clip_y = 1.0f;
+
+void hle_present_set_clip(float cx, float cy)
+{
+    g_clip_x = cx < 0.0f ? 0.0f : cx > 1.0f ? 1.0f : cx;
+    g_clip_y = cy < 0.0f ? 0.0f : cy > 1.0f ? 1.0f : cy;
+}
+
 void hle_present_set_osd(float fps)
 {
     g_osd = fps;
@@ -1197,6 +1205,29 @@ static void quad(VkCommandBuffer cb, PsFrame *f, unsigned set, VkPipeline p, VkI
                  const float pc[12], uint32_t w, uint32_t h)
 {
     quad_ds(cb, f, f->set[set], p, src, pc, w, h);
+}
+
+/* The picture's quad, cut to the clip rectangle (hle_present_set_clip):
+ * the window's axes, swapped for a display turned a quarter */
+static void quad_clipped(VkCommandBuffer cb, PsFrame *f, unsigned set, VkPipeline p, VkImageView src,
+                         const float pc[12], uint32_t w, uint32_t h)
+{
+    if (g_clip_x >= 1.0f && g_clip_y >= 1.0f) {
+        quad(cb, f, set, p, src, pc, w, h);
+        return;
+    }
+    const bool turned = fabsf(g_ps.rot[0]) < 0.5f;
+    const float cx = turned ? g_clip_y : g_clip_x, cy = turned ? g_clip_x : g_clip_y;
+    set_src(f, f->set[set], src);
+    VkViewport vp = { 0, 0, (float)w, (float)h, 0.0f, 1.0f };
+    const uint32_t sw = (uint32_t)(cx * (float)w + 0.5f), sh = (uint32_t)(cy * (float)h + 0.5f);
+    VkRect2D sc = { { (int32_t)((w - sw) / 2), (int32_t)((h - sh) / 2) }, { sw, sh } };
+    T.vkCmdBindPipeline(cb, VK_PIPELINE_BIND_POINT_GRAPHICS, p);
+    T.vkCmdSetViewport(cb, 0, 1, &vp);
+    T.vkCmdSetScissor(cb, 0, 1, &sc);
+    T.vkCmdBindDescriptorSets(cb, VK_PIPELINE_BIND_POINT_GRAPHICS, g_ps.pl, 0, 1, &f->set[set], 0, NULL);
+    T.vkCmdPushConstants(cb, g_ps.pl, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0, 48, pc);
+    T.vkCmdDraw(cb, 4, 1, 0, 0);
 }
 
 static void rendering(VkCommandBuffer cb, VkImageView v, uint32_t w, uint32_t h, bool clear)
@@ -1972,7 +2003,7 @@ void hle_present_end(float sx, float sy, bool fxaa, int upscale, bool average, u
             VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT);
     rendering(cb, g_ps.view[g_ps.idx], iw, ih, true);
     if (g_ps.have && !cover) {
-        quad(cb, f, SET_WINDOW, g_ps.pipe[p], from, pc, iw, ih);
+        quad_clipped(cb, f, SET_WINDOW, g_ps.pipe[p], from, pc, iw, ih);
         if (g_osd > 0 && g_ps.pipe[P_OSD]) {
             /* top left, 4 digits each 0.022 of the window's height wide */
             const float dh = 0.045f, dw = dh * 0.62f * (float)wh / (float)ww;
