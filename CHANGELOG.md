@@ -1,5 +1,19 @@
 # xbased changelog
 
+## 1.0.82 (2026-11)
+
+### Changes
+- A game that launches another executable or reboots the console, a state
+  being loaded, or a restart from the menu no longer swap the window. The
+  emulator still starts again underneath, but its window now lives inside
+  one window kept for the whole game session: the next run's picture comes
+  up inside it, under the last one, and takes over once it has drawn. The
+  taskbar button, the focus, the window's place and full screen stay as
+  they were. On Windows always; on Linux under X11 (on Wayland a program
+  can't hold another one's window, so there it works as before).
+  `frame=0` on the command line turns it off.
+- Starting a game in full screen no longer shows the desktop for a moment.
+
 ## 1.0.81 (2026-11)
 
 ### Fixes

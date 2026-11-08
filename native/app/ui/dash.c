@@ -22,11 +22,17 @@
 #endif
 
 #ifndef XBASED_VERSION
-#define XBASED_VERSION "1.0.81"
+#define XBASED_VERSION "1.0.82"
 #endif
 
 Dash D;
 static SDL_Window *g_win;
+static void (*g_fs_hook)(void);
+
+void dash_set_fullscreen_hook(void (*toggle)(void))
+{
+    g_fs_hook = toggle;
+}
 static UiTex *g_layer, *g_prev;   /* this screen's foreground, the last one's */
 static float g_trans = 1;               /* the transition's progress, 0-1 */
 static int g_trans_dir = 1;
@@ -329,7 +335,11 @@ static void poll_input(void)
             } else if (k == SDLK_Y || k == SDLK_TAB) {
                 in->y = true;
             } else if (k == SDLK_F11 || (k == SDLK_RETURN && (e.key.mod & SDL_KMOD_ALT))) {
-                SDL_SetWindowFullscreen(g_win, !(SDL_GetWindowFlags(g_win) & SDL_WINDOW_FULLSCREEN));
+                if (g_fs_hook) {
+                    g_fs_hook();
+                } else {
+                    SDL_SetWindowFullscreen(g_win, !(SDL_GetWindowFlags(g_win) & SDL_WINDOW_FULLSCREEN));
+                }
             }
             break;
         }

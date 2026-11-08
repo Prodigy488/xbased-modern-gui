@@ -20,6 +20,9 @@ int dash_run(SDL_Window *win, const char *exe);
  * be NULL), each frame, has the ones being changed, to show at once. */
 enum { DASH_INGAME_RESUME, DASH_INGAME_SAVE, DASH_INGAME_LOAD, DASH_INGAME_RESTART, DASH_INGAME_QUIT };
 struct Config;
+/* Full screen in the in-game menu (F11, Alt+Enter): this instead of the
+ * window's own, when the game's window is inside a frame (win_frame.h) */
+void dash_set_fullscreen_hook(void (*toggle)(void));
 int dash_ingame(SDL_Window *win, const char *key, const char *title, const char *frame_bmp, int *slot,
                 void (*live)(const struct Config *global, const struct Config *game));
 

@@ -37,6 +37,11 @@
 #include "native/app/ui/xbox_data.h"
 #include "native/app/ui/xemu_import.h"
 #include "native/app/win_aslr.h"
+#include "native/app/win_frame.h"
+#ifndef _WIN32
+#include <poll.h>
+#include <sys/wait.h>
+#endif
 #include "native/app/win_auto.h"
 #include "native/app/win_mods.h"
 #include "native/core/cheats.h"
@@ -325,8 +330,14 @@ static void give_foreground(bool to_dash)
  * dashboard waiting behind it. TerminateProcess skips that; what the run
  * wrote is written (stderr isn't buffered, files are closed as they go).
  * A code with bit 30 is a run started again (run_again): no dashboard. */
+static void *g_frame;   /* the session's frame (win_frame.h), NULL: the run's window on its own */
+static bool g_frame_keep;   /* this run ends for another (run_again): the frame stays */
+
 static _Noreturn void exit_now(int code)
 {
+    if (g_frame && !(code & 0x40000000) && !g_frame_keep) {
+        nc_frame_close(g_frame);    /* not a run started again: the session's end */
+    }
     fflush(NULL);
 #ifdef _WIN32
     give_foreground(!(code & 0x40000000));
@@ -386,14 +397,14 @@ static void run_again(const char *extra, bool hold)
     HANDLE ev = CreateEventA(NULL, TRUE, FALSE, ev_name);
     SetEnvironmentVariableA("XBASED_READY", ev ? ev_name : NULL);
     char rect[64] = "";
-    if (g_nw.sdl_window && !(SDL_GetWindowFlags(g_nw.sdl_window) & SDL_WINDOW_FULLSCREEN)) {
+    if (!g_frame && g_nw.sdl_window && !(SDL_GetWindowFlags(g_nw.sdl_window) & SDL_WINDOW_FULLSCREEN)) {
         int x = 0, y = 0, w = 0, h = 0;
         SDL_GetWindowPosition(g_nw.sdl_window, &x, &y);
         SDL_GetWindowSize(g_nw.sdl_window, &w, &h);
         snprintf(rect, sizeof(rect), "%d,%d,%d,%d", x, y, w, h);
     }
     SetEnvironmentVariableA("XBASED_RECT", rect[0] ? rect : NULL);
-    if (g_nw.hwnd) {
+    if (g_nw.hwnd && !g_frame) {
         SetWindowPos((HWND)g_nw.hwnd, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
     }
     PROCESS_INFORMATION pi;
@@ -405,7 +416,7 @@ static void run_again(const char *extra, bool hold)
          * exit code (bit 30 set) lets it follow the game on (dash.c) */
         exit_now((int)(0x40000000u | (pi.dwProcessId & 0x3FFFFFFFu)));
     }
-    if (g_nw.hwnd) {
+    if (g_nw.hwnd && !g_frame) {
         SetWindowPos((HWND)g_nw.hwnd, HWND_NOTOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
     }
 #else
@@ -434,6 +445,32 @@ static void run_again(const char *extra, bool hold)
     }
     argv[k] = NULL;
     fflush(stderr);
+    if (g_frame) {
+        /* inside the frame: the next run a process of its own, its window
+         * coming up under this one's, this one going once it has drawn
+         * (it writes to the pipe); exec'ing this one dropped its window */
+        int rp[2];
+        if (pipe(rp) == 0) {
+            char fd[16];
+            snprintf(fd, sizeof(fd), "%d", rp[1]);
+            setenv("XBASED_READY_FD", fd, 1);
+            const pid_t pid = fork();
+            if (pid == 0) {
+                close(rp[0]);
+                execv(exe, argv);
+                _exit(127);
+            }
+            close(rp[1]);
+            unsetenv("XBASED_READY_FD");
+            if (pid > 0) {
+                wait_next_run((void *)(intptr_t)(rp[0] + 1), (void *)(intptr_t)pid);
+                close(rp[0]);
+                g_frame_keep = true;
+                exit_now(0);
+            }
+            close(rp[0]);
+        }
+    }
     execv(exe, argv);
 #endif
     exit_now(0);
@@ -784,6 +821,8 @@ static double g_notice_t0;
 static char g_notice_file[MAX_PATH + 160];  /* shown once this is written (a picture) */
 #ifdef _WIN32
 static HANDLE g_ready_ev;       /* the run before this one waits on it (run_again) */
+#else
+static int g_ready_fd = -1;     /* the run before this one waits on it (run_again, inside the frame) */
 #endif
 
 static void ov_present(void)
@@ -844,8 +883,21 @@ static void wait_next_run(void *ev, void *proc)
         CloseHandle((HANDLE)ev);
     }
 #else
-    (void)ev;
-    (void)proc;
+    /* ev: the pipe's read end + 1, proc the next run's pid */
+    const int fd = (int)(intptr_t)ev - 1;
+    const pid_t pid = (pid_t)(intptr_t)proc;
+    const uint64_t until = SDL_GetTicks() + 15000;
+    while (fd >= 0 && SDL_GetTicks() < until) {
+        struct pollfd pf = {fd, POLLIN, 0};
+        if (poll(&pf, 1, 0) > 0 || waitpid(pid, NULL, WNOHANG) == pid) {
+            break;      /* drawn (a byte, or its end: gone) */
+        }
+        SDL_Event e;
+        while (SDL_PollEvent(&e)) {
+        }
+        ov_present();
+        SDL_Delay(4);
+    }
 #endif
 }
 
@@ -1217,7 +1269,7 @@ static const char *pick_disc(void)
 }
 
 #ifndef XBASED_VERSION
-#define XBASED_VERSION "1.0.81"
+#define XBASED_VERSION "1.0.82"
 #endif
 
 static void rm_tree(const char *path)
@@ -1311,6 +1363,10 @@ static void hotkey_do(SDL_Window *win, int h, bool down, int slot, bool *paused,
     }
     switch (h) {
     case IM_HK_FULL:
+        if (g_frame) {
+            nc_frame_toggle_fullscreen(g_frame);
+            break;
+        }
         fs_mode(win);
         SDL_SetWindowFullscreen(win, !(SDL_GetWindowFlags(win) & SDL_WINDOW_FULLSCREEN));
         break;
@@ -1341,9 +1397,18 @@ static void hotkey_do(SDL_Window *win, int h, bool down, int slot, bool *paused,
     }
 }
 
+/* The in-game menu's full screen key (dash.c): the frame's */
+static void frame_fullscreen(void)
+{
+    nc_frame_toggle_fullscreen(g_frame);
+}
+
 int main(int argc, char *argv[])
 {
 #ifdef _WIN32
+    if (argc > 1 && !strcmp(argv[1], "frame")) {
+        return nc_frame_main(argc, argv);      /* the game's frame (win_frame.h) */
+    }
     xb_aslr_check();    /* Windows' first memory where the guest's goes: run again without (win_aslr.h) */
 #endif
     /* The gamepads with the window in the background (the dashboard behind a
@@ -1378,6 +1443,18 @@ int main(int argc, char *argv[])
     for (int i = 0; i < g_nargs; i++) {
         again |= !strncmp(g_args[i], "loadstate=", 10);
     }
+#ifndef _WIN32
+    {
+        /* a game's run, X11: this process stays as the session's frame, a
+         * child of it goes on as the run (win_frame.h); frame=0, the
+         * dashboard or a disc to pick: as before */
+        const char *fv = opt_value("frame");
+        const char *fr = opt_value("fsrate");
+        if (disc && strcmp(disc, "none") && !opt_flag("pick") && (!fv || strcmp(fv, "0"))) {
+            nc_frame_fork(want_fullscreen(), fr && !strcmp(fr, "60"));
+        }
+    }
+#endif
     log_setup(opt_flag("console"), again);
     if (again) {
         nc_log("hakuX-app", "---- started again (%s)", opt_flag("relaunch") ? "the title's relaunch" : "a state loaded");
@@ -1555,17 +1632,31 @@ int main(int argc, char *argv[])
 #else
     const SDL_WindowFlags vk_flag = SDL_WINDOW_VULKAN; /* SDL_Vulkan_CreateSurface's (swapchain.c) */
 #endif
-    SDL_Window *win = SDL_CreateWindow(wtitle, 1280, 960, vk_flag | SDL_WINDOW_RESIZABLE | SDL_WINDOW_HIGH_PIXEL_DENSITY);
+    const SDL_WindowFlags hidden = SDL_WINDOW_HIDDEN;   /* shown inside the frame, or on its own below */
+    SDL_Window *win = SDL_CreateWindow(wtitle, 1280, 960,
+                                       vk_flag | SDL_WINDOW_RESIZABLE | SDL_WINDOW_HIGH_PIXEL_DENSITY | hidden);
     if (!win) {
         fatal_box("xbased", SDL_GetError());
         return 1;
     }
-    fs_mode(win);       /* the full screen's mode before it's full screen */
-    if (want_fullscreen()) {
-        SDL_SetWindowFullscreen(win, true);
-    }
-    SDL_HideCursor();   /* the game doesn't use the mouse */
     {
+        /* the session's frame (win_frame.h): a run started again comes up
+         * inside the same window; frame=0 the run's window on its own */
+        const char *fv = opt_value("frame");
+        if (!fv || strcmp(fv, "0")) {
+            g_frame = nc_frame_get(wtitle, want_fullscreen(), g_fs60);
+        }
+        if (g_frame) {
+            nc_frame_adopt(g_frame, win, wtitle);
+            dash_set_fullscreen_hook(frame_fullscreen);
+            nc_log("hakuX-app", "window: inside the session's frame");
+        }
+    }
+    if (!g_frame) {
+        fs_mode(win);       /* the full screen's mode before it's full screen */
+        if (want_fullscreen()) {
+            SDL_SetWindowFullscreen(win, true);
+        }
         /* the run before's window's place (run_again), windowed */
         const char *r = getenv("XBASED_RECT");
         int x, y, w, h;
@@ -1574,7 +1665,9 @@ int main(int argc, char *argv[])
             SDL_SetWindowSize(win, w, h);
             SDL_SetWindowPosition(win, x, y);
         }
+        SDL_ShowWindow(win);
     }
+    SDL_HideCursor();   /* the game doesn't use the mouse */
     SDL_PropertiesID props = SDL_GetWindowProperties(win);
     g_nw.hwnd = SDL_GetPointerProperty(props, SDL_PROP_WINDOW_WIN32_HWND_POINTER, NULL);
     g_nw.hinstance = SDL_GetPointerProperty(props, SDL_PROP_WINDOW_WIN32_INSTANCE_POINTER, NULL);
@@ -1619,6 +1712,11 @@ int main(int argc, char *argv[])
         SetEnvironmentVariableA("XBASED_RECT", NULL);
 #else
         unsetenv("XBASED_HOLD");
+        const char *rf = getenv("XBASED_READY_FD");
+        if (rf && rf[0]) {
+            g_ready_fd = atoi(rf);
+        }
+        unsetenv("XBASED_READY_FD");
 #endif
     }
     nc_vsync_start();
@@ -1799,7 +1897,27 @@ int main(int argc, char *argv[])
         if (minimized || g_nw.width <= 0 || !nc_present_frame(&g_nw)) {
             SDL_Delay(8); /* nothing to wait for the display on */
         }
-#ifdef _WIN32
+        static bool raised;
+        if (g_frame && !raised && hle_present_count() > 0) {
+            raised = true;
+            nc_frame_raise(g_frame, win);   /* over the run before's, which goes next */
+        }
+        if (g_frame) {
+            const bool m = nc_frame_minimized(g_frame);
+            if (m != minimized) {
+                minimized = m;      /* a child window hears nothing of its frame's minimizing */
+                nc_kernel_set_paused(&g_core.kernel, paused || minimized);
+                nc_audio_set_paused(paused || minimized);
+            }
+        }
+#ifndef _WIN32
+        if (g_ready_fd >= 0 && hle_present_count() > 0) {
+            if (write(g_ready_fd, "1", 1) < 0) {
+            }
+            close(g_ready_fd);  /* drawn: the run before may go */
+            g_ready_fd = -1;
+        }
+#else
         if (g_ready_ev && hle_present_count() > 0) {
             SetEvent(g_ready_ev);   /* drawn: the run before may go */
             CloseHandle(g_ready_ev);
