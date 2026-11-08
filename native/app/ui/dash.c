@@ -22,7 +22,7 @@
 #endif
 
 #ifndef XBASED_VERSION
-#define XBASED_VERSION "1.0.82"
+#define XBASED_VERSION "1.0.83"
 #endif
 
 Dash D;
@@ -1156,6 +1156,7 @@ static void go_spawn(void)
         quote_arg(cmd, n, sizeof(cmd), g_go.extra);
     }
     PROCESS_INFORMATION pi;
+    AllowSetForegroundWindow(ASFW_ANY);     /* the game's window, and its frame's process, may take it */
     if (xb_spawn(D.exe, cmd, NULL, &pi)) {
         CloseHandle(pi.hThread);
         g_follow = pi.hProcess;

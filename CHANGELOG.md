@@ -1,5 +1,12 @@
 # xbased changelog
 
+## 1.0.83 (2026-11)
+
+### Fixes
+- Starting a game no longer shows the taskbar for a moment on Windows. The
+  game's window asked for the foreground before it was allowed to, so
+  Windows flashed its taskbar button instead.
+
 ## 1.0.82 (2026-11)
 
 ### Changes

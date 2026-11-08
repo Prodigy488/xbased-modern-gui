@@ -284,10 +284,14 @@ void *nc_frame_get(const char *title, bool fullscreen, bool fs60)
     memset(&si, 0, sizeof(si));
     si.cb = sizeof(si);
     PROCESS_INFORMATION pi;
-    if (!CreateProcessA(exe, cmd, NULL, NULL, FALSE, 0, NULL, NULL, &si, &pi)) {
+    /* suspended until it may take the foreground: up first, it asked before
+     * this process let it, Windows refused and flashed its taskbar button
+     * instead (the taskbar over the full screen for a moment) */
+    if (!CreateProcessA(exe, cmd, NULL, NULL, FALSE, CREATE_SUSPENDED, NULL, NULL, &si, &pi)) {
         return NULL;
     }
-    AllowSetForegroundWindow(pi.dwProcessId);   /* it takes the foreground this process was given */
+    AllowSetForegroundWindow(pi.dwProcessId);
+    ResumeThread(pi.hThread);
     CloseHandle(pi.hThread);
     char cls[96];
     snprintf(cls, sizeof(cls), "xbased_frame_%s", token);
@@ -302,6 +306,7 @@ void *nc_frame_get(const char *title, bool fullscreen, bool fs60)
     }
     CloseHandle(pi.hProcess);
     if (h) {
+        SetForegroundWindow(h);     /* this process may (the dashboard started it): the frame's in front */
         char v[32];
         snprintf(v, sizeof(v), "%llx", (unsigned long long)(uintptr_t)h);
         SetEnvironmentVariableA("XBASED_FRAME_HWND", v);   /* the runs this one starts: the same frame */
