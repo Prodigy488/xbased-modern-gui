@@ -911,6 +911,9 @@ static void apply_cfg(const Config *global, const Config *game, bool sound)
         if ((v = cfg_get(c, "crt"))) {
             hle_present_set_crt(atoi(v));
         }
+        if ((v = cfg_get(c, "vsync"))) {
+            hle_present_set_vsync(atoi(v) != 0);
+        }
         if ((v = cfg_get(c, "showfps"))) {
             nc_present_set_show_fps(atoi(v) != 0);
         }
@@ -1114,7 +1117,7 @@ static const char *pick_disc(void)
 }
 
 #ifndef XBASED_VERSION
-#define XBASED_VERSION "1.0.75"
+#define XBASED_VERSION "1.0.76"
 #endif
 
 static void rm_tree(const char *path)
@@ -1285,6 +1288,16 @@ int main(int argc, char *argv[])
         if (g_disc_fd < 0) {
             nc_log("hakuX-app", "can't open the disc %s", g_disc);
         }
+    } else {
+        /* the controls as a game's (game_options), xbased.ini's alone: left
+         * unresolved, the Xbox dashboard got no controller until the in-game
+         * menu resolved them on Resume (#124) */
+        char path[MAX_PATH + 16];
+        snprintf(path, sizeof(path), "%sxbased.ini", g_data_dir);
+        Config global, none;
+        cfg_load(&global, path);
+        memset(&none, 0, sizeof(none));
+        im_resolve(&g_map, &global, &none);
     }
     char hdd[1024];
     const char *hv = opt_value("hdd");
@@ -1351,6 +1364,8 @@ int main(int argc, char *argv[])
             nc_present_set_upscale(nc_upscale_from_name(a + 8));
         } else if (!strncmp(a, "crt=", 4)) {
             hle_present_set_crt(atoi(a + 4));
+        } else if (!strncmp(a, "vsync=", 6)) {
+            hle_present_set_vsync(atoi(a + 6) != 0);
         } else if (!strncmp(a, "volume=", 7)) {
             g_volume = atoi(a + 7) / 100.0f;
             nc_audio_set_volume(g_volume);

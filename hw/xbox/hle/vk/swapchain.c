@@ -690,6 +690,8 @@ static void drop_window(void)
     g_ps.win = NULL;
 }
 
+static bool g_vsync;               /* hle_present_set_vsync */
+
 static bool make_swapchain(uint32_t w, uint32_t h)
 {
     VkSurfaceCapabilitiesKHR caps;
@@ -754,6 +756,22 @@ static bool make_swapchain(uint32_t w, uint32_t h)
     VkCompositeAlphaFlagBitsKHR ca = (caps.supportedCompositeAlpha & VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR)
                                          ? VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR
                                          : VK_COMPOSITE_ALPHA_INHERIT_BIT_KHR;
+    VkPresentModeKHR pm = VK_PRESENT_MODE_FIFO_KHR;
+    if (!g_vsync) {
+        uint32_t nm = 0;
+        VkPresentModeKHR modes[16];
+        if (vkGetPhysicalDeviceSurfacePresentModesKHR(g_hvk.phys, g_ps.surf, &nm, NULL) == VK_SUCCESS) {
+            nm = MIN(nm, 16u);
+            vkGetPhysicalDeviceSurfacePresentModesKHR(g_hvk.phys, g_ps.surf, &nm, modes);
+        }
+        for (uint32_t i = 0; i < nm; i++) {
+            if (modes[i] == VK_PRESENT_MODE_IMMEDIATE_KHR) {
+                pm = modes[i];
+            } else if (modes[i] == VK_PRESENT_MODE_MAILBOX_KHR && pm == VK_PRESENT_MODE_FIFO_KHR) {
+                pm = modes[i];
+            }
+        }
+    }
     VkSwapchainKHR old = g_ps.sc;
     if (old) {
         idle();
@@ -766,7 +784,7 @@ static bool make_swapchain(uint32_t w, uint32_t h)
         .imageUsage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT |
                       (g_ps.shot_can ? VK_IMAGE_USAGE_TRANSFER_SRC_BIT : 0),
         .imageSharingMode = VK_SHARING_MODE_EXCLUSIVE, .preTransform = tf, .compositeAlpha = ca,
-        .presentMode = VK_PRESENT_MODE_FIFO_KHR, .clipped = VK_TRUE, .oldSwapchain = old };
+        .presentMode = pm, .clipped = VK_TRUE, .oldSwapchain = old };
     VkSwapchainKHR sc = VK_NULL_HANDLE;
     VkResult r = T.vkCreateSwapchainKHR(g_hvk.dev, &ci, NULL, &sc);
     drop_images();
@@ -778,6 +796,12 @@ static bool make_swapchain(uint32_t w, uint32_t h)
         g_ps.sc = VK_NULL_HANDLE;
         hle_log("hakuX-hle-back", "present: vkCreateSwapchainKHR %ux%u: %d", w, h, r);
         return false;
+    }
+    static VkPresentModeKHR s_told = (VkPresentModeKHR)-1;
+    if (pm != s_told) {
+        s_told = pm;
+        hle_log("hakuX-hle-back", "present: V-Sync %s", pm == VK_PRESENT_MODE_FIFO_KHR ? "on" :
+                pm == VK_PRESENT_MODE_IMMEDIATE_KHR ? "off (immediate)" : "off (mailbox)");
     }
     uint32_t ni = 0;
     VkResult ri = T.vkGetSwapchainImagesKHR(g_hvk.dev, sc, &ni, NULL);
@@ -848,6 +872,20 @@ static float g_osd; /* the frame rate shown, 0 none */
 void hle_present_set_osd(float fps)
 {
     g_osd = fps;
+}
+
+/* V-Sync: on (FIFO, the default), or off for whoever likes tearing
+ * (IMMEDIATE, else MAILBOX, else FIFO: what the surface has). A change
+ * makes the swapchain again at the next frame. The emulated display's
+ * 60 Hz paces the frames either way (present.c). */
+static bool g_vsync = true;
+
+void hle_present_set_vsync(bool on)
+{
+    if (on != g_vsync) {
+        g_vsync = on;
+        g_ps.stale = true;
+    }
 }
 
 void hle_present_set_crt(int kind)

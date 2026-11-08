@@ -1,5 +1,24 @@
 # xbased changelog
 
+## 1.0.76 (2026-11)
+
+### New
+- A Vertical sync setting (Settings, Video), on by default. Off, frames are
+  shown as soon as they're ready, with tearing.
+
+### Fixes
+- The Xbox dashboard (Settings, Online) took no controller or keyboard until
+  the in-game menu was opened and closed.
+- The library's bottom line shows the game's region and version, and two
+  games with the same name show theirs on their tiles, so different releases
+  can be told apart without opening them. The game's page lists its title
+  ID, version, region, publisher, year and size under the cover, no longer
+  running under the menu beside it. The separator between publisher and year
+  no longer shows as garbled characters.
+- The on-screen keyboard's highlight follows the mouse on mice that report
+  small steps. It stayed on the key the pointer had left while the click
+  typed the one under it.
+
 ## 1.0.75 (2026-11)
 
 ### Changes

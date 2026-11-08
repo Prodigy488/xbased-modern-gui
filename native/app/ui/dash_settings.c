@@ -205,6 +205,7 @@ void scr_settings(void)
         rows_video(&l);
         opt_bool(&l, S_FULLSCREEN, "fullscreen", true, true);
         opt_bool(&l, S_SHOW_FPS, "showfps", false, false);
+        opt_bool(&l, S_VSYNC, "vsync", true, false);
         break;
     case 1: {
         /* the console's audio setting and the speakers it plays on: stereo,

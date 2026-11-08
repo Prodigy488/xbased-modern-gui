@@ -43,6 +43,8 @@ void hle_present_shot(const char *path);
 /* The CRT filter on the window's picture: 0 none, 1 soft scanlines, 2 a
  * TV, 3 an arcade monitor (any thread; the next refresh). */
 void hle_present_set_crt(int kind);
+/* V-Sync on (the default) or off (tearing): applied at the next frame */
+void hle_present_set_vsync(bool on);
 /* The frame rate shown in the window's corner, 0 none (any thread). */
 void hle_present_set_osd(float fps);
 

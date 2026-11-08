@@ -1,5 +1,5 @@
 /*
- * hakuX front end ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â the dashboard (dash.h): its loop, input, lists, and
+ * hakuX front end — the dashboard (dash.h): its loop, input, lists, and
  * the main, games and game screens. Settings, controls, memory and online
  * are in dash_settings.c, dash_memory.c.
  */
@@ -22,7 +22,7 @@
 #endif
 
 #ifndef XBASED_VERSION
-#define XBASED_VERSION "1.0.75"
+#define XBASED_VERSION "1.0.76"
 #endif
 
 Dash D;
@@ -340,14 +340,21 @@ static void poll_input(void)
         case SDL_EVENT_TEXT_INPUT:
             in->text = e.text.text;
             break;
-        case SDL_EVENT_MOUSE_MOTION:
-            /* a real move, not the window appearing under the pointer */
-            if (fabsf(e.motion.xrel) + fabsf(e.motion.yrel) >= 2) {
+        case SDL_EVENT_MOUSE_MOTION: {
+            /* a real move, not the window appearing under the pointer: 2 pixels
+             * in all, events added up (a mouse that reports often sends 1-pixel
+             * steps, and judged one at a time a slow move never counted: the
+             * highlight stayed on the key it had left, #147) */
+            static float s_moved;
+            s_moved += fabsf(e.motion.xrel) + fabsf(e.motion.yrel);
+            if (s_moved >= 2) {
+                s_moved = 0;
                 in->moved = true;
                 in->pad = false;
                 cursor(true);
             }
             break;
+        }
         case SDL_EVENT_MOUSE_BUTTON_DOWN:
             in->pad = false;
             cursor(true);
@@ -1430,6 +1437,28 @@ static void draw_star(float cx, float cy, float r, float alpha)
     }
 }
 
+/* The regions a disc's certificate allows, as the console's names */
+static const char *region_text(uint32_t regions)
+{
+    static const char *const k_reg[8] = {"-", "NTSC-U", "NTSC-J", "NTSC-U/J", "PAL", "NTSC-U/PAL",
+                                         "NTSC-J/PAL", "World"};
+    return k_reg[regions & 7];
+}
+
+/* Another game in the library has g's name (two releases, two versions):
+ * its tile tells them apart by region and version */
+static bool title_repeats(const LibGame *g)
+{
+    const int n = lib_count();
+    for (int i = 0; i < n; i++) {
+        const LibGame *o = lib_get(i);
+        if (o && o != g && !o->hidden && !SDL_strcasecmp(o->g.title, g->g.title)) {
+            return true;
+        }
+    }
+    return false;
+}
+
 /* the icons view's tile: the disc's icon, the title, the publisher and year under */
 static void draw_tile(LibGame *g, float x, float y, float w, float h, bool sel, float alpha)
 {
@@ -1454,8 +1483,12 @@ static void draw_tile(LibGame *g, float x, float y, float w, float h, bool sel, 
                 UI_ALIGN_LEFT, tw);
     char info[120];
     const char *pub = lib_publisher(g);
-    if (g->g.year) {
-        snprintf(info, sizeof(info), "%s%s%d", pub, *pub ? " Ã‚Â· " : "", g->g.year);
+    if (title_repeats(g)) {
+        /* the same name twice: what tells them apart, region and version */
+        snprintf(info, sizeof(info), "%s · v%u%s%.0d", region_text(g->g.regions), g->g.version,
+                 g->g.year ? " · " : "", g->g.year);
+    } else if (g->g.year) {
+        snprintf(info, sizeof(info), "%s%s%d", pub, *pub ? " · " : "", g->g.year);
     } else {
         snprintf(info, sizeof(info), "%s", pub);
     }
@@ -1725,8 +1758,8 @@ static void scr_games(void)
         if (g->g.year) {
             snprintf(year, sizeof(year), "%d  ", g->g.year);
         }
-        snprintf(info, sizeof(info), "%s%s%s%08X  v%u  %.1f GB", pub, *pub ? "  " : "", year, g->g.title_id,
-                 g->g.version, g->g.size / 1073741824.0);
+        snprintf(info, sizeof(info), "%s%s%s%s  v%u  %.1f GB", pub, *pub ? "  " : "", year,
+                 region_text(g->g.regions), g->g.version, g->g.size / 1073741824.0);
         ui_text_fit(W - 60, H - 120, info, 20, UI_FONT_REGULAR, UI_GREY, UI_ALIGN_RIGHT, 480);
         if (D.in.ok) {
             open_game(g);
@@ -1818,17 +1851,20 @@ static void scr_game(void)
     const float ch = H - 300, cw = ch * 0.7f;
     draw_card(g, 70, 150, cw, ch, false, ease(D.anim * 4));
     /* the facts under the cover */
-    char info[200];
-    static const char *const k_reg[8] = {"-", "NTSC-U", "NTSC-J", "NTSC-U/J", "PAL", "NTSC-U/PAL", "NTSC-J/PAL",
-                                         "World"};
+    /* the facts under the cover, a line each, as wide as its column (one
+     * line under the whole screen ran under the menu beside it) */
+    char info[3][160];
     const char *pub = lib_publisher(g);
+    snprintf(info[0], sizeof(info[0]), "%s %08X   v%u", T(S_TITLE_ID), g->g.title_id, g->g.version);
+    snprintf(info[1], sizeof(info[1]), "%s %s", T(S_REGION), region_text(g->g.regions));
     char year[16] = "";
     if (g->g.year) {
-        snprintf(year, sizeof(year), "   %d", g->g.year);
+        snprintf(year, sizeof(year), "%s%d", *pub ? "   " : "", g->g.year);
     }
-    snprintf(info, sizeof(info), "%s %08X   v%u   %s %s%s%s%s", T(S_TITLE_ID), g->g.title_id, g->g.version,
-             T(S_REGION), k_reg[g->g.regions & 7], *pub ? "   " : "", pub, year);
-    ui_text_fit(70, 160 + ch, info, 18, UI_FONT_REGULAR, UI_GREY, UI_ALIGN_LEFT, W - 140);
+    snprintf(info[2], sizeof(info[2]), "%s%s   %.1f GB", pub, year, g->g.size / 1073741824.0);
+    for (int i = 0; i < 3; i++) {
+        ui_text_fit(70, 160 + ch + 26 * i, info[i], 18, UI_FONT_REGULAR, UI_GREY, UI_ALIGN_LEFT, cw + 20);
+    }
     List l;
     list_begin(&l, 110 + cw, 150, W - 180 - cw, ch, 60);
     if (list_row(&l, T(S_PLAY), NULL, NULL)) {
