@@ -1914,6 +1914,22 @@ int main(int argc, char *argv[])
             }
             pointer_hide();     /* the game doesn't draw one: a message box, a focus change or a mouse move shows it again */
         }
+        {
+            /* Windows only changes the pointer when the mouse moves, and SDL only acts on a window it has
+             * seen the mouse in: with a controller, or a mouse left alone, the one the dashboard showed can
+             * stay on the game. So it is set again a few times a second. */
+            static Uint64 last_hide;
+            const Uint64 now_ms = SDL_GetTicks();
+            if (now_ms - last_hide >= 150) {
+                last_hide = now_ms;
+                pointer_hide();
+#ifdef _WIN32
+                if (focused) {
+                    SetCursor(NULL);
+                }
+#endif
+            }
+        }
         update_pads(focused);
         state_request_poll();
 
