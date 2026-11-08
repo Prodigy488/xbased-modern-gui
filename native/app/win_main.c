@@ -52,6 +52,7 @@
 
 #include <SDL3/SDL.h>
 #include <SDL3/SDL_main.h>
+#include <dirent.h>
 #include <fcntl.h>
 #include <pthread.h>
 #include <stdlib.h>
@@ -1113,8 +1114,76 @@ static const char *pick_disc(void)
 }
 
 #ifndef XBASED_VERSION
-#define XBASED_VERSION "1.0.74"
+#define XBASED_VERSION "1.0.75"
 #endif
+
+static void rm_tree(const char *path)
+{
+    DIR *d = opendir(path);
+    if (!d) {
+        remove(path);
+        return;
+    }
+    struct dirent *e;
+    while ((e = readdir(d))) {
+        if (!strcmp(e->d_name, ".") || !strcmp(e->d_name, "..")) {
+            continue;
+        }
+        char p[1400];
+        snprintf(p, sizeof(p), "%s/%s", path, e->d_name);
+        struct stat st;
+        if (!stat(p, &st) && S_ISDIR(st.st_mode)) {
+            rm_tree(p);
+        } else {
+            remove(p);
+        }
+    }
+    closedir(d);
+    rmdir(path);
+}
+
+/* The shader caches (hle_spirv*, hle_pipeline_cache, hle_pipelines) from
+ * another version go: each update starts them again, so nothing a build
+ * before kept is used (they are keyed by their content, and old entries
+ * only took space). The version they were made with: hle/version.txt. */
+static void shader_cache_by_version(const char *base)
+{
+    if (!base) {
+        return;
+    }
+    char vf[1200], seen[64] = "";
+    snprintf(vf, sizeof(vf), "%s/version.txt", base);
+    FILE *f = fopen(vf, "r");
+    if (f) {
+        if (fgets(seen, sizeof(seen), f)) {
+            seen[strcspn(seen, "\r\n")] = 0;
+        }
+        fclose(f);
+    }
+    if (!strcmp(seen, XBASED_VERSION)) {
+        return;
+    }
+    DIR *d = opendir(base);
+    if (d) {
+        struct dirent *e;
+        while ((e = readdir(d))) {
+            if (!strncmp(e->d_name, "hle_spirv", 9) || !strcmp(e->d_name, "hle_pipeline_cache") ||
+                !strcmp(e->d_name, "hle_pipelines")) {
+                char p[1300];
+                snprintf(p, sizeof(p), "%s/%s", base, e->d_name);
+                rm_tree(p);
+            }
+        }
+        closedir(d);
+    }
+    f = fopen(vf, "w");
+    if (f) {
+        fprintf(f, "%s\n", XBASED_VERSION);
+        fclose(f);
+    }
+    nc_log("hakuX-app", "shader caches of %s cleared (%s)", seen[0] ? seen : "an earlier version",
+           XBASED_VERSION);
+}
 #ifdef _WIN32
 #define NC_PLATFORM_NAME "Windows"
 #else
@@ -1239,6 +1308,7 @@ int main(int argc, char *argv[])
         snprintf(base, sizeof(base), "%s/../hle", hdd);
         mkdir(base, 0775);
         setenv("HAKUX_NATIVE_BASE", base, 0);
+        shader_cache_by_version(getenv("HAKUX_NATIVE_BASE"));
     }
 
     NcOptions opt;

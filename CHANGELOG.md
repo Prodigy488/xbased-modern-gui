@@ -1,5 +1,12 @@
 # xbased changelog
 
+## 1.0.75 (2026-11)
+
+### Changes
+- The shader caches are cleared the first time a new version starts, so
+  each update builds its shaders again and none kept from an older version
+  is used.
+
 ## 1.0.74 (2026-11)
 
 ### Changes
