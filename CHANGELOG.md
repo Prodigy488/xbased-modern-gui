@@ -1,5 +1,10 @@
 # xbased changelog
 
+## 1.0.76.3 (Modern GUI fork)
+
+- The mouse pointer stays hidden while a game runs (it could come back after a message box, a focus
+  change or moving the mouse), with the keyboard and mouse or a controller.
+
 ## 1.0.76.2 (Modern GUI fork)
 
 - Fixed "your Xbox doesn't have enough free blocks" in games: with a hard disk size set in Settings >

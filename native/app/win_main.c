@@ -1362,7 +1362,7 @@ static const char *pick_disc(void)
 }
 
 #ifndef XBASED_VERSION
-#define XBASED_VERSION "1.0.76.2"
+#define XBASED_VERSION "1.0.76.3"
 #endif
 
 static void rm_tree(const char *path)
@@ -1875,6 +1875,9 @@ int main(int argc, char *argv[])
         nc_auto_tick();
         if (nc_auto_take_menu()) {
             ingame_menu(win, &paused, minimized);
+        }
+        if (SDL_CursorVisible()) {
+            SDL_HideCursor();   /* the game doesn't draw one: a message box, a focus change or a mouse move shows it again */
         }
         update_pads(focused);
         state_request_poll();
