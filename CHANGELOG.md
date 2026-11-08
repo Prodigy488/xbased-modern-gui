@@ -1,5 +1,25 @@
 # xbased changelog
 
+## 1.0.78 (2026-11)
+
+### Fixes
+- Now and then, for a single frame, part of a scene was drawn with another
+  part's camera or vertices: a view from somewhere else, large black or
+  stretched polygons, a piece of a character or of the scenery flung across
+  the screen (Prince of Persia: Warrior Within's ship, most often in
+  fights). The memory holding a draw's vertices and constants could be
+  handed to other data before the GPU drew it, when the emulator had to
+  wait for the GPU while it was still preparing that draw.
+- Two copies into the same image (glow effects) could run in either order.
+- A texture made from a render target could show the image the target had
+  before it was recreated, on the frames already being drawn.
+- A rare CPU translation error when a game popped a value into memory the
+  emulator was watching.
+
+### Changes
+- The Windows download is smaller: its executable no longer carries debug
+  information.
+
 ## 1.0.77 (2026-11)
 
 ### Fixes

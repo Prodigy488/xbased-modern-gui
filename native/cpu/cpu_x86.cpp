@@ -901,12 +901,19 @@ struct Translator {
                 }
                 return CONTINUE;
             }
-            a.op(ZYDIS_MNEMONIC_MOV, {R(ZYDIS_REGISTER_R13D), M(ZYDIS_REGISTER_R12D, 0, 4)}, true);
-            esp_add(4);
+            /* the store before ESP moves: a store that faults (a write-
+             * watched page) restarts the instruction from the frame the
+             * fault saw, which must not have ESP popped already (a second
+             * pop then, of the next slot). The address is the one after
+             * the pop (ESP + 4 as the base); the value in R14, as an FS
+             * operand's address takes R13. */
+            a.op(ZYDIS_MNEMONIC_MOV, {R(ZYDIS_REGISTER_R14D), M(ZYDIS_REGISTER_R12D, 0, 4)}, true);
             ZydisEncoderOperand m;
-            if (!mem_operand(o0, m) || !a.op(ZYDIS_MNEMONIC_MOV, {m, R(ZYDIS_REGISTER_R13D)}, true)) {
+            const int64_t after = o0.mem.base == ZYDIS_REGISTER_ESP ? 4 : 0;
+            if (!mem_operand(o0, m, after) || !a.op(ZYDIS_MNEMONIC_MOV, {m, R(ZYDIS_REGISTER_R14D)}, true)) {
                 return FAIL;
             }
+            esp_add(4);
             return CONTINUE;
         }
         case ZYDIS_MNEMONIC_PUSHAD:

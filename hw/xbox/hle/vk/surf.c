@@ -711,6 +711,12 @@ void hle_surf_transition(VkCommandBuffer cb, HleVkSurf *s, VkImageLayout to)
     if (s->layout != to) {
         hle_img_barrier(cb, s->img, s->aspect, s->layout, to);
         s->layout = to;
+    } else if (to == VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL) {
+        /* a transfer after a transfer into it (a blit, then a copy over
+         * it): the second one's writes after the first one's. The layout
+         * stays, which made no barrier, and the two ran in either order
+         * (the synchronization validation's write after write). */
+        hle_img_barrier(cb, s->img, s->aspect, to, to);
     }
 }
 
