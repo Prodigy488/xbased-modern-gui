@@ -3,15 +3,14 @@
 </p>
 
 <p align="center">
-  <b>The original Xbox, on your PC.</b><br>
-  xbased is an original Xbox emulator for Windows and Linux, developed by <b>crazyriddler</b>.<br>
-  Free and open source, with a console-style dashboard. Based on <a href="https://github.com/rfandango/hakuX">hakuX</a>.
+  <b>xbased Modern GUI: the original Xbox on your PC, with a refreshed dashboard.</b><br>
+  A fork of <a href="https://github.com/crazyriddler/xbased">xbased</a> by <b>crazyriddler</b>, which is based on <a href="https://github.com/rfandango/hakuX">hakuX</a>.<br>
+  Free and open source.
 </p>
 
 <p align="center">
-  <a href="https://github.com/crazyriddler/xbased/releases/latest"><img src="https://img.shields.io/github/v/release/crazyriddler/xbased?style=for-the-badge&color=6fd12a&labelColor=0b1a06&label=download" alt="Download"></a>
+  <a href="https://github.com/Prodigy488/xbased-modern-gui/releases/latest"><img src="https://img.shields.io/github/v/release/Prodigy488/xbased-modern-gui?style=for-the-badge&color=6fd12a&labelColor=0b1a06&label=download" alt="Download"></a>
   <img src="https://img.shields.io/badge/Windows-x64-6fd12a?style=for-the-badge&labelColor=0b1a06&logo=windows&logoColor=white" alt="Windows x64">
-  <img src="https://img.shields.io/badge/Linux-AppImage-6fd12a?style=for-the-badge&labelColor=0b1a06&logo=linux&logoColor=white" alt="Linux AppImage">
   <img src="https://img.shields.io/badge/Vulkan-renderer-6fd12a?style=for-the-badge&labelColor=0b1a06&logo=vulkan&logoColor=white" alt="Vulkan">
   <a href="COPYING"><img src="https://img.shields.io/badge/license-GPL--3.0-6fd12a?style=for-the-badge&labelColor=0b1a06" alt="GPL-3.0"></a>
 </p>
@@ -25,9 +24,10 @@
   <a href="#credits">Credits</a>
 </p>
 
-> **Modern GUI fork.** This is an unofficial fork of [xbased](https://github.com/crazyriddler/xbased)
-> by crazyriddler (itself based on [hakuX](https://github.com/rfandango/hakuX)), kept in step with
-> upstream. It is not supported by the xbased project. What it adds: 11 dashboard styles in 3 themes,
+> **About this fork.** This is an unofficial fork of [xbased](https://github.com/crazyriddler/xbased)
+> by crazyriddler (itself based on [hakuX](https://github.com/rfandango/hakuX)), currently on
+> upstream 1.0.76. It is not made or supported by the xbased project: please report problems with
+> this build [here](https://github.com/Prodigy488/xbased-modern-gui/issues), not upstream. What it adds: 11 dashboard styles in 3 themes (Original Blades by default),
 > an Insignia tab with the Setup Assistant, play time, Resume (auto-save when leaving a game),
 > floating covers and 3D cases, a Homebrew tab with a store, an OG Dashboard tab, GPU and disk-size
 > settings, Nearest and NVIDIA NIS upscaling, pause on focus loss, a keyboard/mouse/controller
@@ -38,7 +38,7 @@
 <!-- trailer -->
 https://github.com/user-attachments/assets/bf62adff-002a-4dc6-9b28-eee775181646
 
-<p align="center"><sub><a href="https://youtu.be/0Kq3bW7XKxI">Watch on YouTube</a> · <a href="https://github.com/crazyriddler/xbased/releases/download/v1.0/xbased-trailer-1080p60.mp4">Download in 1080p60</a></sub></p>
+<p align="center"><sub>Trailer for upstream xbased · <a href="https://youtu.be/0Kq3bW7XKxI">Watch on YouTube</a> · <a href="https://github.com/crazyriddler/xbased/releases/download/v1.0/xbased-trailer-1080p60.mp4">Download in 1080p60</a></sub></p>
 <!-- /trailer -->
 
 ---
@@ -52,10 +52,21 @@ No BIOS, MCPX ROM or hard-disk image is needed.
 
 | Platform | File | |
 |---|---|---|
-| **Windows** 10/11 (x64) | `xbased-1.0.76-windows-x64.zip` | Unzip anywhere and run `xbased.exe`. Portable: everything stays in its folder. |
-| **Linux** (x86-64) | `xbased-1.0.76-x86_64.AppImage` | `chmod +x` it and run. Ubuntu 22.04 or newer, or any distribution of the same age. |
+| **Windows** 10/11 (x64) | `xbased-modern-gui-1.0.76.1-windows-x64.zip` | Unzip anywhere and run `xbased.exe`. Portable: everything stays in its folder. |
 
-Get them from **[Releases](https://github.com/crazyriddler/xbased/releases/latest)**.
+Get it from **[Releases](https://github.com/Prodigy488/xbased-modern-gui/releases/latest)**.
+This fork only publishes a Windows build. For Linux, use the AppImage from
+[upstream xbased](https://github.com/crazyriddler/xbased/releases/latest), or build this
+source yourself (see [Building from source](#building-from-source)); the Linux build of
+the fork has not been tested.
+
+New builds are offered inside the app as it starts (Settings › Interface turns the check
+off). People on upstream xbased or on an older build need to download this zip once by
+hand; after that the updates come from this repository.
+
+The Modern GUI features were written without a GPU to test on. The dashboard skins and the
+NVIDIA NIS maths were checked on a CPU; the rest is built and reviewed but not run on real
+hardware by the author. Please report anything odd.
 
 **Requirements:** a GPU with Vulkan 1.1 or newer (1.3 recommended), a CPU with
 SSE4.1, and your own game images (ISO / XISO) dumped from discs you own.
@@ -203,7 +214,7 @@ xbased doesn't include any copyrighted Xbox software.
 
 ## Getting started
 
-1. Download xbased from [Releases](https://github.com/crazyriddler/xbased/releases/latest):
+1. Download xbased Modern GUI from [Releases](https://github.com/Prodigy488/xbased-modern-gui/releases/latest):
    unzip it anywhere (Windows) or run the AppImage (Linux).
 2. Start it: the dashboard opens. In **Games**, choose **Add games** (the last
    card, or A on an empty library) to open the file browser: go to the folder
@@ -260,7 +271,7 @@ The executable is built from the `hakux` target and named `xbased`.
 3. Get the source, fetch the dependencies and build:
 
    ```bash
-   git clone https://github.com/crazyriddler/xbased
+   git clone https://github.com/Prodigy488/xbased-modern-gui
    cd xbased
    tools/fetch_deps.sh
    cmake -S native -B ../build/win -G Ninja -DCMAKE_BUILD_TYPE=Release \
@@ -289,7 +300,7 @@ copied beside it). It imports only system DLLs, so it runs on any Windows
 2. Get the source, fetch the dependencies and build:
 
    ```bash
-   git clone https://github.com/crazyriddler/xbased
+   git clone https://github.com/Prodigy488/xbased-modern-gui
    cd xbased
    tools/fetch_deps.sh
    cmake -S native -B ../build/linux -G Ninja -DCMAKE_BUILD_TYPE=Release \
@@ -309,6 +320,11 @@ More options (link-time optimization, the dependencies' location) are in
 
 ## Credits
 
+- **xbased Modern GUI** is a fork by **[Prodigy488](https://github.com/Prodigy488)**, made
+  with Claude (Anthropic). It adds the dashboard styles, Insignia and Homebrew tabs, NVIDIA
+  NIS upscaling (a port of [NVIDIA Image Scaling](https://github.com/NVIDIAGameWorks/NVIDIAImageScaling),
+  MIT licence in [licenses/](licenses/)), the input settings and the other changes
+  listed [above](#download). Everything else is upstream's work, credited below.
 - **xbased** by **[crazyriddler](https://github.com/crazyriddler)**, its creator
   and maintainer: the emulator for x86-64 Windows and Linux, the
   console-style dashboard and front end, the game fixes (Fable, The Thing,
