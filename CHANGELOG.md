@@ -1,5 +1,20 @@
 # xbased changelog
 
+## 1.0.84 (2026-11)
+
+### Fixes
+- G-Sync and FreeSync work again in full screen on Windows, with V-Sync on
+  or off (off, there was tearing). Since 1.0.82 the game's picture was
+  drawn in a window inside the session's one, and the display stayed at
+  its fixed refresh. The session's window now presents the picture itself,
+  so the driver sees a full screen game again: independent flip and
+  variable refresh, with the same frame pacing as before.
+- The screen saver no longer starts in the middle of a game played with a
+  controller. Since 1.0.82 the session's window let it through.
+- Starting a game from the dashboard no longer shows the desktop or the
+  taskbar for a moment, and neither does going back to the dashboard when
+  the game closes.
+
 ## 1.0.83 (2026-11)
 
 ### Fixes

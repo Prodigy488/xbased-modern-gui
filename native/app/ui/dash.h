@@ -23,6 +23,9 @@ struct Config;
 /* Full screen in the in-game menu (F11, Alt+Enter): this instead of the
  * window's own, when the game's window is inside a frame (win_frame.h) */
 void dash_set_fullscreen_hook(void (*toggle)(void));
+/* The pointer's place (window pixels) from elsewhere (the game's frame):
+ * false, none; NULL, SDL's own. */
+void dash_set_pointer_hook(bool (*where)(float *x, float *y));
 int dash_ingame(SDL_Window *win, const char *key, const char *title, const char *frame_bmp, int *slot,
                 void (*live)(const struct Config *global, const struct Config *game));
 

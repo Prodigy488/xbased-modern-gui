@@ -9,7 +9,12 @@
 #include <string.h>
 
 #ifdef _WIN32
+#define COBJMACROS
 #include <windows.h>
+#include <dwmapi.h>
+#include <shobjidl.h>
+#include "volk.h"
+#include "hw/xbox/hle/vk/share.h"
 
 #define WM_FRAME_TOGGLE (WM_APP + 1)
 #define WM_FRAME_CLOSE  (WM_APP + 2)
@@ -35,6 +40,11 @@ static void fit_children(void)
     RECT rc;
     GetClientRect(g_fw, &rc);
     for (HWND c = top_child(); c; c = GetWindow(c, GW_HWNDNEXT)) {
+        RECT cr;
+        GetWindowRect(c, &cr);
+        if (cr.right - cr.left <= 1) {
+            continue;   /* a run's window kept out of sight (the frame presents its pictures) */
+        }
         SetWindowPos(c, NULL, 0, 0, rc.right - rc.left, rc.bottom - rc.top, SWP_NOZORDER | SWP_NOACTIVATE);
     }
 }
@@ -87,11 +97,35 @@ static void mode_restore(void)
     }
 }
 
+/* The taskbar told the frame's a full screen window: it stays under it.
+ * Left to its own look, the taskbar came on top for a moment after the
+ * frame took the foreground (the run's window coming into it), over the
+ * game on screens where it doesn't hide itself. */
+static void mark_fullscreen(bool on)
+{
+    static ITaskbarList2 *tb;
+    static bool tried;
+    if (!tried) {
+        tried = true;
+        CoInitializeEx(NULL, COINIT_APARTMENTTHREADED);
+        if (FAILED(CoCreateInstance(&CLSID_TaskbarList, NULL, CLSCTX_INPROC_SERVER, &IID_ITaskbarList2, (void **)&tb))) {
+            tb = NULL;
+        } else if (FAILED(ITaskbarList2_HrInit(tb))) {
+            ITaskbarList2_Release(tb);
+            tb = NULL;
+        }
+    }
+    if (tb) {
+        ITaskbarList2_MarkFullscreenWindow(tb, g_fw, on ? TRUE : FALSE);
+    }
+}
+
 static void set_fullscreen(bool on)
 {
     if (on == g_fs) {
         return;
     }
+    mark_fullscreen(on);
     if (on) {
         GetWindowRect(g_fw, &g_wrect);
         MONITORINFOEXA mi;
@@ -117,10 +151,547 @@ static void set_fullscreen(bool on)
     fit_children();
 }
 
+
+/* ------------------------------------------------------------ the frame's presenter */
+
+/* The runs' pictures (hw/xbox/hle/vk/share.h) presented to the frame's own
+ * window, on a thread of its own: the newest a run has drawn, copied into
+ * the swapchain's image and presented (FIFO, or immediate, as the run
+ * asks); the driver sees this process presenting to a full screen window,
+ * so independent flip, G-Sync and FreeSync apply as for any game. */
+
+static HANDLE g_map, g_ev;
+static HleShare *g_sh;
+static volatile LONG g_presenting;  /* the presenter draws the window: no GDI black over it */
+
+#define FP_SLOTS 3
+
+static struct {
+    bool up, failed;
+    VkInstance inst;
+    VkSurfaceKHR surf;
+    VkPhysicalDevice phys;
+    VkDevice dev;
+    VkQueue q;
+    uint32_t qfam;
+    VkPhysicalDeviceMemoryProperties mem;
+    VkSwapchainKHR sc;
+    uint32_t nimg, sw, sh, mode;
+    VkImage simg[8];
+    VkSemaphore done[8];        /* a swapchain image's copy done: its present waits */
+    VkCommandPool pool;
+    VkCommandBuffer cb[FP_SLOTS];
+    VkFence fence[FP_SLOTS];
+    VkSemaphore acq[FP_SLOTS];
+    uint32_t slot;
+    /* the source's images, opened */
+    int src;                    /* its slot in the block, -1 none */
+    int64_t gen;
+    uint32_t w, h;
+    VkImage img[HLE_SHARE_IMAGES];
+    VkDeviceMemory imem[HLE_SHARE_IMAGES];
+    VkSemaphore drawn, freed;
+    uint64_t shown;
+} P = {.src = -1};
+
+static void fp_fail(const char *why)
+{
+    (void)why;
+    P.failed = true;
+    if (g_sh) {
+        g_sh->failed = 1;       /* the runs present to their own windows */
+    }
+    InterlockedExchange(&g_presenting, 0);
+}
+
+static bool fp_instance(void)
+{
+    if (volkInitialize() != VK_SUCCESS) {
+        return false;
+    }
+    const char *ie[] = {VK_KHR_SURFACE_EXTENSION_NAME, VK_KHR_WIN32_SURFACE_EXTENSION_NAME};
+    VkApplicationInfo ai = {.sType = VK_STRUCTURE_TYPE_APPLICATION_INFO, .pApplicationName = "xbased frame",
+                            .apiVersion = VK_API_VERSION_1_2};
+    VkInstanceCreateInfo ici = {.sType = VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO, .pApplicationInfo = &ai,
+                                .enabledExtensionCount = 2, .ppEnabledExtensionNames = ie};
+    if (vkCreateInstance(&ici, NULL, &P.inst) != VK_SUCCESS) {
+        return false;
+    }
+    volkLoadInstance(P.inst);
+    VkWin32SurfaceCreateInfoKHR sci = {.sType = VK_STRUCTURE_TYPE_WIN32_SURFACE_CREATE_INFO_KHR,
+                                       .hinstance = GetModuleHandleA(NULL), .hwnd = g_fw};
+    return vkCreateWin32SurfaceKHR(P.inst, &sci, NULL, &P.surf) == VK_SUCCESS;
+}
+
+/* the run's GPU (its LUID), a queue that presents to the window */
+static bool fp_device(const uint8_t luid[8])
+{
+    uint32_t n = 0;
+    vkEnumeratePhysicalDevices(P.inst, &n, NULL);
+    VkPhysicalDevice pd[16];
+    n = n > 16 ? 16 : n;
+    vkEnumeratePhysicalDevices(P.inst, &n, pd);
+    for (uint32_t i = 0; i < n && !P.phys; i++) {
+        VkPhysicalDeviceIDProperties idp = {.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ID_PROPERTIES};
+        VkPhysicalDeviceProperties2 p2 = {.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2, .pNext = &idp};
+        vkGetPhysicalDeviceProperties2(pd[i], &p2);
+        if (idp.deviceLUIDValid && !memcmp(idp.deviceLUID, luid, 8) && p2.properties.apiVersion >= VK_API_VERSION_1_2) {
+            P.phys = pd[i];
+        }
+    }
+    if (!P.phys) {
+        return false;
+    }
+    vkGetPhysicalDeviceMemoryProperties(P.phys, &P.mem);
+    uint32_t nq = 0;
+    vkGetPhysicalDeviceQueueFamilyProperties(P.phys, &nq, NULL);
+    VkQueueFamilyProperties qp[16];
+    nq = nq > 16 ? 16 : nq;
+    vkGetPhysicalDeviceQueueFamilyProperties(P.phys, &nq, qp);
+    P.qfam = UINT32_MAX;
+    for (uint32_t i = 0; i < nq && P.qfam == UINT32_MAX; i++) {
+        VkBool32 ok = VK_FALSE;
+        vkGetPhysicalDeviceSurfaceSupportKHR(P.phys, i, P.surf, &ok);
+        if (ok && (qp[i].queueFlags & (VK_QUEUE_GRAPHICS_BIT | VK_QUEUE_TRANSFER_BIT))) {
+            P.qfam = i;
+        }
+    }
+    if (P.qfam == UINT32_MAX) {
+        return false;
+    }
+    const char *de[] = {VK_KHR_SWAPCHAIN_EXTENSION_NAME, VK_KHR_EXTERNAL_MEMORY_WIN32_EXTENSION_NAME,
+                        VK_KHR_EXTERNAL_SEMAPHORE_WIN32_EXTENSION_NAME};
+    VkPhysicalDeviceVulkan12Features f12 = {.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES,
+                                            .timelineSemaphore = VK_TRUE};
+    VkPhysicalDeviceSynchronization2Features s2 = {.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SYNCHRONIZATION_2_FEATURES,
+                                                   .pNext = &f12, .synchronization2 = VK_TRUE};
+    const float prio = 1.0f;
+    VkDeviceQueueCreateInfo qci = {.sType = VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO, .queueFamilyIndex = P.qfam,
+                                   .queueCount = 1, .pQueuePriorities = &prio};
+    const char *de2[4] = {de[0], de[1], de[2], VK_KHR_SYNCHRONIZATION_2_EXTENSION_NAME};
+    VkDeviceCreateInfo dci = {.sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO, .pNext = &s2, .queueCreateInfoCount = 1,
+                              .pQueueCreateInfos = &qci, .enabledExtensionCount = 4, .ppEnabledExtensionNames = de2};
+    if (vkCreateDevice(P.phys, &dci, NULL, &P.dev) != VK_SUCCESS) {
+        return false;
+    }
+    volkLoadDevice(P.dev);
+    vkGetDeviceQueue(P.dev, P.qfam, 0, &P.q);
+    VkCommandPoolCreateInfo pci = {.sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO,
+                                   .flags = VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT, .queueFamilyIndex = P.qfam};
+    vkCreateCommandPool(P.dev, &pci, NULL, &P.pool);
+    VkCommandBufferAllocateInfo cai = {.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO, .commandPool = P.pool,
+                                       .level = VK_COMMAND_BUFFER_LEVEL_PRIMARY, .commandBufferCount = FP_SLOTS};
+    vkAllocateCommandBuffers(P.dev, &cai, P.cb);
+    for (int i = 0; i < FP_SLOTS; i++) {
+        VkFenceCreateInfo fci = {.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO, .flags = VK_FENCE_CREATE_SIGNALED_BIT};
+        vkCreateFence(P.dev, &fci, NULL, &P.fence[i]);
+        VkSemaphoreCreateInfo sci = {.sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO};
+        vkCreateSemaphore(P.dev, &sci, NULL, &P.acq[i]);
+    }
+    return true;
+}
+
+static void fp_drop_swapchain(void)
+{
+    if (!P.sc) {
+        return;
+    }
+    vkDeviceWaitIdle(P.dev);
+    for (uint32_t i = 0; i < P.nimg; i++) {
+        vkDestroySemaphore(P.dev, P.done[i], NULL);
+    }
+    vkDestroySwapchainKHR(P.dev, P.sc, NULL);
+    P.sc = VK_NULL_HANDLE;
+    P.nimg = 0;
+}
+
+/* the window's swapchain: its size, FIFO (vsync) or immediate (else mailbox, else FIFO) */
+static bool fp_swapchain(uint32_t vsync)
+{
+    VkSurfaceCapabilitiesKHR caps;
+    if (vkGetPhysicalDeviceSurfaceCapabilitiesKHR(P.phys, P.surf, &caps) != VK_SUCCESS) {
+        return false;
+    }
+    uint32_t w = caps.currentExtent.width, h = caps.currentExtent.height;
+    if (w == UINT32_MAX) {
+        w = g_sh->cw;
+        h = g_sh->ch;
+    }
+    if (!w || !h) {
+        return false;   /* minimized */
+    }
+    VkPresentModeKHR pm = VK_PRESENT_MODE_FIFO_KHR;
+    if (!vsync) {
+        uint32_t nm = 0;
+        VkPresentModeKHR modes[16];
+        vkGetPhysicalDeviceSurfacePresentModesKHR(P.phys, P.surf, &nm, NULL);
+        nm = nm > 16 ? 16 : nm;
+        vkGetPhysicalDeviceSurfacePresentModesKHR(P.phys, P.surf, &nm, modes);
+        for (uint32_t i = 0; i < nm; i++) {
+            if (modes[i] == VK_PRESENT_MODE_IMMEDIATE_KHR) {
+                pm = modes[i];
+            } else if (modes[i] == VK_PRESENT_MODE_MAILBOX_KHR && pm == VK_PRESENT_MODE_FIFO_KHR) {
+                pm = modes[i];
+            }
+        }
+    }
+    uint32_t nf = 0;
+    VkSurfaceFormatKHR fm[32];
+    vkGetPhysicalDeviceSurfaceFormatsKHR(P.phys, P.surf, &nf, NULL);
+    nf = nf > 32 ? 32 : nf;
+    vkGetPhysicalDeviceSurfaceFormatsKHR(P.phys, P.surf, &nf, fm);
+    VkSurfaceFormatKHR fmt = fm[0];
+    for (uint32_t i = 0; i < nf; i++) {
+        if (fm[i].format == VK_FORMAT_B8G8R8A8_UNORM && fm[i].colorSpace == VK_COLOR_SPACE_SRGB_NONLINEAR_KHR) {
+            fmt = fm[i];
+        }
+    }
+    uint32_t n = caps.minImageCount + 1;
+    if (caps.maxImageCount && n > caps.maxImageCount) {
+        n = caps.maxImageCount;
+    }
+    VkSwapchainKHR old = P.sc;
+    VkSwapchainCreateInfoKHR ci = {
+        .sType = VK_STRUCTURE_TYPE_SWAPCHAIN_CREATE_INFO_KHR, .surface = P.surf, .minImageCount = n,
+        .imageFormat = fmt.format, .imageColorSpace = fmt.colorSpace, .imageExtent = {w, h}, .imageArrayLayers = 1,
+        .imageUsage = VK_IMAGE_USAGE_TRANSFER_DST_BIT, .imageSharingMode = VK_SHARING_MODE_EXCLUSIVE,
+        .preTransform = caps.currentTransform, .compositeAlpha = VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR,
+        .presentMode = pm, .clipped = VK_TRUE, .oldSwapchain = old};
+    if (old) {
+        vkDeviceWaitIdle(P.dev);
+        for (uint32_t i = 0; i < P.nimg; i++) {
+            vkDestroySemaphore(P.dev, P.done[i], NULL);
+        }
+    }
+    VkSwapchainKHR sc = VK_NULL_HANDLE;
+    const VkResult r = vkCreateSwapchainKHR(P.dev, &ci, NULL, &sc);
+    if (old) {
+        vkDestroySwapchainKHR(P.dev, old, NULL);
+    }
+    P.sc = r == VK_SUCCESS ? sc : VK_NULL_HANDLE;
+    P.nimg = 0;
+    if (!P.sc) {
+        return false;
+    }
+    uint32_t ni = 8;
+    vkGetSwapchainImagesKHR(P.dev, P.sc, &ni, P.simg);
+    for (uint32_t i = 0; i < ni; i++) {
+        VkSemaphoreCreateInfo sci = {.sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO};
+        vkCreateSemaphore(P.dev, &sci, NULL, &P.done[i]);
+    }
+    P.nimg = ni;
+    P.sw = w;
+    P.sh = h;
+    P.mode = vsync;
+    return true;
+}
+
+static void fp_drop_source(void)
+{
+    if (P.src < 0) {
+        return;
+    }
+    vkDeviceWaitIdle(P.dev);
+    for (uint32_t i = 0; i < HLE_SHARE_IMAGES; i++) {
+        if (P.img[i]) {
+            vkDestroyImage(P.dev, P.img[i], NULL);
+        }
+        if (P.imem[i]) {
+            vkFreeMemory(P.dev, P.imem[i], NULL);
+        }
+        P.img[i] = VK_NULL_HANDLE;
+        P.imem[i] = VK_NULL_HANDLE;
+    }
+    if (P.drawn) {
+        vkDestroySemaphore(P.dev, P.drawn, NULL);
+    }
+    if (P.freed) {
+        vkDestroySemaphore(P.dev, P.freed, NULL);
+    }
+    P.drawn = P.freed = VK_NULL_HANDLE;
+    P.src = -1;
+    P.gen = 0;
+}
+
+static bool fp_import_sem(VkSemaphore *sem, const uint16_t *name)
+{
+    VkSemaphoreTypeCreateInfo tci = {.sType = VK_STRUCTURE_TYPE_SEMAPHORE_TYPE_CREATE_INFO,
+                                     .semaphoreType = VK_SEMAPHORE_TYPE_TIMELINE};
+    VkSemaphoreCreateInfo sci = {.sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO, .pNext = &tci};
+    if (vkCreateSemaphore(P.dev, &sci, NULL, sem) != VK_SUCCESS) {
+        return false;
+    }
+    VkImportSemaphoreWin32HandleInfoKHR ii = {.sType = VK_STRUCTURE_TYPE_IMPORT_SEMAPHORE_WIN32_HANDLE_INFO_KHR,
+                                              .semaphore = *sem,
+                                              .handleType = VK_EXTERNAL_SEMAPHORE_HANDLE_TYPE_OPAQUE_WIN32_BIT,
+                                              .name = (LPCWSTR)name};
+    return vkImportSemaphoreWin32HandleKHR(P.dev, &ii) == VK_SUCCESS;
+}
+
+/* source k's images and timelines, by their names */
+static bool fp_import(int k)
+{
+    fp_drop_source();
+    HleShareSrc *s = &g_sh->src[k];
+    const int64_t gen = s->gen;
+    if (!gen || !fp_import_sem(&P.drawn, s->drawn) || !fp_import_sem(&P.freed, s->freed)) {
+        return false;
+    }
+    for (uint32_t i = 0; i < HLE_SHARE_IMAGES; i++) {
+        VkExternalMemoryImageCreateInfo xi = {.sType = VK_STRUCTURE_TYPE_EXTERNAL_MEMORY_IMAGE_CREATE_INFO,
+                                              .handleTypes = VK_EXTERNAL_MEMORY_HANDLE_TYPE_OPAQUE_WIN32_BIT};
+        VkImageCreateInfo ici = {.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO, .pNext = &xi, .imageType = VK_IMAGE_TYPE_2D,
+                                 .format = (VkFormat)s->fmt, .extent = {s->w, s->h, 1}, .mipLevels = 1, .arrayLayers = 1,
+                                 .samples = VK_SAMPLE_COUNT_1_BIT, .tiling = VK_IMAGE_TILING_OPTIMAL,
+                                 .usage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT,
+                                 .sharingMode = VK_SHARING_MODE_EXCLUSIVE, .initialLayout = VK_IMAGE_LAYOUT_UNDEFINED};
+        if (vkCreateImage(P.dev, &ici, NULL, &P.img[i]) != VK_SUCCESS) {
+            return false;
+        }
+        VkMemoryRequirements mr;
+        vkGetImageMemoryRequirements(P.dev, P.img[i], &mr);
+        uint32_t type = UINT32_MAX;
+        for (uint32_t t = 0; t < P.mem.memoryTypeCount && type == UINT32_MAX; t++) {
+            if ((mr.memoryTypeBits & (1u << t)) &&
+                (P.mem.memoryTypes[t].propertyFlags & VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT)) {
+                type = t;
+            }
+        }
+        VkImportMemoryWin32HandleInfoKHR ii = {.sType = VK_STRUCTURE_TYPE_IMPORT_MEMORY_WIN32_HANDLE_INFO_KHR,
+                                               .handleType = VK_EXTERNAL_MEMORY_HANDLE_TYPE_OPAQUE_WIN32_BIT,
+                                               .name = (LPCWSTR)s->mem[i]};
+        VkMemoryDedicatedAllocateInfo di = {.sType = VK_STRUCTURE_TYPE_MEMORY_DEDICATED_ALLOCATE_INFO, .pNext = &ii,
+                                            .image = P.img[i]};
+        VkMemoryAllocateInfo ai = {.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO, .pNext = &di,
+                                   .allocationSize = s->size[i] ? s->size[i] : mr.size, .memoryTypeIndex = type};
+        if (type == UINT32_MAX || vkAllocateMemory(P.dev, &ai, NULL, &P.imem[i]) != VK_SUCCESS ||
+            vkBindImageMemory(P.dev, P.img[i], P.imem[i], 0) != VK_SUCCESS) {
+            return false;
+        }
+    }
+    if (s->gen != gen) {
+        return false;   /* made again meanwhile: next time */
+    }
+    P.src = k;
+    P.gen = gen;
+    P.w = s->w;
+    P.h = s->h;
+    P.shown = 0;
+    return true;
+}
+
+/* the newest source with a picture: the run started last (the one before
+ * goes on drawing until then, and is shown until then) */
+static int fp_source(void)
+{
+    int best = -1;
+    for (int k = 0; k < 2; k++) {
+        const HleShareSrc *s = &g_sh->src[k];
+        if (s->gen && s->latest && (best < 0 || s->order > g_sh->src[best].order)) {
+            best = k;
+        }
+    }
+    return best;
+}
+
+static void fp_barrier(VkCommandBuffer cb, VkImage img, VkImageLayout from, VkImageLayout to, uint32_t sq, uint32_t dq,
+                       VkPipelineStageFlags2 ss, VkAccessFlags2 sa, VkPipelineStageFlags2 ds, VkAccessFlags2 da)
+{
+    VkImageMemoryBarrier2 b = {.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2, .srcStageMask = ss, .srcAccessMask = sa,
+                               .dstStageMask = ds, .dstAccessMask = da, .oldLayout = from, .newLayout = to,
+                               .srcQueueFamilyIndex = sq, .dstQueueFamilyIndex = dq, .image = img,
+                               .subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1}};
+    VkDependencyInfo di = {.sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO, .imageMemoryBarrierCount = 1,
+                           .pImageMemoryBarriers = &b};
+    vkCmdPipelineBarrier2(cb, &di);
+}
+
+/* picture v of image i to the window */
+static bool fp_present(uint32_t i, uint64_t v)
+{
+    const uint32_t vs = g_sh->src[P.src].vsync;
+    RECT rc;
+    GetClientRect(g_fw, &rc);
+    if (!P.sc || P.mode != vs || P.sw != (uint32_t)(rc.right - rc.left) || P.sh != (uint32_t)(rc.bottom - rc.top)) {
+        if (!fp_swapchain(vs)) {
+            return false;
+        }
+    }
+    const uint32_t k = P.slot++ % FP_SLOTS;
+    vkWaitForFences(P.dev, 1, &P.fence[k], VK_TRUE, 1000000000ull);
+    uint32_t si = 0;
+    VkResult r = vkAcquireNextImageKHR(P.dev, P.sc, 100000000ull, P.acq[k], VK_NULL_HANDLE, &si);
+    if (r == VK_ERROR_OUT_OF_DATE_KHR) {
+        fp_drop_swapchain();
+        return false;
+    }
+    if (r != VK_SUCCESS && r != VK_SUBOPTIMAL_KHR) {
+        return false;
+    }
+    vkResetFences(P.dev, 1, &P.fence[k]);
+    VkCommandBuffer cb = P.cb[k];
+    vkResetCommandBuffer(cb, 0);
+    VkCommandBufferBeginInfo bi = {.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO,
+                                   .flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT};
+    vkBeginCommandBuffer(cb, &bi);
+    const VkImage src = P.img[i], dst = P.simg[si];
+    /* the run's image ours (from the external queue family), the swapchain's for the copy */
+    fp_barrier(cb, src, VK_IMAGE_LAYOUT_GENERAL, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, VK_QUEUE_FAMILY_EXTERNAL, P.qfam,
+               VK_PIPELINE_STAGE_2_NONE, 0, VK_PIPELINE_STAGE_2_BLIT_BIT, VK_ACCESS_2_TRANSFER_READ_BIT);
+    fp_barrier(cb, dst, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_QUEUE_FAMILY_IGNORED,
+               VK_QUEUE_FAMILY_IGNORED, VK_PIPELINE_STAGE_2_BLIT_BIT, 0, VK_PIPELINE_STAGE_2_BLIT_BIT,
+               VK_ACCESS_2_TRANSFER_WRITE_BIT);
+    if (P.w == P.sw && P.h == P.sh) {
+        VkImageCopy c = {.srcSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1},
+                         .dstSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1}, .extent = {P.w, P.h, 1}};
+        vkCmdCopyImage(cb, src, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, dst, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &c);
+    } else {
+        /* a size changing (the window's, before the run's next pictures): scaled meanwhile */
+        VkImageBlit b = {.srcSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1},
+                         .srcOffsets = {{0, 0, 0}, {(int32_t)P.w, (int32_t)P.h, 1}},
+                         .dstSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1},
+                         .dstOffsets = {{0, 0, 0}, {(int32_t)P.sw, (int32_t)P.sh, 1}}};
+        vkCmdBlitImage(cb, src, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, dst, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &b,
+                       VK_FILTER_LINEAR);
+    }
+    fp_barrier(cb, dst, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_PRESENT_SRC_KHR, VK_QUEUE_FAMILY_IGNORED,
+               VK_QUEUE_FAMILY_IGNORED, VK_PIPELINE_STAGE_2_BLIT_BIT, VK_ACCESS_2_TRANSFER_WRITE_BIT,
+               VK_PIPELINE_STAGE_2_NONE, 0);
+    fp_barrier(cb, src, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, VK_IMAGE_LAYOUT_GENERAL, P.qfam, VK_QUEUE_FAMILY_EXTERNAL,
+               VK_PIPELINE_STAGE_2_BLIT_BIT, 0, VK_PIPELINE_STAGE_2_NONE, 0);
+    vkEndCommandBuffer(cb);
+    VkSemaphoreSubmitInfo wait[2] = {
+        {.sType = VK_STRUCTURE_TYPE_SEMAPHORE_SUBMIT_INFO, .semaphore = P.drawn, .value = v,
+         .stageMask = VK_PIPELINE_STAGE_2_BLIT_BIT},
+        {.sType = VK_STRUCTURE_TYPE_SEMAPHORE_SUBMIT_INFO, .semaphore = P.acq[k],
+         .stageMask = VK_PIPELINE_STAGE_2_BLIT_BIT}};
+    VkSemaphoreSubmitInfo sig[2] = {
+        {.sType = VK_STRUCTURE_TYPE_SEMAPHORE_SUBMIT_INFO, .semaphore = P.freed, .value = v,
+         .stageMask = VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT},
+        {.sType = VK_STRUCTURE_TYPE_SEMAPHORE_SUBMIT_INFO, .semaphore = P.done[si],
+         .stageMask = VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT}};
+    VkCommandBufferSubmitInfo cbi = {.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_SUBMIT_INFO, .commandBuffer = cb};
+    VkSubmitInfo2 sub = {.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO_2, .waitSemaphoreInfoCount = 2, .pWaitSemaphoreInfos = wait,
+                         .commandBufferInfoCount = 1, .pCommandBufferInfos = &cbi, .signalSemaphoreInfoCount = 2,
+                         .pSignalSemaphoreInfos = sig};
+    if (vkQueueSubmit2(P.q, 1, &sub, P.fence[k]) != VK_SUCCESS) {
+        return false;
+    }
+    VkPresentInfoKHR pi = {.sType = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR, .waitSemaphoreCount = 1,
+                           .pWaitSemaphores = &P.done[si], .swapchainCount = 1, .pSwapchains = &P.sc,
+                           .pImageIndices = &si};
+    r = vkQueuePresentKHR(P.q, &pi);
+    if (r == VK_ERROR_OUT_OF_DATE_KHR || r == VK_SUBOPTIMAL_KHR) {
+        fp_drop_swapchain();
+    }
+    P.shown = v;
+    g_sh->src[P.src].shown = (int64_t)v;
+    if (!g_presenting) {
+        InterlockedExchange(&g_presenting, 1);
+    }
+    return true;
+}
+
+static DWORD WINAPI fp_thread(void *arg)
+{
+    (void)arg;
+    for (;;) {
+        WaitForSingleObject(g_ev, 50);
+        const int k = fp_source();
+        if (k < 0) {
+            continue;
+        }
+        HleShareSrc *s = &g_sh->src[k];
+        /* Vulkan from the first picture on, not as the window comes up:
+         * loading the driver holds the process's loader lock a while, and
+         * the window's thread, waiting on it, painted nothing meanwhile (the
+         * desktop and the taskbar through it for a moment) */
+        if (!P.inst && !fp_instance()) {
+            fp_fail("no Vulkan instance or surface");
+            return 0;
+        }
+        if (!P.dev) {
+            if (!s->luid_valid || !fp_device(s->luid)) {
+                fp_fail("no device for the run's GPU");
+                return 0;
+            }
+        }
+        if (k != P.src || s->gen != P.gen) {
+            if (!fp_import(k)) {
+                fp_drop_source();
+                continue;   /* being made again: the next picture */
+            }
+        }
+        const int64_t latest = s->latest;
+        const uint64_t v = (uint64_t)latest >> 2;
+        if (!v || v <= P.shown) {
+            continue;
+        }
+        fp_present((uint32_t)(latest & 3), v);
+    }
+}
+
+static void fp_start(const char *token)
+{
+    wchar_t n[128];
+    swprintf(n, 128, HLE_SHARE_BLOCK_FMT, token);
+    g_map = CreateFileMappingW(INVALID_HANDLE_VALUE, NULL, PAGE_READWRITE, 0, sizeof(HleShare), n);
+    g_sh = g_map ? (HleShare *)MapViewOfFile(g_map, FILE_MAP_ALL_ACCESS, 0, 0, sizeof(HleShare)) : NULL;
+    swprintf(n, 128, HLE_SHARE_EVENT_FMT, token);
+    g_ev = CreateEventW(NULL, FALSE, FALSE, n);
+    if (!g_sh || !g_ev) {
+        return;
+    }
+    memset(g_sh, 0, sizeof(*g_sh));
+    RECT rc;
+    GetClientRect(g_fw, &rc);
+    g_sh->cw = (uint32_t)(rc.right - rc.left);
+    g_sh->ch = (uint32_t)(rc.bottom - rc.top);
+    g_sh->version = HLE_SHARE_VERSION;
+    g_sh->magic = HLE_SHARE_MAGIC;      /* last: the runs open it from now on */
+    CloseHandle(CreateThread(NULL, 0, fp_thread, NULL, 0, NULL));
+}
+
+static void frame_mouse(uint32_t type, LPARAM l, int button, int wheel)
+{
+    if (!g_sh) {
+        return;
+    }
+    POINT pt = {(short)LOWORD(l), (short)HIWORD(l)};
+    if (type == 4) {
+        ScreenToClient(g_fw, &pt);  /* the wheel's is the screen's */
+    }
+    const int64_t at = g_sh->mouse_head;
+    HleShareMouse *m = &g_sh->mouse[at % HLE_SHARE_MICE];
+    m->type = type;
+    m->x = pt.x;
+    m->y = pt.y;
+    m->button = button;
+    m->wheel = wheel;
+    InterlockedExchange64((volatile LONG64 *)&g_sh->mouse_head, at + 1);
+}
+
+/* The session's over: the dashboard the game came from shown and in front
+ * before the frame goes (this process has the foreground, it may hand it
+ * on; the game's couldn't always). The frame gone first, the desktop and the
+ * taskbar showed until the dashboard was back. */
+static void hand_back(void)
+{
+    const char *e = getenv("XBASED_DASH_HWND");
+    HWND d = e && e[0] ? (HWND)(uintptr_t)strtoull(e, NULL, 16) : NULL;
+    if (d && IsWindow(d)) {
+        ShowWindow(d, SW_SHOW);
+        SetForegroundWindow(d);
+    }
+}
+
 static LRESULT CALLBACK frame_proc(HWND h, UINT m, WPARAM w, LPARAM l)
 {
     switch (m) {
     case WM_ERASEBKGND: {
+        if (g_presenting) {
+            return 1;   /* the presenter's pictures: no GDI over them */
+        }
         RECT rc;
         GetClientRect(h, &rc);
         FillRect((HDC)w, &rc, (HBRUSH)GetStockObject(BLACK_BRUSH));
@@ -128,7 +699,41 @@ static LRESULT CALLBACK frame_proc(HWND h, UINT m, WPARAM w, LPARAM l)
     }
     case WM_SIZE:
         fit_children();
+        if (g_sh && LOWORD(l) && HIWORD(l)) {
+            g_sh->cw = LOWORD(l);   /* the runs draw at this size from their next picture */
+            g_sh->ch = HIWORD(l);
+        }
         return 0;
+    case WM_SETCURSOR:
+        if (LOWORD(l) == HTCLIENT && g_presenting) {
+            SetCursor(g_sh && g_sh->cursor ? LoadCursorW(NULL, (LPCWSTR)IDC_ARROW) : NULL);
+            return TRUE;
+        }
+        break;
+    case WM_MOUSEMOVE:
+        frame_mouse(1, l, 0, 0);
+        return 0;
+    case WM_LBUTTONDOWN:
+    case WM_RBUTTONDOWN:
+    case WM_MBUTTONDOWN:
+        frame_mouse(2, l, m == WM_LBUTTONDOWN ? 1 : m == WM_MBUTTONDOWN ? 2 : 3, 0);
+        return 0;
+    case WM_LBUTTONUP:
+    case WM_RBUTTONUP:
+    case WM_MBUTTONUP:
+        frame_mouse(3, l, m == WM_LBUTTONUP ? 1 : m == WM_MBUTTONUP ? 2 : 3, 0);
+        return 0;
+    case WM_MOUSEWHEEL:
+        frame_mouse(4, l, 0, GET_WHEEL_DELTA_WPARAM(w) / WHEEL_DELTA);
+        return 0;
+    case WM_SYSCOMMAND:
+        /* the system asks the window in front before starting the screen
+         * saver or turning the panel off: never while a game's on (a pad
+         * doesn't count as input), as SDL's own windows answer */
+        if ((w & 0xFFF0) == SC_SCREENSAVE || (w & 0xFFF0) == SC_MONITORPOWER) {
+            return 0;
+        }
+        break;
     case WM_ACTIVATE:
         if (LOWORD(w) != WA_INACTIVE && top_child()) {
             SetFocus(top_child());     /* the keyboard to the run's window */
@@ -162,6 +767,7 @@ static LRESULT CALLBACK frame_proc(HWND h, UINT m, WPARAM w, LPARAM l)
         set_fullscreen(!g_fs);
         return 0;
     case WM_FRAME_CLOSE:
+        hand_back();
         ShowWindow(h, SW_HIDE);
         DestroyWindow(h);
         return 0;
@@ -177,7 +783,8 @@ static LRESULT CALLBACK frame_proc(HWND h, UINT m, WPARAM w, LPARAM l)
             if (!g_gone_at) {
                 g_gone_at = now;
                 mode_restore();
-                ShowWindow(h, SW_HIDE);     /* what's behind (the dashboard) at once */
+                hand_back();                /* the run went without a word (it fell): the dashboard */
+                ShowWindow(h, SW_HIDE);
             } else if (now - g_gone_at > FRAME_LINGER_MS) {
                 DestroyWindow(h);
             }
@@ -242,10 +849,20 @@ int nc_frame_main(int argc, char **argv)
         return 4;
     }
     g_t0 = GetTickCount64();
+    fp_start(token);    /* the runs' pictures presented here (hw/xbox/hle/vk/share.h) */
     if (fs) {
         set_fullscreen(true);   /* before it's shown: up as a window first, the desktop showed around it */
     }
+    /* painted before it's seen: shown cloaked, painted black, then in
+     * sight (a window shows nothing until it has painted: what's behind
+     * it, the desktop as the dashboard goes, showed through) */
+    BOOL cloak = TRUE;
+    DwmSetWindowAttribute(g_fw, DWMWA_TRANSITIONS_FORCEDISABLED, &cloak, sizeof(cloak));
+    DwmSetWindowAttribute(g_fw, DWMWA_CLOAK, &cloak, sizeof(cloak));
     ShowWindow(g_fw, SW_SHOW);
+    UpdateWindow(g_fw);
+    cloak = FALSE;
+    DwmSetWindowAttribute(g_fw, DWMWA_CLOAK, &cloak, sizeof(cloak));
     SetForegroundWindow(g_fw);
     SetTimer(g_fw, 1, FRAME_TICK_MS, NULL);
     MSG msg;
@@ -307,6 +924,8 @@ void *nc_frame_get(const char *title, bool fullscreen, bool fs60)
     CloseHandle(pi.hProcess);
     if (h) {
         SetForegroundWindow(h);     /* this process may (the dashboard started it): the frame's in front */
+        SetEnvironmentVariableA("XBASED_FRAME_TOKEN", token);
+        _putenv_s("XBASED_FRAME_TOKEN", token);
         char v[32];
         snprintf(v, sizeof(v), "%llx", (unsigned long long)(uintptr_t)h);
         SetEnvironmentVariableA("XBASED_FRAME_HWND", v);   /* the runs this one starts: the same frame */
@@ -320,7 +939,19 @@ static HWND hwnd_of(SDL_Window *w)
     return (HWND)SDL_GetPointerProperty(SDL_GetWindowProperties(w), SDL_PROP_WINDOW_WIN32_HWND_POINTER, NULL);
 }
 
-void nc_frame_adopt(void *frame, SDL_Window *child, const char *title)
+void nc_frame_fill(void *frame, SDL_Window *child)
+{
+    RECT rc;
+    GetClientRect((HWND)frame, &rc);
+    SetWindowPos(hwnd_of(child), NULL, 0, 0, rc.right - rc.left, rc.bottom - rc.top, SWP_NOZORDER | SWP_NOACTIVATE);
+}
+
+const char *nc_frame_token(void)
+{
+    return getenv("XBASED_FRAME_TOKEN");
+}
+
+void nc_frame_adopt(void *frame, SDL_Window *child, const char *title, bool hidden)
 {
     HWND f = (HWND)frame, c = hwnd_of(child);
     wchar_t wt[512];
@@ -332,8 +963,14 @@ void nc_frame_adopt(void *frame, SDL_Window *child, const char *title)
     SetParent(c, f);
     RECT rc;
     GetClientRect(f, &rc);
-    SetWindowPos(c, HWND_BOTTOM, 0, 0, rc.right - rc.left, rc.bottom - rc.top,
-                 SWP_NOACTIVATE | SWP_FRAMECHANGED | SWP_SHOWWINDOW);
+    if (hidden) {
+        /* 1x1, outside the client area: nothing over the frame's pictures
+         * (they keep their independent flip), the keyboard still its */
+        SetWindowPos(c, HWND_BOTTOM, -8, -8, 1, 1, SWP_NOACTIVATE | SWP_FRAMECHANGED | SWP_SHOWWINDOW);
+    } else {
+        SetWindowPos(c, HWND_BOTTOM, 0, 0, rc.right - rc.left, rc.bottom - rc.top,
+                     SWP_NOACTIVATE | SWP_FRAMECHANGED | SWP_SHOWWINDOW);
+    }
 }
 
 void nc_frame_raise(void *frame, SDL_Window *child)
@@ -702,8 +1339,20 @@ void *nc_frame_get(const char *title, bool fullscreen, bool fs60)
 
 static SDL_Window *g_child;     /* the run's window, for the calls without it */
 
-void nc_frame_adopt(void *frame, SDL_Window *child, const char *title)
+void nc_frame_fill(void *frame, SDL_Window *child)
 {
+    (void)frame;
+    (void)child;
+}
+
+const char *nc_frame_token(void)
+{
+    return NULL;
+}
+
+void nc_frame_adopt(void *frame, SDL_Window *child, const char *title, bool hidden)
+{
+    (void)hidden;
     Display *d = x_display(child);
     const Window f = (Window)(uintptr_t)frame, c = x_window(child);
     if (!d || !c) {
