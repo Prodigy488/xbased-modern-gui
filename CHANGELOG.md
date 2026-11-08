@@ -1,5 +1,29 @@
 # xbased changelog
 
+## 1.0.80 (2026-11)
+
+### Fixes
+- Prince of Persia: Warrior Within could crash when the Prince falls into
+  the ship's hold, early in the first level. Its data arriving sooner than
+  from a real drive let the game use an object it had already freed. It
+  now always reads at the console drive's speed, whatever the disc speed
+  setting says, and so do The Sands of Time and The Two Thrones (the same
+  engine) and Star Wars: KotOR II. The setting is hidden for these games.
+- A game jumping to address 0 closed the whole emulator without a word.
+  It's now reported as the game's own crash in the log.
+
+### Changes
+- Disc speed is now also a global setting (System), for every game, and
+  it has two choices: Like the console, the default, or Fast. Games now
+  load at the console drive's speed unless you pick Fast, which shows a
+  warning because some games break with it (loading screens get longer
+  than in earlier versions). A game's own disc speed setting still wins
+  over the global one, and the games that need the console drive's speed
+  always get it. The old "Close to the console's" choice is gone: it
+  became Like the console.
+- Picking 128 MB of console memory shows a warning, as some games can
+  crash or not start with a debug kit's memory.
+
 ## 1.0.79 (2026-11)
 
 ### Changes

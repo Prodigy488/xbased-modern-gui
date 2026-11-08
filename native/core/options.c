@@ -81,7 +81,8 @@ bool nc_option(NcOptions *o, const char *arg)
     } else if ((v = value(arg, "prebuild="))) {
         o->prebuild = atoi(v) != 0;
     } else if ((v = value(arg, "devtime="))) {
-        nc_io_set_device_time(atoi(v));         /* console timing (native/kernel/io.c): 0, 1, 2 */
+        nc_io_set_device_time(atoi(v) ? 2 : 0); /* console timing (native/kernel/io.c): 0 fast, 2 the drive's
+                                                 * (1, a quarter of it, gone in 1.0.80: the drive's) */
     } else if ((v = value(arg, "pads="))) {
         setenv("NC_PAD_MASK", v, 1);            /* read by the USB at boot (ohci.c) */
     } else if ((v = value(arg, "video="))) {

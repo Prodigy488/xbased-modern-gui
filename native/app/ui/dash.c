@@ -22,7 +22,7 @@
 #endif
 
 #ifndef XBASED_VERSION
-#define XBASED_VERSION "1.0.79"
+#define XBASED_VERSION "1.0.80"
 #endif
 
 Dash D;
@@ -952,6 +952,12 @@ void opt_choice(List *l, enum UiStr label, const char *key, const char *const *v
         cfg_unset(c, key);
     } else {
         cfg_set(c, key, vals[D.editing_game ? pos - 1 : pos]);
+        const char *now_v = vals[D.editing_game ? pos - 1 : pos];
+        if (!strcmp(key, "devtime") && !strcmp(now_v, "0")) {
+            dash_toast(T(S_DISC_WARN));     /* a few titles need the drive's time (native/kernel/io.c) */
+        } else if (!strcmp(key, "ram") && !strcmp(now_v, "128")) {
+            dash_toast(T(S_RAM_WARN));      /* retail titles meet a debug kit's memory map */
+        }
     }
 }
 

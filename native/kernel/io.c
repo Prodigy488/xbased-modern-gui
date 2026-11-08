@@ -848,7 +848,8 @@ static void complete(NcKernel *k, const uint32_t *a)
  * time. NC_DEVTIME="disc_us,disc_kBps,hdd_us,hdd_kBps" (or the property
  * debug.hakux.devtime, read at boot) tunes the drives. */
 static bool g_devtime;
-static bool g_devtime_set;      /* the run's options chose (devtime=), a title's default doesn't apply */
+static bool g_devtime_set;      /* the run's options chose (devtime=) */
+static int g_devtime_title;     /* a title's own mode (nc_io_title_device_mode): over the options' */
 static struct DevRate {
     uint32_t req_us, kbps;
 } g_dev_disc = {125, 27600},    /* the DVD drive at 5x: 500 us, 6900 kB/s */
@@ -877,29 +878,42 @@ static void device_time(int mode)
 void nc_io_set_device_time(int mode)
 {
     g_devtime_set = true;
-    device_time(mode);
+    device_time(g_devtime_title ? g_devtime_title : mode);  /* the options again (in-game menu): the title's stays */
 }
 
-/* The titles that need the drives' own time, the run's options not saying:
+/* The titles that need the drives' own time, whatever the run's options say
+ * (a faster disc breaks them):
  * KotOR II's T3-M4 scene on Peragus (the fuel line blown) stays black at any
  * faster disc, as on an Xbox playing it from its hard disk (the players'
- * fix then: that part from the DVD). A quarter of the time wasn't enough. */
+ * fix then: that part from the DVD). A quarter of the time wasn't enough.
+ * Warrior Within's fall into the ship's hold (its first level) calls through
+ * a freed object now and then when its data comes in sooner: from a
+ * savestate before it, 5 of 26 loads ended in the title's fault with the
+ * disc as fast as the PC reads, 16 of 20 at a quarter of the drive's time,
+ * none of 24 at the drive's own. The Sands of Time and The Two Thrones,
+ * on its engine, with it. */
 int nc_io_title_device_mode(uint32_t title_id, const char *name)
 {
     /* every edition: the id the US and PAL discs share, and the name */
     static const struct {
         uint32_t id;
-        const char *name;   /* in the certificate's title, any case */
+        const char *name;   /* in the certificate's title, any case (NULL: the id only) */
     } k_titles[] = {
         {0x4C410014, "kotor ii"},       /* Star Wars: KotOR II - The Sith Lords */
         {0, "sith lords"},
+        /* the Sands of Time trilogy, one engine (each certificate's title
+         * starts so): Warrior Within US-059 (Kenshi no Kokoro, Japan, too),
+         * The Sands of Time US-029 (USA, Europe), The Two Thrones US-088 */
+        {0x5553003B, "prince of persia"},
+        {0x5553001D, NULL},
+        {0x55530058, NULL},
     };
     char low[64] = "";
     for (unsigned i = 0; name && name[i] && i < sizeof(low) - 1; i++) {
         low[i] = (char)tolower((unsigned char)name[i]);
     }
     for (unsigned i = 0; i < sizeof(k_titles) / sizeof(k_titles[0]); i++) {
-        if ((k_titles[i].id && k_titles[i].id == title_id) || strstr(low, k_titles[i].name)) {
+        if ((k_titles[i].id && k_titles[i].id == title_id) || (k_titles[i].name && strstr(low, k_titles[i].name))) {
             return 2;
         }
     }
@@ -909,8 +923,13 @@ int nc_io_title_device_mode(uint32_t title_id, const char *name)
 void nc_io_title_device_time(uint32_t title_id, const char *name)
 {
     const int mode = nc_io_title_device_mode(title_id, name);
-    if (!g_devtime_set && mode) {
-        nc_log("hakuX-native-io", "console timing: the drives' own for %08x (%s)", title_id, name ? name : "");
+    g_devtime_title = mode;
+    if (!mode && !g_devtime_set) {
+        device_time(2);     /* the options not saying: the console drive's time (1.0.80) */
+    }
+    if (mode) {
+        nc_log("hakuX-native-io", "console timing: the drives' own for %08x (%s)%s", title_id, name ? name : "",
+               g_devtime_set ? ", over the options' disc speed" : "");
         device_time(mode);
     }
 }

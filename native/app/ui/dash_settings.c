@@ -229,6 +229,15 @@ void scr_settings(void)
         static const char *pv[] = {"hdtv", "standard", "svideo", "scart", "vga"};
         static const char *pn[] = {"HDTV (component)", "Standard (composite)", "S-Video", "SCART (RGB)", "VGA"};
         opt_choice(&l, S_AVPACK, "avpack", pv, pn, 5, "hdtv");
+        {
+            /* the disc's speed for every game (devtime=): the console
+             * drive's by default, fast with a warning; a game's own setting
+             * over it, and a title that needs the drive's own has that
+             * anyway (native/kernel/io.c) */
+            static const char *const dv[] = {"2", "0"};
+            const char *dn[] = {T(S_DISC_CONSOLE), T(S_DISC_FAST)};
+            opt_choice(&l, S_DISC_SPEED, "devtime", dv, dn, 2, "2");
+        }
         opt_bool(&l, S_ASYNC_SHADERS, "asyncpipe", false, false);
         opt_bool(&l, S_PREBUILD, "prebuild", false, false);
         break;
@@ -396,16 +405,13 @@ void scr_game_settings(void)
     opt_videoflag(&l, S_WIDESCREEN, 0x10000);
     rows_pal(&l);
     rows_ram(&l);
-    {
-        /* the disc's speed (devtime=): as fast as the PC reads, or the
-         * console's drive (a quarter or all of its time); a title that needs
-         * the drive's own gets it by default (native/kernel/io.c) */
-        static const char *const dv[] = {"0", "1", "2"};
-        const char *dn[] = {T(S_DISC_FAST), T(S_DISC_NEAR), T(S_DISC_CONSOLE)};
-        static char def[4];
-        const char *gv = cfg_get(&D.global, "devtime");
-        snprintf(def, sizeof(def), "%d", gv ? atoi(gv) : nc_io_title_device_mode(D.cur->g.title_id, D.cur->g.title));
-        opt_choice(&l, S_DISC_SPEED, "devtime", dv, dn, 3, def);
+    if (!nc_io_title_device_mode(D.cur->g.title_id, D.cur->g.title)) {
+        /* the disc's speed (devtime=): the console drive's, or as fast as
+         * the PC reads; a title that needs the drive's own always has it,
+         * and no choice (native/kernel/io.c) */
+        static const char *const dv[] = {"2", "0"};
+        const char *dn[] = {T(S_DISC_CONSOLE), T(S_DISC_FAST)};
+        opt_choice(&l, S_DISC_SPEED, "devtime", dv, dn, 2, "2");
     }
     opt_bool(&l, S_ASYNC_SHADERS, "asyncpipe", false, false);
     if (list_row(&l, T(S_RESET_GAME), NULL, NULL)) {
