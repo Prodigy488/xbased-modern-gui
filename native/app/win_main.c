@@ -129,6 +129,13 @@ static void read_ini(void)
     if (GetFileAttributesA(path) == INVALID_FILE_ATTRIBUTES) {
         MoveFileA(old, path);
     }
+    {   /* the old shader settings gone first (cfg_shaders_migrate) */
+        Config c;
+        cfg_load(&c, path);
+        if (cfg_shaders_migrate(&c)) {
+            cfg_save(&c);
+        }
+    }
     FILE *f = fopen(path, "r");
     if (!f) {
         return;
@@ -193,6 +200,9 @@ static void game_options(const char *disc)
     snprintf(path, sizeof(path), "%sgames/%s.ini", g_data_dir, g.key);
     Config c;
     cfg_load(&c, path);
+    if (cfg_shaders_migrate(&c)) {
+        cfg_save(&c);
+    }
     /* the command line's options after the game's: move them to the end */
     char *cmdline[MAX_ARGS];
     int ncmd = 0;
@@ -1103,7 +1113,7 @@ static const char *pick_disc(void)
 }
 
 #ifndef XBASED_VERSION
-#define XBASED_VERSION "1.0.72"
+#define XBASED_VERSION "1.0.73"
 #endif
 #ifdef _WIN32
 #define NC_PLATFORM_NAME "Windows"

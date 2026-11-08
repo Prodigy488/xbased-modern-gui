@@ -22,7 +22,7 @@
 #endif
 
 #ifndef XBASED_VERSION
-#define XBASED_VERSION "1.0.72"
+#define XBASED_VERSION "1.0.73"
 #endif
 
 Dash D;
@@ -987,6 +987,9 @@ void opt_bool(List *l, enum UiStr label, const char *key, bool def, bool flag_st
     } else {
         cfg_set(c, key, on ? "0" : "1");
     }
+    if (!on && !strcmp(key, "asyncpipe")) {
+        dash_toast(T(S_ASYNC_WARN));    /* draws wait for no shader: they are skipped */
+    }
 }
 
 typedef struct {
@@ -1271,6 +1274,7 @@ static void wait_child(void)
     SDL_SetHint(SDL_HINT_FORCE_RAISEWINDOW, "0");
     cfg_load(&D.global, D.global.path);     /* the game may have changed settings */
     upscale_migrate(&D.global);
+    cfg_shaders_migrate(&D.global);
     cc_sync(&D.global);                     /* ... or its EEPROM (a title's own options) */
     g_auto_off = -1;    /* the scripted commands meanwhile were the game's */
 }
@@ -1472,6 +1476,9 @@ static void open_game(LibGame *g)
     game_cfg_path(g, p, sizeof(p));
     cfg_load(&D.game, p);
     upscale_migrate(&D.game);
+    if (cfg_shaders_migrate(&D.game)) {
+        cfg_save(&D.game);
+    }
     D.sel[SCR_GAME] = 0;
     dash_push(SCR_GAME);
 }
@@ -2058,7 +2065,8 @@ int dash_run(SDL_Window *win, const char *exe)
     char p[1200];
     snprintf(p, sizeof(p), "%sxbased.ini", cfg_data_dir());
     cfg_load(&D.global, p);
-    if (upscale_migrate(&D.global)) {
+    const bool up = upscale_migrate(&D.global), sh = cfg_shaders_migrate(&D.global);
+    if (up || sh) {
         cfg_save(&D.global);
     }
     if (cfg_get(&D.global, "uncap")) {
@@ -2407,7 +2415,8 @@ int dash_ingame(SDL_Window *win, const char *key, const char *title, const char 
     char p[1200];
     snprintf(p, sizeof(p), "%sxbased.ini", cfg_data_dir());
     cfg_load(&D.global, p);
-    if (upscale_migrate(&D.global)) {
+    const bool up = upscale_migrate(&D.global), sh = cfg_shaders_migrate(&D.global);
+    if (up || sh) {
         cfg_save(&D.global);
     }
     i18n_set(cfg_get(&D.global, "ui.lang"));
@@ -2419,6 +2428,9 @@ int dash_ingame(SDL_Window *win, const char *key, const char *title, const char 
     game_cfg_path(&game, p, sizeof(p));
     cfg_load(&D.game, p);
     upscale_migrate(&D.game);
+    if (cfg_shaders_migrate(&D.game)) {
+        cfg_save(&D.game);
+    }
     D.stack[0] = SCR_INGAME;
     D.sel[SCR_INGAME] = 0;  /* on Resume each time, as a console's: no Quit by habit */
     g_auto_off = -1;

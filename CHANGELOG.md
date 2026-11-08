@@ -1,5 +1,17 @@
 # xbased changelog
 
+## 1.0.73 (2026-11)
+
+### Changes
+- Asynchronous shaders and building cached shaders before the game are now
+  off by default, and an earlier setting of either is reset once. Timed
+  in-game with the shader cache cleared (Fable, Burnout 3, Vice City, Prince
+  of Persia: The Two Thrones), building shaders when they are first drawn
+  stuttered no more than building them in the background, while
+  asynchronous shaders skipped the draws that were waiting for theirs, which
+  shows as flickering or missing graphics. Turning asynchronous shaders back
+  on shows a warning about that.
+
 ## 1.0.72 (2026-11)
 
 ### Fixes
