@@ -26,7 +26,7 @@ The executable is built from the `hakux` target and named `xbased`.
 3. Get the source, fetch the dependencies and build:
 
    ```bash
-   git clone https://github.com/crazyriddler/xbased
+   git clone https://github.com/Prodigy488/xbased-modern-gui
    cd xbased-modern-gui
    tools/fetch_deps.sh
    cmake -S native -B ../build/win -G Ninja -DCMAKE_BUILD_TYPE=Release \
@@ -59,7 +59,7 @@ sudo apt install git clang lld cmake ninja-build pkg-config python3 zlib1g-dev \
 Then:
 
 ```bash
-git clone https://github.com/crazyriddler/xbased
+git clone https://github.com/Prodigy488/xbased-modern-gui
 cd xbased-modern-gui
 tools/fetch_deps.sh
 cmake -S native -B ../build/linux -G Ninja -DCMAKE_BUILD_TYPE=Release \
