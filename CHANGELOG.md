@@ -1,5 +1,13 @@
 # xbased changelog
 
+## 1.0.74 (2026-11)
+
+### Changes
+- The asynchronous shaders setting is gone: shaders are always built when
+  they are first drawn. Built in the background, the draws waiting for them
+  were skipped, which showed as flickering or broken graphics, and it didn't
+  stutter less.
+
 ## 1.0.73 (2026-11)
 
 ### Changes

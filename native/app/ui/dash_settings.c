@@ -228,7 +228,6 @@ void scr_settings(void)
         static const char *pv[] = {"hdtv", "standard", "svideo", "scart", "vga"};
         static const char *pn[] = {"HDTV (component)", "Standard (composite)", "S-Video", "SCART (RGB)", "VGA"};
         opt_choice(&l, S_AVPACK, "avpack", pv, pn, 5, "hdtv");
-        opt_bool(&l, S_ASYNC_SHADERS, "asyncpipe", false, false);
         opt_bool(&l, S_PREBUILD, "prebuild", false, false);
         break;
     }
@@ -406,7 +405,6 @@ void scr_game_settings(void)
         snprintf(def, sizeof(def), "%d", gv ? atoi(gv) : nc_io_title_device_mode(D.cur->g.title_id, D.cur->g.title));
         opt_choice(&l, S_DISC_SPEED, "devtime", dv, dn, 3, def);
     }
-    opt_bool(&l, S_ASYNC_SHADERS, "asyncpipe", false, false);
     if (list_row(&l, T(S_RESET_GAME), NULL, NULL)) {
         dash_ask(T(S_RESET_GAME), reset_game);
     }
