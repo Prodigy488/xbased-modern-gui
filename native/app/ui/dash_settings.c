@@ -192,11 +192,13 @@ void dash_take_folder(void)
 /* ---- the mouse's and the quick save's rows, on the global Controls tab and a game's own controls */
 static void rows_mouse(List *l)
 {
-    opt_bool(l, S_MOUSE_STICK, "mouse", false, false);
+    const char *dev = cfg_get(&D.global, "pad.p1");
+    const bool all = dev && !strcmp(dev, "all");         /* "keyboard, mouse and controllers": the mouse is on */
+    opt_bool(l, S_MOUSE_STICK, "mouse", all, false);
     const Config *c = D.editing_game ? &D.game : &D.global;
     const char *on = cfg_get(c, "mouse");
     const char *gon = cfg_get(&D.global, "mouse");
-    const bool shown = on ? strcmp(on, "0") != 0 : (!D.editing_game || (gon && strcmp(gon, "0") != 0));
+    const bool shown = on ? strcmp(on, "0") != 0 : (!D.editing_game ? all : (gon ? strcmp(gon, "0") != 0 : all));
     if (!shown) {
         return;
     }

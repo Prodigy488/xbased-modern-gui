@@ -586,6 +586,7 @@ static void mouse_capture(SDL_Window *win)
         g_mouse_skip = true;
         g_mouse_dx = g_mouse_dy = g_mouse_sx = g_mouse_sy = 0;
         g_mouse_t = SDL_GetTicks();
+        nc_log("hakuX-app", "mouse captured (stick: %s, sensitivity %d%%)", g_map.mouse_stick ? "left" : "right", (int)(g_map.mouse_sens * 100));
         notice(T(S_MOUSE_CAPTURED), NULL);
     }
 }
@@ -1361,7 +1362,7 @@ static const char *pick_disc(void)
 }
 
 #ifndef XBASED_VERSION
-#define XBASED_VERSION "1.0.76.1"
+#define XBASED_VERSION "1.0.76.2"
 #endif
 
 static void rm_tree(const char *path)
@@ -1757,6 +1758,12 @@ int main(int argc, char *argv[])
                 /* a click on the game takes the mouse, when it is set to be a stick */
                 if (g_map.mouse && !g_mouse_cap && focused && !minimized) {
                     mouse_capture(win);
+                } else if (!g_map.mouse) {
+                    static bool said;
+                    if (!said) {
+                        said = true;
+                        nc_log("hakuX-app", "a mouse click: the mouse is off (Settings > Controls > Mouse as a stick)");
+                    }
                 }
                 break;
             case SDL_EVENT_MOUSE_MOTION:

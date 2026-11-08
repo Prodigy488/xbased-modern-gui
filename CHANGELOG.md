@@ -1,5 +1,16 @@
 # xbased changelog
 
+## 1.0.76.2 (Modern GUI fork)
+
+- Fixed "your Xbox doesn't have enough free blocks" in games: with a hard disk size set in Settings >
+  System smaller than what the E: folder already holds (10 GB set, 15 GB of homebrew in it), the
+  drive read 0 MB free. The data drive now always has room, as it already did on the automatic size.
+- Choosing "Keyboard, mouse and controllers" now turns the mouse on (it stays off if you switch
+  "Mouse as a stick" off yourself). The mouse is the right stick by default, which moves the camera
+  in a game; set it to the left stick in Settings > Controls to steer menus with it. Click the game
+  to take the mouse, F3 or Esc to let go. The log notes when the mouse is taken, or when a click is
+  ignored because the mouse is off.
+
 ## 1.0.76.1 (Modern GUI fork)
 
 Everything from xbased 1.0.76, plus the Modern GUI changes: dashboard styles and themes, Insignia tab

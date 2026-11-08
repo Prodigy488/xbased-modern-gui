@@ -256,6 +256,9 @@ void im_cycle_device(Config *c, int player, int delta)
         snprintf(v, sizeof(v), "pad%d", pos - 2);
     }
     cfg_set(c, k, v);
+    if (pos == 2 && player == 0 && !cfg_get(c, "mouse")) {
+        cfg_set(c, "mouse", "1");       /* the device that has the mouse in it: the mouse on, until set off */
+    }
 }
 
 void im_hotkey_name(const Config *c, int h, char *out, size_t n)
@@ -312,7 +315,7 @@ void im_resolve(ImMap *m, const Config *global, const Config *game)
     /* the mouse: the game's own settings where its controls are its own, the global ones otherwise */
     const Config *mc[2] = {custom ? game : global, global};
 #define MOUSE_CFG(key) (cfg_get(mc[0], key) ? mc[0] : mc[1])
-    m->mouse = cfg_bool(MOUSE_CFG("mouse"), "mouse", false);
+    m->mouse = cfg_bool(MOUSE_CFG("mouse"), "mouse", m->device[0] == -3);   /* on with "keyboard, mouse and controllers" */
     {
         const char *s = cfg_get(MOUSE_CFG("mouse.stick"), "mouse.stick");
         m->mouse_stick = s && !strcmp(s, "left");

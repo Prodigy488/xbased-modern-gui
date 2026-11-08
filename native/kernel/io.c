@@ -2624,12 +2624,14 @@ static uint32_t volume_info(NcKernel *k, const NcFile *nf, uint32_t cls, uint32_
             const uint64_t cluster = (uint64_t)spu * 512u;
             const uint64_t used = part_used(part);
             uint64_t size = part_size(part);
-            /* The data drive on its automatic size never reads as full: what the
+            /* The data drive never reads as full, on the automatic size or one set in
+             * Settings > System (a 10 GB drive with 15 GB of homebrew in its folder
+             * read 0 MB free, and "not enough free blocks" followed): what the
              * folder holds (saves, installed homebrew, an OG dashboard's games)
              * can pass the retail 5 GB, and a title that asks for free blocks
              * before a new game then refuses ("not enough free blocks") on a drive
              * that has the room. Always 4 GB over what is used. */
-            if (part == 1 && !getenv("HAKUX_E_MB") && size < used + (4ull << 30)) {
+            if (part == 1 && size < used + (4ull << 30)) {
                 size = used + (4ull << 30);
             }
             uint64_t free_part = used < size ? size - used : 0;
