@@ -1,5 +1,13 @@
 # xbased changelog
 
+## 1.0.79 (2026-11)
+
+### Changes
+- Asynchronous shaders are back as a setting (System, and per game), off by
+  default. Turning them on shows a warning: while a shader is being built
+  the draws that need it are skipped, so things can flicker or look broken
+  for a moment, in exchange for less stutter.
+
 ## 1.0.78 (2026-11)
 
 ### Fixes

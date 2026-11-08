@@ -23,8 +23,9 @@ void nc_options_init(NcOptions *o)
      * with the caches cleared (Fable, Burnout 3, Vice City, The Two Thrones),
      * built in place stuttered no more than asynchronously, and asynchronous
      * building skipped the draws waiting for theirs (5 to 88 in a minute:
-     * objects missing or flickering for a frame) */
-    *o = (NcOptions){ .prebuild = false, .video = -1, .av_pack = NC_AV_PACK_HDTV };
+     * objects missing or flickering for a frame); asynchronous shaders stay a
+     * setting, off unless turned on (its warning says what they can break) */
+    *o = (NcOptions){ .async_pipe = false, .prebuild = false, .video = -1, .av_pack = NC_AV_PACK_HDTV };
 }
 
 static const char *value(const char *arg, const char *name)
@@ -76,7 +77,7 @@ bool nc_option(NcOptions *o, const char *arg)
         nc_hle_set_render_scale(atoi(v));
         nc_log("hakuX-app", "render scale %sx", v);
     } else if ((v = value(arg, "asyncpipe="))) {
-        (void)v;                                /* asynchronous shaders: none (1.0.74), an old line ignored */
+        o->async_pipe = atoi(v) != 0;
     } else if ((v = value(arg, "prebuild="))) {
         o->prebuild = atoi(v) != 0;
     } else if ((v = value(arg, "devtime="))) {
@@ -136,9 +137,7 @@ void nc_options_apply(const NcOptions *o)
     } else {
         unsetenv("HAKUX_HLE_FPSCAP");
     }
-    /* shaders are built when first drawn, never in the background: a draw
-     * whose shader was being built was skipped (flickering, missing
-     * graphics), and timed in-game it stuttered no less (1.0.73) */
-    nc_hle_set_pipeline_options(false, o->prebuild);
-    nc_log("hakuX-app", "shaders: cached ones built before the game %s", o->prebuild ? "on" : "off");
+    nc_hle_set_pipeline_options(o->async_pipe, o->prebuild);
+    nc_log("hakuX-app", "shaders: asynchronous compilation %s, cached ones built before the game %s",
+           o->async_pipe ? "on" : "off", o->prebuild ? "on" : "off");
 }

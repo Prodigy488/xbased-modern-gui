@@ -22,7 +22,7 @@
 #endif
 
 #ifndef XBASED_VERSION
-#define XBASED_VERSION "1.0.78"
+#define XBASED_VERSION "1.0.79"
 #endif
 
 Dash D;
@@ -993,6 +993,9 @@ void opt_bool(List *l, enum UiStr label, const char *key, bool def, bool flag_st
         cfg_set(c, key, on ? "0" : "1");
     } else {
         cfg_set(c, key, on ? "0" : "1");
+    }
+    if (!on && !strcmp(key, "asyncpipe")) {
+        dash_toast(T(S_ASYNC_WARN));    /* draws wait for no shader: they are skipped */
     }
 }
 
