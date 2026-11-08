@@ -1,5 +1,16 @@
 # xbased changelog
 
+## 1.0.77 (2026-11)
+
+### Fixes
+- At higher internal resolutions, glow effects built from smaller copies of
+  the frame no longer draw a bright outline around characters and objects in
+  front of lit backgrounds (Prince of Persia: The Sands of Time and others).
+  Those small glow images now render at the console's resolution, as their
+  blur expects.
+- The CRT TV and arcade filters no longer show wavy moire bands at window
+  sizes where each scanline covers two or three screen pixels.
+
 ## 1.0.76 (2026-11)
 
 ### New
