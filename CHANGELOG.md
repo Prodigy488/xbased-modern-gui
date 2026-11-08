@@ -1,5 +1,22 @@
 # xbased changelog
 
+## 1.0.86 (2026-11)
+
+### Fixes
+- G-Sync and FreeSync work again in full screen on Windows, with V-Sync on
+  or off. The session's window now presents the game's picture itself with
+  D3D12 and a DXGI swapchain, as RetroArch does when it presents Vulkan
+  through DXGI: the emulator draws into images the window made for it, and
+  the driver sees an ordinary full screen game, with independent flip and
+  variable refresh. Frame pacing on screen is a little steadier than in
+  1.0.84.
+- 1.0.84's way of handing the picture over, which left some PCs (such as
+  the ROG Xbox Ally) with a black screen, is gone. If the session's window
+  ever goes away, the game now goes back to the dashboard instead of
+  staying open where it can't be seen, and the log says why.
+- Starting a game from the dashboard and going back to it no longer show
+  the desktop or the taskbar for a moment.
+
 ## 1.0.85 (2026-11)
 
 ### Fixes

@@ -43,7 +43,12 @@ void *nc_frame_get(const char *title, bool fullscreen, bool fs60);
 /* The run's window made a child of the frame's, filling it, under any
  * child already there (the run before's, until this one has drawn); the
  * frame takes this run's title. */
-void nc_frame_adopt(void *frame, struct SDL_Window *child, const char *title);
+void nc_frame_adopt(void *frame, struct SDL_Window *child, const char *title, bool hidden);
+/* The run's window filling the frame (it presents to it itself: the frame's
+ * pictures couldn't be had). */
+void nc_frame_fill(void *frame, struct SDL_Window *child);
+/* The frame's own pictures (hw/xbox/hle/vk/share.h): its block's token. */
+const char *nc_frame_token(void);
 /* The run's window on top of the frame's children, with the keyboard. */
 void nc_frame_raise(void *frame, struct SDL_Window *child);
 /* Full screen (borderless, the panel's mode a multiple of 60 Hz if the

@@ -22,7 +22,7 @@
 #endif
 
 #ifndef XBASED_VERSION
-#define XBASED_VERSION "1.0.85"
+#define XBASED_VERSION "1.0.86"
 #endif
 
 Dash D;
@@ -32,6 +32,13 @@ static void (*g_fs_hook)(void);
 void dash_set_fullscreen_hook(void (*toggle)(void))
 {
     g_fs_hook = toggle;
+}
+
+static bool (*g_ptr_hook)(float *x, float *y);
+
+void dash_set_pointer_hook(bool (*where)(float *x, float *y))
+{
+    g_ptr_hook = where;
 }
 static UiTex *g_layer, *g_prev;   /* this screen's foreground, the last one's */
 static float g_trans = 1;               /* the transition's progress, 0-1 */
@@ -473,9 +480,12 @@ static void poll_input(void)
     if (g_cursor_at > 0 && ui_time() - g_cursor_at > 3) {
         cursor(false);
     }
-    float mx, my;
-    SDL_GetMouseState(&mx, &my);
-    float dpi = SDL_GetWindowPixelDensity(g_win);
+    float mx = 0, my = 0;
+    float dpi = 1.0f;
+    if (!g_ptr_hook || !g_ptr_hook(&mx, &my)) {
+        SDL_GetMouseState(&mx, &my);
+        dpi = SDL_GetWindowPixelDensity(g_win);
+    }
     in->mx = g_cursor_at > 0 ? mx * dpi / ui_scale() : -1;
     in->my = g_cursor_at > 0 ? my * dpi / ui_scale() : -1;
     if (g_cursor_at <= 0) {
@@ -2198,7 +2208,11 @@ int dash_run(SDL_Window *win, const char *exe)
                 if (e.type == SDL_EVENT_QUIT) {
                     D.quit = true;
                 } else if (e.type == SDL_EVENT_WINDOW_FOCUS_LOST && g_hide_at > 0) {
-                    g_hide_at = ui_time();
+                    /* the game's window in front: this one behind it a moment
+                     * more, until the screen has it (gone at once, the desktop
+                     * showed for a picture before the game's) */
+                    const double soon = ui_time() + 0.3;
+                    g_hide_at = soon < g_hide_at ? soon : g_hide_at;
                 }
             }
             if (g_hide_at > 0 && ui_time() >= g_hide_at) {

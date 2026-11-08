@@ -47,6 +47,20 @@ void hle_present_set_crt(int kind);
 void hle_present_set_vsync(bool on);
 /* The frame rate shown in the window's corner, 0 none (any thread). */
 void hle_present_set_osd(float fps);
+/* Windows: the pictures drawn for the game's frame (vk/share.h, token: its
+ * block's) instead of the window's own swapchain, from the next refresh;
+ * hle_present_remote, once they are. */
+void hle_present_set_remote(const char *token);
+bool hle_present_remote(void);
+/* 1 drawing for the frame, -1 it can't (the window's own swapchain), 0 not known yet */
+int hle_present_remote_state(void);
+/* the frame's word on why it can't present (empty: none) */
+const char *hle_present_remote_why(void);
+/* the frame's client area (pixels), its pointer shown or not, its mouse's
+ * events since *at (HleShareMouse each, n at most) */
+void hle_present_remote_size(uint32_t *w, uint32_t *h);
+void hle_present_remote_cursor(bool shown);
+uint32_t hle_present_remote_mouse(void *out, uint32_t n, int64_t *at);
 /* The picture's pass cut to its middle cx by cy (clip space half sizes, 1:
  * the whole window): the frame grown past its place shows no more of it. */
 void hle_present_set_clip(float cx, float cy);
