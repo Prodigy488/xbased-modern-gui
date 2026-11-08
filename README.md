@@ -272,7 +272,7 @@ The executable is built from the `hakux` target and named `xbased`.
 
    ```bash
    git clone https://github.com/Prodigy488/xbased-modern-gui
-   cd xbased
+   cd xbased-modern-gui
    tools/fetch_deps.sh
    cmake -S native -B ../build/win -G Ninja -DCMAKE_BUILD_TYPE=Release \
      -DCMAKE_C_COMPILER=clang -DCMAKE_CXX_COMPILER=clang++
@@ -301,7 +301,7 @@ copied beside it). It imports only system DLLs, so it runs on any Windows
 
    ```bash
    git clone https://github.com/Prodigy488/xbased-modern-gui
-   cd xbased
+   cd xbased-modern-gui
    tools/fetch_deps.sh
    cmake -S native -B ../build/linux -G Ninja -DCMAKE_BUILD_TYPE=Release \
      -DCMAKE_C_COMPILER=clang -DCMAKE_CXX_COMPILER=clang++

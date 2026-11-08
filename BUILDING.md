@@ -27,7 +27,7 @@ The executable is built from the `hakux` target and named `xbased`.
 
    ```bash
    git clone https://github.com/crazyriddler/xbased
-   cd xbased
+   cd xbased-modern-gui
    tools/fetch_deps.sh
    cmake -S native -B ../build/win -G Ninja -DCMAKE_BUILD_TYPE=Release \
      -DCMAKE_C_COMPILER=clang -DCMAKE_CXX_COMPILER=clang++
@@ -60,7 +60,7 @@ Then:
 
 ```bash
 git clone https://github.com/crazyriddler/xbased
-cd xbased
+cd xbased-modern-gui
 tools/fetch_deps.sh
 cmake -S native -B ../build/linux -G Ninja -DCMAKE_BUILD_TYPE=Release \
   -DCMAKE_C_COMPILER=clang -DCMAKE_CXX_COMPILER=clang++
