@@ -597,6 +597,17 @@ static void linear_size(uint32_t pitch, uint32_t xfmt, uint32_t sx, uint32_t sy,
         *h = MAX(*h, dh);
         return;
     }
+    /* the same in a 2x2 view: as wide as the display's samples. GTA Vice
+     * City in 480p widescreen draws its trails over its 1440 x 480 back
+     * buffer (2x, a 1536-pixel pitch) through a 720 x 240 2x2 view of it.
+     * Sized by the pitch, the view was a 1536 x 480 object of its own that
+     * the scene never reached, and at night the sky came out a solid colour
+     * (in PAL, 640 x 480, the pitch has no padding and both are one object) */
+    if (tilew && dw && sy > 1 && *w <= dw && pw > dw && pitch == tile_pitch(dw * bytes)) {
+        *w = dw;
+        *h = MAX(*h, dh);
+        return;
+    }
     /* an antialiased view whose samples are the display's pixels: the same
      * rows, as wide as the display. Dead or Alive 2 draws its glow sources
      * at 360 x 240 2x2 over the 720 x 480 frame it has just drawn, in the

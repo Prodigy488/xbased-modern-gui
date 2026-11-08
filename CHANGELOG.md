@@ -1,5 +1,12 @@
 # xbased changelog
 
+## 1.0.71 (2026-11)
+
+### Fixes
+- GTA Vice City in 480p widescreen (NTSC consoles, 720 x 480) with Trails
+  on drew its night sky as a solid colour, white or yellow, and smeared the
+  picture. The trails pass now draws over the frame itself.
+
 ## 1.0.70 (2026-11)
 
 ### Fixes
