@@ -1,5 +1,14 @@
 # xbased changelog
 
+## 1.0.72 (2026-11)
+
+### Fixes
+- Water and other bump-mapped effects (Fable's pond, Burnout 3's lake and
+  many more) are drawn as on the console. Textures whose channels the game
+  marks as signed are now read and filtered as signed values, and the bump
+  matrix is taken in the order the GPU uses. Before, the water showed a
+  streaked or grainy pattern.
+
 ## 1.0.71 (2026-11)
 
 ### Fixes

@@ -145,7 +145,8 @@ typedef struct PbObj {
  * defined again when its memory was written (checked once a frame) or its
  * palette changed. */
 typedef struct PbTex {
-    uint32_t key[4];                    /* offset, format, size, palette; id 0: free */
+    uint32_t key[5];                    /* offset, format, size, palette, signed bytes
+                                           (hle_tex_sign_xor); id 0: free */
     uint32_t id;
     uint32_t pa, bytes;                 /* the memory its texels came from */
     uint32_t pal_hash;
@@ -2735,7 +2736,18 @@ static uint32_t texture(unsigned s, bool *unset, bool *lin)
         return best->id;
     }
     uint32_t pal_reg = code == HLE_XFMT_P8 ? R(NV097_SET_TEXTURE_PALETTE + b) : 0;
-    uint32_t key[4] = { off, fmt, size, pal_reg };
+    /* signed channels (SET_TEXTURE_FILTER 31:28) in a format of 8-bit ones:
+     * a texture of its own, its bytes flipped where defined (hle_tex_sign_xor),
+     * so the host's filtering and mipmaps blend them as signed values */
+    static int nosign = -1;                 /* debug: HAKUX_HLE_TEXSIGN=0 (vk/draw.c), as defined */
+    if (nosign < 0) {
+        const char *e = getenv("HAKUX_HLE_TEXSIGN");
+        nosign = e && !strcmp(e, "0");
+    }
+    unsigned eff;
+    const uint32_t sx = nosign ? 0 : hle_tex_sign_xor(code, (R(NV097_SET_TEXTURE_OFFSET + b + 0x14) >> 28) & 15,
+                                                      &eff);
+    uint32_t key[5] = { off, fmt, size, pal_reg, sx };
     uint32_t h = hash32(key, sizeof(key)) % TEX_SLOTS;
     PbTex *t = &g_pd.tex[h];
     while (t->id && memcmp(t->key, key, sizeof(key))) {
@@ -2800,7 +2812,7 @@ static uint32_t texture(unsigned s, bool *unset, bool *lin)
         memcpy(pal, pal_mem, 4 * npal);
     }
     if (redefine) {
-        const uint32_t h5[5] = { HLE_COMMON_TYPE_TEXTURE | 1, off, 0, fmt, size };
+        const uint32_t h5[5] = { HLE_COMMON_TYPE_TEXTURE | 1, off, sx, fmt, size };
         uint32_t bytes = 0;
         coh_pend_wait(pa, hle_draw_tex_bytes(h5));  /* a copy queued into its texels lands first */
         t->ok = hle_draw_tex_define(t->id, h5, pal, npal, &bytes) != 0;
