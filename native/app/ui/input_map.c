@@ -307,6 +307,18 @@ static const struct { const char *v, *label; int code; } k_hkp[] = {
     {"guide+down", "Guide + D-pad down", IM_HKP_WITH + SDL_GAMEPAD_BUTTON_DPAD_DOWN},
     {"guide+left", "Guide + D-pad left", IM_HKP_WITH + SDL_GAMEPAD_BUTTON_DPAD_LEFT},
     {"guide+right", "Guide + D-pad right", IM_HKP_WITH + SDL_GAMEPAD_BUTTON_DPAD_RIGHT},
+    {"back+a", "Back + A", IM_HKP_BACK_WITH + SDL_GAMEPAD_BUTTON_SOUTH},
+    {"back+b", "Back + B", IM_HKP_BACK_WITH + SDL_GAMEPAD_BUTTON_EAST},
+    {"back+x", "Back + X", IM_HKP_BACK_WITH + SDL_GAMEPAD_BUTTON_WEST},
+    {"back+y", "Back + Y", IM_HKP_BACK_WITH + SDL_GAMEPAD_BUTTON_NORTH},
+    {"back+lb", "Back + LB", IM_HKP_BACK_WITH + SDL_GAMEPAD_BUTTON_LEFT_SHOULDER},
+    {"back+rb", "Back + RB", IM_HKP_BACK_WITH + SDL_GAMEPAD_BUTTON_RIGHT_SHOULDER},
+    {"back+ls", "Back + LS", IM_HKP_BACK_WITH + SDL_GAMEPAD_BUTTON_LEFT_STICK},
+    {"back+rs", "Back + RS", IM_HKP_BACK_WITH + SDL_GAMEPAD_BUTTON_RIGHT_STICK},
+    {"back+up", "Back + D-pad up", IM_HKP_BACK_WITH + SDL_GAMEPAD_BUTTON_DPAD_UP},
+    {"back+down", "Back + D-pad down", IM_HKP_BACK_WITH + SDL_GAMEPAD_BUTTON_DPAD_DOWN},
+    {"back+left", "Back + D-pad left", IM_HKP_BACK_WITH + SDL_GAMEPAD_BUTTON_DPAD_LEFT},
+    {"back+right", "Back + D-pad right", IM_HKP_BACK_WITH + SDL_GAMEPAD_BUTTON_DPAD_RIGHT},
 };
 /* the menu keeps the Guide button's tap (it always opened it), a
  * screenshot the Share button's; the rest none until set */

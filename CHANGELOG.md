@@ -1,5 +1,21 @@
 # xbased changelog
 
+## 1.0.90 (2026-11)
+
+### New
+- Controller shortcuts can use Back plus a button (Back + X, Back + RB and
+  so on) as well as Guide plus a button, for controllers that don't have a
+  Guide button or where it opens something else. Pick them in Settings ›
+  Shortcuts. The game still sees Back pressed, but not the button that goes
+  with it, and Back + Start keeps opening the menu.
+
+### Fixes
+- Aquaman: Battle for Atlantis shows its intro movies instead of a black
+  screen. The game writes each movie frame straight into its frame buffers
+  and leaves the GPU set up for a small texture it drew before, and that
+  small texture is what went on screen. Now a frame buffer the display is
+  reading is shown the way the video mode lays it out.
+
 ## 1.0.89 (2026-11)
 
 ### Fixes

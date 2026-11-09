@@ -1434,6 +1434,55 @@ static void shown_part(const PbObj *o, uint32_t ax, uint32_t ay, uint32_t *w, ui
  * it, drawn since the swap before, is shown instead. Double-S.T.E.A.L 2
  * binds a 32 x 16 target after its frame, before its Present, and that went
  * on screen, black, for every frame. */
+/* The display's last start addresses (hle_pb_flipped): the frame buffers
+ * the scanout reads */
+static uint32_t g_disp_starts[4];
+
+static bool display_start(uint32_t pa)
+{
+    for (unsigned i = 0; i < ARRAY_SIZE(g_disp_starts); i++) {
+        if (pa && __atomic_load_n(&g_disp_starts[i], __ATOMIC_ACQUIRE) == pa) {
+            return true;
+        }
+    }
+    return false;
+}
+
+/* The frame buffer at pa as the scanout reads it: the video mode's format
+ * and pitch, the display's size. A title's D3D Present moves the colour
+ * offset to its next back buffer and leaves the format bound before it:
+ * Aquaman: Battle for Atlantis draws into a 256 x 256 swizzled texture,
+ * then copies its Bink movies' frames into the back buffers on the CPU and
+ * presents them with no draw, and the 256 x 256 view of each back buffer
+ * went to the display, black. Only at an address the display started at;
+ * that layout's object when one is there or the CPU wrote the memory (its
+ * writes kept for rt_cpu_sync), else 0. */
+static uint32_t scanout_object(uint32_t pa)
+{
+    uint32_t pitch, xfmt;
+    unsigned hz;
+    hle_pb_display_mode_get(&pitch, &xfmt, &hz);
+    const HleFmtInfo *fi = pitch ? hle_fmt_info(xfmt) : NULL;
+    const uint32_t w = g_pd.disp_w, h = g_pd.disp_h;
+    if (!fi || (fi->flags & (HLE_FI_DEPTH | HLE_FI_DXT)) || pitch < w * (fi->bpp / 8) || !h ||
+        !display_start(pa)) {
+        return 0;
+    }
+    for (unsigned i = 0; i < g_pd.nobjs; i++) {
+        const HleSurfDesc *d = &g_pd.objs[i].d;
+        if (d->pa == pa && d->xfmt == xfmt && d->pitch == pitch && d->w == w && d->h >= h &&
+            !g_pd.objs[i].cube) {
+            return g_pd.objs[i].id;
+        }
+    }
+    if (!hle_mem_written(pa, pitch * h)) {
+        return 0;
+    }
+    const uint32_t id = object(pa, xfmt, pitch, w, h);
+    hle_mem_mark_written(pa, pitch * h);
+    return id;
+}
+
 static void swap(void)
 {
     sync_rt();
@@ -1448,7 +1497,18 @@ static void swap(void)
     if (fo && g_disp_moded && g_pd.disp_w && g_pd.disp_h && fo->d.w < g_pd.disp_w &&
         fo->d.h < g_pd.disp_h) {
         PbObj *f = obj_of(g_pd.frame_rt);
-        if (f && f->written > g_pd.swap_wseq) {
+        const uint32_t so = f && f->written > g_pd.swap_wseq ? 0 : scanout_object(fo->d.pa);
+        if (so) {
+            static bool s_logged;
+            if (!s_logged) {
+                s_logged = true;
+                hle_log("hakuX-hle-pb", "swap: frame buffer %08x shown as the video mode lays it out "
+                        "(bound as %ux%u)", fo->d.pa, fo->d.w, fo->d.h);
+            }
+            id = so;
+            fo = obj_of(so);
+            ax = ay = 1;
+        } else if (f && f->written > g_pd.swap_wseq) {
             id = g_pd.frame_rt;
             fo = f;
             ax = g_pd.frame_aa_x;
@@ -1839,6 +1899,10 @@ void hle_pb_flipped(uint32_t start)
      * 9-14 ms on, and juddered). The swap that comes is marked flipped, for
      * when no flip follows it (hle_pbd_scanout). */
     const uint32_t pa = start & 0x0FFFFFFFu;
+    static unsigned s_next;
+    if (pa && !display_start(pa)) {
+        __atomic_store_n(&g_disp_starts[s_next++ % ARRAY_SIZE(g_disp_starts)], pa, __ATOMIC_RELEASE);
+    }
     if (pa && __atomic_load_n(&g_pd.ahead_pa, __ATOMIC_ACQUIRE) == pa) {
         __atomic_store_n(&g_pd.flipped_pa, pa, __ATOMIC_RELEASE);
     }

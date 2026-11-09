@@ -600,6 +600,27 @@ static bool pad_guide_held(SDL_Gamepad *pad)
     return pad && SDL_GetGamepadButton(pad, SDL_GAMEPAD_BUTTON_GUIDE);
 }
 
+/* The pad whose Back + button shortcut went: let go for the game until
+ * Back and that button are both up (Back + X no X in the game, even with
+ * Back let go first) */
+static SDL_Gamepad *g_back_pad;
+static int g_back_btn;
+
+static bool pad_in_shortcut(SDL_Gamepad *pad)
+{
+    if (!pad) {
+        return false;
+    }
+    if (pad == g_back_pad) {
+        if (SDL_GetGamepadButton(pad, SDL_GAMEPAD_BUTTON_BACK) ||
+            SDL_GetGamepadButton(pad, (SDL_GamepadButton)g_back_btn)) {
+            return true;
+        }
+        g_back_pad = NULL;
+    }
+    return pad_guide_held(pad);
+}
+
 static void update_pads(bool focused)
 {
     const bool *keys = SDL_GetKeyboardState(NULL);
@@ -626,7 +647,7 @@ static void update_pads(bool focused)
         /* the keyboard: player 1 on auto, any player set to it */
         const bool kb = focused && (g_map.device[i] == -1 || (i == 0 && g_map.device[i] == 0));
         ImPad m;
-        im_read(&g_map, (int)i, kb ? keys : NULL, pad_guide_held(pad) ? NULL : pad, &m);
+        im_read(&g_map, (int)i, kb ? keys : NULL, pad_in_shortcut(pad) ? NULL : pad, &m);
         s.buttons = m.buttons;
         memcpy(s.analog, m.analog, sizeof(s.analog));
         s.lx = m.lx;
@@ -1293,7 +1314,7 @@ static const char *pick_disc(void)
 }
 
 #ifndef XBASED_VERSION
-#define XBASED_VERSION "1.0.89"
+#define XBASED_VERSION "1.0.90"
 #endif
 
 static void rm_tree(const char *path)
@@ -1807,7 +1828,8 @@ int main(int argc, char *argv[])
             case SDL_EVENT_GAMEPAD_BUTTON_DOWN: {
                 /* the controller's shortcuts: Guide with a button (Guide
                  * alone, a tap: on its release, nothing else pressed), the
-                 * touchpad, Share; and the menu with Back and Start */
+                 * touchpad, Share, Back with a button; and the menu with
+                 * Back and Start */
                 SDL_Gamepad *gp = SDL_GetGamepadFromID(ev.gbutton.which);
                 const int b = ev.gbutton.button;
                 int code = IM_HKP_NONE;
@@ -1823,11 +1845,17 @@ int main(int argc, char *argv[])
                 } else if (gp && SDL_GetGamepadButton(gp, SDL_GAMEPAD_BUTTON_BACK) &&
                            SDL_GetGamepadButton(gp, SDL_GAMEPAD_BUTTON_START)) {
                     ingame_menu(win, &paused, minimized);
+                } else if (gp && b != SDL_GAMEPAD_BUTTON_BACK && SDL_GetGamepadButton(gp, SDL_GAMEPAD_BUTTON_BACK)) {
+                    code = IM_HKP_BACK_WITH + b;
                 }
                 for (int h = 0; code != IM_HKP_NONE && h < IM_HOTKEYS; h++) {
                     if (g_map.hk_pad[h] == code) {
                         g_pad_held_hk = h;
                         g_pad_held_code = code;
+                        if (code >= IM_HKP_BACK_WITH) {
+                            g_back_pad = gp;        /* the game doesn't get the button */
+                            g_back_btn = b;
+                        }
                         hotkey_do(win, h, true, 1, &paused, minimized);
                         break;
                     }
@@ -1849,6 +1877,8 @@ int main(int argc, char *argv[])
                 /* a held shortcut (fast forward) ends with either button let go */
                 if (g_pad_held_hk >= 0 &&
                     (b == SDL_GAMEPAD_BUTTON_GUIDE || IM_HKP_WITH + b == g_pad_held_code ||
+                     IM_HKP_BACK_WITH + b == g_pad_held_code ||
+                     (b == SDL_GAMEPAD_BUTTON_BACK && g_pad_held_code >= IM_HKP_BACK_WITH) ||
                      (b == SDL_GAMEPAD_BUTTON_TOUCHPAD && g_pad_held_code == IM_HKP_TOUCHPAD) ||
                      (b == SDL_GAMEPAD_BUTTON_MISC1 && g_pad_held_code == IM_HKP_SHARE))) {
                     hotkey_do(win, g_pad_held_hk, false, 1, &paused, minimized);

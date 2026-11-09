@@ -369,7 +369,8 @@ void scr_settings(void)
     case 5:
         /* the keyboard's (a key, Ctrl/Alt/Shift with it if held), then the
          * controller's: Guide with a button, the touchpad or Share, buttons
-         * the Xbox controller hasn't (no game means them) */
+         * the Xbox controller hasn't (no game means them), or Back with a
+         * button for controllers without Guide */
         for (int h = 0; h < IM_HOTKEYS; h++) {
             char val[64];
             im_hotkey_name(&D.global, h, val, sizeof(val));
