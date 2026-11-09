@@ -93,6 +93,7 @@ static struct {
     VkSemaphore tl;             /* timeline: each submit's value */
     uint64_t submitted;
     VkSampler smp;
+    VkSampler smp_near;         /* the picture's, upscaled as nearest neighbour (HLE_UPSCALE_NEAREST) */
     VkDescriptorSetLayout dsl;
     VkPipelineLayout pl;
     VkDescriptorPool dp;
@@ -600,6 +601,14 @@ static bool init(void)
         .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO, .bindingCount = 2, .pBindings = b };
     if (T.vkCreateSemaphore(g_hvk.dev, &tsi, NULL, &g_ps.tl) != VK_SUCCESS ||
         T.vkCreateSampler(g_hvk.dev, &sci, NULL, &g_ps.smp) != VK_SUCCESS ||
+        T.vkCreateSampler(g_hvk.dev, &(VkSamplerCreateInfo){ .sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO,
+                                                              .magFilter = VK_FILTER_NEAREST,
+                                                              .minFilter = VK_FILTER_NEAREST,
+                                                              .addressModeU = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE,
+                                                              .addressModeV = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE,
+                                                              .addressModeW = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE,
+                                                              .maxLod = 0.0f },
+                          NULL, &g_ps.smp_near) != VK_SUCCESS ||
         T.vkCreateDescriptorSetLayout(g_hvk.dev, &dci, NULL, &g_ps.dsl) != VK_SUCCESS) {
         return false;
     }
@@ -1020,6 +1029,10 @@ static void shot_write(uint32_t w, uint32_t h)
 }
 
 static bool ov_on(void);
+/* the overlay was in the last picture: the one after it goes off isn't
+ * unchanged (a still frame, a logo, kept the menu's last fading picture on
+ * screen: Dead or Alive 3's, #193) */
+static bool g_ov_shown;
 
 bool hle_present_unchanged(struct ANativeWindow *win, uint64_t key)
 {
@@ -1032,7 +1045,7 @@ bool hle_present_unchanged(struct ANativeWindow *win, uint64_t key)
         have_sc = g_rm.sh->src[g_rm.slot].vsync == (g_vsync ? 1u : 0u);
     }
 #endif
-    if (ov_on() || g_ps.shot_want || !g_ps.shown || !win || win != g_ps.win || g_ps.stale || !have_sc ||
+    if (ov_on() || g_ov_shown || g_ps.shot_want || !g_ps.shown || !win || win != g_ps.win || g_ps.stale || !have_sc ||
         key != g_ps.shown_key || ww != g_ps.wsize.width || wh != g_ps.wsize.height ||
         hle_disp_gamma_seq() != g_ps.ramp_gen) {
         return false;
@@ -1637,10 +1650,14 @@ static void barrier(VkCommandBuffer cb, VkImage img, VkImageLayout from, VkImage
     T.vkCmdPipelineBarrier2(cb, &di);
 }
 
+/* the sampler set_src gives: the picture's pass upscaling as nearest
+ * neighbour (#183, the pixels kept square and sharp), else linear */
+static bool g_smp_near;
+
 /* Set ds to sample src (and the frame's share of the ramp). */
 static void set_src(PsFrame *f, VkDescriptorSet ds, VkImageView src)
 {
-    VkDescriptorImageInfo ii = { g_ps.smp, src, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL };
+    VkDescriptorImageInfo ii = { g_smp_near ? g_ps.smp_near : g_ps.smp, src, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL };
     VkDescriptorBufferInfo bi = { g_ps.ubo, (VkDeviceSize)(f - g_ps.fr) * PS_RAMP, 768 };
     VkWriteDescriptorSet wr[2] = {
         { .sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET, .dstSet = ds, .dstBinding = 0,
@@ -2012,7 +2029,16 @@ static bool ov_init(void)
 
 bool hle_ov_ready(void)
 {
-    return g_ps.inited && !g_ps.failed && g_ps.sc && ov_init();
+    /* a window of its own (its swapchain), or the frame's pictures: the
+     * overlay draws over either. Asked for the swapchain only, the in-game
+     * menu took the way without the overlay under the frame and left its
+     * last fading picture up when it closed (#193) */
+#ifdef _WIN32
+    const bool target = g_ps.sc || g_rm.on;
+#else
+    const bool target = g_ps.sc != VK_NULL_HANDLE;
+#endif
+    return g_ps.inited && !g_ps.failed && target && ov_init();
 }
 
 /* A host-visible buffer of at least need bytes, mapped (a frame's own: its
@@ -2526,6 +2552,7 @@ void hle_present_end(float sx, float sy, bool fxaa, int upscale, bool average, u
     }
     /* the overlay: its textures first, the picture as one under a cover */
     const bool ov = g_ov.on && ov_init();
+    g_ov_shown = ov;
     const bool cover = ov && (g_ov.flags & HLE_OV_COVER);
     bool scene_ok = false;
     if (ov || (g_ov.ok && g_ov.dirty)) {
@@ -2557,7 +2584,9 @@ void hle_present_end(float sx, float sy, bool fxaa, int upscale, bool average, u
             VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT);
     rendering(cb, g_ps.view[g_ps.idx], iw, ih, true);
     if (g_ps.have && !cover) {
+        g_smp_near = p == P_BILINEAR && upscale == HLE_UPSCALE_NEAREST;
         quad_clipped(cb, f, SET_WINDOW, g_ps.pipe[p], from, pc, iw, ih);
+        g_smp_near = false;
         if (g_osd > 0 && g_ps.pipe[P_OSD]) {
             /* top left, 4 digits each 0.022 of the window's height wide */
             const float dh = 0.045f, dw = dh * 0.62f * (float)wh / (float)ww;

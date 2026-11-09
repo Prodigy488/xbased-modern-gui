@@ -91,13 +91,14 @@ static void cover_path(const XdGame *g, char *out, size_t n)
 /* ------------------------------------------------------------ the user's */
 
 /* custom.txt: a line a game the user changed, its key, 1 if hidden (else
- * 0), its name ("" for the disc's), then 1 if a favorite and when it was
- * last played (a time_t; both left out by older versions) */
+ * 0), its name ("" for the disc's), then 1 if a favorite, when it was last
+ * played (a time_t) and how long it has been played in all (seconds; these
+ * left out by older versions, which read the line's first fields only) */
 typedef struct {
     char key[48];       /* user_key's */
     bool hidden, fav;
     char name[128];
-    int64_t played;
+    int64_t played, playtime;
 } Custom;
 
 static Custom *g_custom;
@@ -134,7 +135,7 @@ static void custom_load(void)
     while (g_ncustom < MAX_GAMES && fgets(line, sizeof(line), f)) {
         line[strcspn(line, "\r\n")] = 0;
         char *s = line, *key = tok(&s, "\t"), *hid = tok(&s, "\t"), *name = tok(&s, "\t");
-        char *fav = tok(&s, "\t"), *played = tok(&s, "\t");
+        char *fav = tok(&s, "\t"), *played = tok(&s, "\t"), *playtime = tok(&s, "\t");
         if (!key || !*key || !hid) {
             continue;
         }
@@ -144,6 +145,7 @@ static void custom_load(void)
         snprintf(c->name, sizeof(c->name), "%s", name ? name : "");
         c->fav = fav && *fav == '1';
         c->played = played ? strtoll(played, NULL, 10) : 0;
+        c->playtime = playtime ? strtoll(playtime, NULL, 10) : 0;
     }
     fclose(f);
 }
@@ -172,9 +174,9 @@ static void custom_save(void)
             *hash = 0;
         }
         /* a game's own line kept while an id line it overrides is there */
-        if (c->hidden || c->name[0] || c->fav || c->played || (hash && custom_of(base, false))) {
-            fprintf(f, "%s\t%d\t%s\t%d\t%lld\n", c->key, c->hidden ? 1 : 0, c->name, c->fav ? 1 : 0,
-                    (long long)c->played);
+        if (c->hidden || c->name[0] || c->fav || c->played || c->playtime || (hash && custom_of(base, false))) {
+            fprintf(f, "%s\t%d\t%s\t%d\t%lld\t%lld\n", c->key, c->hidden ? 1 : 0, c->name, c->fav ? 1 : 0,
+                    (long long)c->played, (long long)c->playtime);
         }
     }
     /* whole, then in the old one's place: a crash halfway keeps the old */
@@ -252,6 +254,7 @@ static Custom *custom_get(const LibGame *g, bool want)
         c->hidden = from.hidden;
         c->fav = from.fav;
         c->played = from.played;
+        c->playtime = from.playtime;
         snprintf(c->name, sizeof(c->name), "%s", from.name);
     }
     return c;
@@ -264,6 +267,7 @@ static void custom_apply(LibGame *g)
     g->hidden = c && c->hidden;
     g->fav = c && c->fav;
     g->played = c ? c->played : 0;
+    g->playtime = c ? c->playtime : 0;
     if (c && c->name[0]) {
         if (!g->orig[0]) {
             snprintf(g->orig, sizeof(g->orig), "%s", g->g.title);
@@ -975,6 +979,7 @@ static void custom_sync(const LibGame *g)
         if (e == g || same_game(e, g)) {
             e->fav = c && c->fav;
             e->played = c ? c->played : 0;
+            e->playtime = c ? c->playtime : 0;
         }
     }
 }
@@ -1001,6 +1006,32 @@ void lib_set_played(LibGame *g)
         custom_sync(g);
     }
     SDL_UnlockMutex(L.mu);
+}
+
+void lib_add_playtime(LibGame *g, int64_t seconds)
+{
+    if (!g || seconds <= 0) {
+        return;
+    }
+    SDL_LockMutex(L.mu);
+    Custom *c = custom_get(g, true);
+    if (c) {
+        c->playtime += seconds;
+        custom_save();
+        custom_sync(g);
+    }
+    SDL_UnlockMutex(L.mu);
+}
+
+int64_t lib_last_played_time(void)
+{
+    int64_t last = 0;
+    SDL_LockMutex(L.mu);
+    for (int i = 0; i < g_ncustom; i++) {
+        last = g_custom[i].played > last ? g_custom[i].played : last;
+    }
+    SDL_UnlockMutex(L.mu);
+    return last;
 }
 
 void lib_show_hidden(bool show)

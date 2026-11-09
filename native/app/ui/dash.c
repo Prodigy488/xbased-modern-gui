@@ -22,7 +22,7 @@
 #endif
 
 #ifndef XBASED_VERSION
-#define XBASED_VERSION "1.0.86"
+#define XBASED_VERSION "1.0.87"
 #endif
 
 Dash D;
@@ -1118,6 +1118,8 @@ static struct {
     char path[1024], extra[1300];
     bool has_extra;
     UiTex *pic;
+    char game[1024];        /* the game's disc (the library's path), its time played counted as it ends */
+    uint64_t t_start;       /* when its process started (SDL_GetTicks), 0: none */
 } g_go;
 
 #ifdef _WIN32
@@ -1170,6 +1172,7 @@ static void go_spawn(void)
     if (xb_spawn(D.exe, cmd, NULL, &pi)) {
         CloseHandle(pi.hThread);
         g_follow = pi.hProcess;
+        g_go.t_start = SDL_GetTicks();
     } else {
         char e[96];
         snprintf(e, sizeof(e), "The game couldn't start (error %lu)", GetLastError());
@@ -1177,7 +1180,9 @@ static void go_spawn(void)
 #else
     const char *args[4] = {D.exe, g_go.path, g_go.has_extra ? g_go.extra : NULL, NULL};
     g_child = SDL_CreateProcess(args, false);
-    if (!g_child) {
+    if (g_child) {
+        g_go.t_start = SDL_GetTicks();
+    } else {
         dash_toast(SDL_GetError());
 #endif
         g_go.back = ui_time();      /* the screen back */
@@ -1212,6 +1217,7 @@ void dash_open_xbox_dashboard(void)
     }
     dash_save_cfg();
     snprintf(g_go.path, sizeof(g_go.path), "none");
+    g_go.game[0] = 0;       /* no game's time */
     g_go.has_extra = true;
     snprintf(g_go.extra, sizeof(g_go.extra), "dash");
     snd_play(SND_LAUNCH);
@@ -1233,6 +1239,7 @@ void launch_game(LibGame *g, const char *extra)
     dash_save_cfg();
     lib_set_played(g);      /* the last played first, when the Games screen wants it */
     snprintf(g_go.path, sizeof(g_go.path), "%s", g->g.path);
+    snprintf(g_go.game, sizeof(g_go.game), "%s", g->g.path);
     g_go.has_extra = extra != NULL;
     snprintf(g_go.extra, sizeof(g_go.extra), "%s", extra ? extra : "");
     snd_play(SND_LAUNCH);
@@ -1299,6 +1306,19 @@ static void wait_child(void)
     } else {
         return;
     }
+    if (g_go.t_start && g_go.game[0]) {
+        /* the session's over (its restarts and loaded states the same one):
+         * the game's time played grows by it (#188) */
+        const int n = lib_count();
+        for (int i = 0; i < n; i++) {
+            LibGame *g = lib_get(i);
+            if (g && !strcmp(g->g.path, g_go.game)) {
+                lib_add_playtime(g, (int64_t)((SDL_GetTicks() - g_go.t_start) / 1000));
+                break;
+            }
+        }
+    }
+    g_go.t_start = 0;
     g_hide_at = 0;
     g_go.back = cfg_bool(&D.global, "ui.fx", true) ? ui_time() : 0;   /* the screen rushes back in */
     SDL_ShowWindow(g_win);
@@ -1418,6 +1438,73 @@ static void draw_card(LibGame *g, float x, float y, float w, float h, bool sel, 
                     UI_ALIGN_CENTER, w - 10);
     }
     ui_round_outline(x, y, w, h, 10, sel ? 3 : 1, ui_alpha(sel ? UI_GREEN_HI : UI_GREEN_DIM, alpha));
+}
+
+/* when the game played last was played: that game's card is marked (a
+ * frame round it, a tag), the Games screen's each frame */
+static int64_t g_last_played;
+
+static bool is_last_played(const LibGame *g)
+{
+    return g_last_played > 0 && g->played == g_last_played;
+}
+
+/* the last played game's mark, round its card (or tile) at x, y: a thin
+ * frame a little out from it and a tag on its bottom edge */
+static void draw_last_mark(float x, float y, float w, float h, float r, float alpha)
+{
+    const float o = w > h ? 4 : 5;
+    ui_round_outline(x - o, y - o, w + o * 2, h + o * 2, r + o, 1.5f, ui_alpha(UI_GREEN, 0.75f * alpha));
+    const char *tag = T(S_LAST_PLAYED_TAG);
+    const float fs = w > h ? 11 : fminf(12, fmaxf(8, w * 0.075f));
+    /* the small covers' tag a little wider than its card, its words whole */
+    const float tw = fminf(ui_text_width(tag, fs, UI_FONT_BOLD) + fs * 1.4f, w > h ? w - 8 : w + 26), th = fs + 8;
+    const float tx = w > h ? x + w - tw - 8 : x + (w - tw) / 2, ty = y + h - th / 2 + (w > h ? 0 : 1);
+    ui_round(tx, ty, tw, th, th / 2, ui_alpha((UiColor){0x0A, 0x1E, 0x05, 0xFF}, alpha));
+    ui_round_outline(tx, ty, tw, th, th / 2, 1.2f, ui_alpha(UI_GREEN, alpha));
+    ui_text_fit(tx + tw / 2, ty + 3, tag, fs, UI_FONT_BOLD, ui_alpha(UI_GREEN_HI, alpha), UI_ALIGN_CENTER,
+                tw - fs * 0.8f);
+}
+
+/* g's time played and when it was last played, as the Games screen says
+ * them ("" when never played) */
+static void played_text(const LibGame *g, char *out, size_t n)
+{
+    out[0] = 0;
+    char tp[64] = "", lp[96] = "";
+    if (g->playtime >= 60) {
+        const int m = (int)(g->playtime / 60);
+        if (m >= 60) {
+            snprintf(tp, sizeof(tp), T(S_HOURS_MINS), m / 60, m % 60);
+        } else {
+            snprintf(tp, sizeof(tp), T(S_MINS), m);
+        }
+    } else if (g->playtime > 0) {
+        snprintf(tp, sizeof(tp), "< %s", "1 min");
+    }
+    if (g->played > 0) {
+        const time_t now = time(NULL), then = (time_t)g->played;
+        struct tm a = *localtime(&now), b = *localtime(&then);
+        a.tm_hour = b.tm_hour = 12;     /* calendar days apart, not 24 hours */
+        a.tm_min = b.tm_min = a.tm_sec = b.tm_sec = 0;
+        const int days = (int)((mktime(&a) - mktime(&b) + 43200) / 86400);
+        if (days <= 0) {
+            snprintf(lp, sizeof(lp), "%s", T(S_TODAY));
+        } else if (days == 1) {
+            snprintf(lp, sizeof(lp), "%s", T(S_YESTERDAY));
+        } else if (days < 30) {
+            snprintf(lp, sizeof(lp), T(S_DAYS_AGO), days);
+        } else {
+            strftime(lp, sizeof(lp), "%Y-%m-%d", localtime(&then));
+        }
+    }
+    if (tp[0] && lp[0]) {
+        snprintf(out, n, "%s %s  ·  %s %s", T(S_TIME_PLAYED), tp, T(S_LAST_PLAYED_ON), lp);
+    } else if (lp[0]) {
+        snprintf(out, n, "%s %s", T(S_LAST_PLAYED_ON), lp);
+    } else if (tp[0]) {
+        snprintf(out, n, "%s %s", T(S_TIME_PLAYED), tp);
+    }
 }
 
 /* the last card of the grid: the file browser, games added */
@@ -1585,6 +1672,7 @@ static void scr_games(void)
     lib_show_hidden(cfg_bool(&D.global, "ui.showhidden", false));
     static LibGame *vis[MAX_SHOWN];
     const int total = lib_count(), n = dash_find_list(vis, MAX_SHOWN);
+    g_last_played = lib_last_played_time();
     const char *desc = dash_find_desc();
     const bool filtered = desc[0] != 0;
     char sub[300];
@@ -1778,10 +1866,16 @@ static void scr_games(void)
             LibGame *g = vis[i];
             if (view == 2) {
                 draw_tile(g, x, y, cw, ch, s, a);
+                if (is_last_played(g)) {
+                    draw_last_mark(x, y, cw, ch, 8, a);
+                }
             } else {
                 draw_card(g, x, y, cw * k, ch * k, s, a);
                 if (g->fav) {
                     draw_star(x + cw * k - (view ? 11 : 18), y + (view ? 11 : 18), view ? 6 : 10, a);
+                }
+                if (is_last_played(g)) {
+                    draw_last_mark(x, y, cw * k, ch * k, 10, a);
                 }
             }
             if (over && D.in.click) {
@@ -1829,6 +1923,11 @@ static void scr_games(void)
         snprintf(info, sizeof(info), "%s%s%s%s%s  v%u  %.1f GB", file, pub, *pub ? "  " : "", year,
                  region_text(g->g.regions), g->g.version, g->g.size / 1073741824.0);
         ui_text_fit(W - 60, H - 120, info, 20, UI_FONT_REGULAR, UI_GREY, UI_ALIGN_RIGHT, 480);
+        char played[256];
+        played_text(g, played, sizeof(played));
+        if (played[0]) {
+            ui_text_fit(W - 60, H - 94, played, 18, UI_FONT_REGULAR, UI_GREEN, UI_ALIGN_RIGHT, 560);
+        }
         if (D.in.ok) {
             open_game(g);
         }
@@ -1932,6 +2031,13 @@ static void scr_game(void)
     snprintf(info[2], sizeof(info[2]), "%s%s   %.1f GB", pub, year, g->g.size / 1073741824.0);
     for (int i = 0; i < 3; i++) {
         ui_text_fit(70, 160 + ch + 26 * i, info[i], 18, UI_FONT_REGULAR, UI_GREY, UI_ALIGN_LEFT, cw + 20);
+    }
+    {   /* its time played, when last played (#188), under the actions */
+        char played[256];
+        played_text(g, played, sizeof(played));
+        if (played[0]) {
+            ui_text_fit(110 + cw, 160 + ch + 26, played, 18, UI_FONT_REGULAR, UI_GREEN, UI_ALIGN_LEFT, W - 180 - cw);
+        }
     }
     List l;
     list_begin(&l, 110 + cw, 150, W - 180 - cw, ch, 60);

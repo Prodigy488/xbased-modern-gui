@@ -1,5 +1,23 @@
 # xbased changelog
 
+## 1.0.87 (2026-11)
+
+### New
+- The Games screen shows how long you've played each game and when you
+  last played it, under the selected game's details and on its page.
+- The game you played last is marked on the Games screen with a thin frame
+  and a small "Last played" tag, in every view.
+- Nearest neighbour upscaling (Settings > Video > Upscaling) keeps the
+  picture's pixels square and sharp.
+
+### Fixes
+- Hunter: The Reckoning - Redeemer no longer stops with a disc error at its
+  first level, and the soldiers' shadows are dark again instead of yellow.
+- Castlevania: Curse of Darkness gets past its title screen into the game.
+- Dr. Muto no longer stops right after New Game.
+- The in-game menu fades out completely when it's closed, without leaving
+  a tinted picture behind.
+
 ## 1.0.86 (2026-11)
 
 ### Fixes
