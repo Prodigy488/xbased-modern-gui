@@ -1,5 +1,16 @@
 # xbased changelog
 
+## 1.0.89 (2026-11)
+
+### Fixes
+- Oddworld: Stranger's Wrath no longer crashes when you start a new game.
+  The first time it runs, the game fills its cache on the hard disk, and
+  one small file it writes and closes straight away was still being
+  written in the background when the game had already moved on. Finishing
+  that write later scribbled over the game's memory. Now a file's pending
+  reads and writes finish before it's closed, as on the console. This had
+  been broken since 1.0.49.
+
 ## 1.0.88 (2026-11)
 
 ### New

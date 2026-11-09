@@ -730,10 +730,13 @@ static void flush_later(const NcFile *nf)
     closer_queue(&j);
 }
 
+static void io_drain_file(NcKernel *k, unsigned i);
+
 void nc_io_close(NcKernel *k, uint32_t object)
 {
     uint32_t i = nc_vm_rd32(k->vm, object + FO_INDEX);
     if (i < MAX_FILES && g_files[i].used) {
+        io_drain_file(k, i);    /* its reads and writes in flight complete first */
         NcFile *nf = &g_files[i];
         if (nf->fd >= 0 && nf->wrote) {
             close_later(nf);
@@ -975,6 +978,7 @@ typedef struct DiscJob {
     uint32_t thread_id;      /* its id then: the slot may hold another thread by the end */
     bool sync;               /* a synchronous handle's: the thread waits for it (nc_ke_block) */
     bool write;              /* a hard disk file's write from the buffer (write_data), not a read */
+    unsigned slot;           /* its file's slot (g_files), counted in g_file_jobs till it completes */
     bool ok;
     int err;
     char path[64]; /* for the log */
@@ -997,6 +1001,7 @@ typedef struct Reader {
 
 static Reader g_readers[2] = {{PTHREAD_MUTEX_INITIALIZER, PTHREAD_COND_INITIALIZER},
                               {PTHREAD_MUTEX_INITIALIZER, PTHREAD_COND_INITIALIZER}};
+static unsigned g_file_jobs[MAX_FILES];    /* each file's jobs queued and not yet completed (the guest CPU's) */
 static bool g_io_hurry;      /* a savestate's drain: no drive time left to wait (atomic) */
 
 static uint64_t mono_ns(void)
@@ -1112,7 +1117,7 @@ static bool disc_read_later(NcKernel *k, const NcFile *nf, const uint32_t *a, co
     DiscJob j = {.disc = k->disc, .file = nf->disc, .fd = -1, .off = off, .va = run[0].va, .n = n,
                  .dev_us = dev_us, .iosb = a[4], .event = event, .apc = a[2], .apc_ctx = a[3],
                  .thread = k->current, .thread_id = k->current ? k->current->id : 0, .sync = sync,
-                 .write = write};
+                 .write = write, .slot = (unsigned)(nf - g_files)};
     snprintf(j.path, sizeof(j.path), "%s", nf->path);
     const struct FilePort *fp = file_port(k, a);
     if (fp) {
@@ -1164,6 +1169,7 @@ static bool disc_read_later(NcKernel *k, const NcFile *nf, const uint32_t *a, co
     }
     const bool queued = r->started && r->busy < DISC_JOBS;
     if (queued) {
+        g_file_jobs[j.slot]++;
         pin_buffer(k, &j, 1);
         r->q[(r->head + r->n++) % DISC_JOBS] = j;
         r->busy++;
@@ -1184,6 +1190,9 @@ static bool disc_read_later(NcKernel *k, const NcFile *nf, const uint32_t *a, co
 
 static void disc_read_done(NcKernel *k, const DiscJob *j)
 {
+    if (j->slot < MAX_FILES && g_file_jobs[j->slot]) {
+        g_file_jobs[j->slot]--;
+    }
     pin_buffer(k, j, -1);
     const bool ok = j->ok;
     const int err = j->err;
@@ -1220,12 +1229,10 @@ static void disc_read_done(NcKernel *k, const DiscJob *j)
     }
 }
 
-void nc_io_poll(NcKernel *k)
+/* The jobs the drives finished, completed: their IoStatusBlocks, events,
+ * APCs, waiting threads. done: room for DISC_JOBS. */
+static void io_complete_done(NcKernel *k, DiscJob *done)
 {
-    if (!nc_irq_take_work()) {
-        return;
-    }
-    static DiscJob done[DISC_JOBS]; /* the guest CPU's thread only */
     for (unsigned d = 0; d < 2; d++) {
         Reader *const r = &g_readers[d];
         pthread_mutex_lock(&r->mu);
@@ -1237,6 +1244,43 @@ void nc_io_poll(NcKernel *k)
         for (unsigned i = 0; i < n; i++) {
             disc_read_done(k, &done[i]);
         }
+    }
+}
+
+void nc_io_poll(NcKernel *k)
+{
+    if (!nc_irq_take_work()) {
+        return;
+    }
+    static DiscJob done[DISC_JOBS]; /* the guest CPU's thread only */
+    io_complete_done(k, done);
+}
+
+/* A file's last handle closes with its reads and writes still in flight:
+ * they complete before it goes, as the console's do by then. Oddworld:
+ * Stranger's Wrath writes a 512-byte file overlapped and unbuffered, its
+ * OVERLAPPED on the stack, and closes it at once without waiting; the
+ * write's IoStatusBlock, completed later, landed where the stack then held
+ * a saved EBP and a return address, and the thread returned to 0x200 (the
+ * byte count) as New Game began (#208). In the guest CPU's thread, which
+ * waits here: a moment, on any drive. */
+static void io_drain_file(NcKernel *k, unsigned i)
+{
+    if (!g_file_jobs[i]) {
+        return;
+    }
+    static DiscJob done[DISC_JOBS];
+    const uint64_t t0 = mono_ns();
+    while (g_file_jobs[i] && mono_ns() - t0 < 10000000000ull) {
+        io_complete_done(k, done);
+        if (g_file_jobs[i]) {
+            usleep(200);
+        }
+    }
+    if (g_file_jobs[i]) {
+        nc_log("hakuX-native-io", "%s closed with %u requests still in flight after 10 s", g_files[i].path,
+               g_file_jobs[i]);
+        g_file_jobs[i] = 0;
     }
 }
 
