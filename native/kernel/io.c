@@ -2244,12 +2244,17 @@ static uint64_t write_data(NcKernel *k, const uint32_t *a, const uint8_t *src, u
      * slow drive (a USB hard disk, an SD card) held the whole console:
      * Project Gotham Racing 2's intro video stood still for minutes while
      * it copied its cars to its cache. An overlapped write only when it
-     * pends on the console too (io_finish): with an event or an APC, or past
-     * the cache (no_buffering). One with neither, through the cache, is done
-     * in the call there: pended, Hunter: The Reckoning - Redeemer took its
-     * settings' write as failed as its first level began ("a problem with
-     * the disc"), since 1.0.49. */
-    const bool pends = nf->async ? a[1] || a[2] || nf->no_buffering : can_block(k);
+     * pends on the console too (io_finish): past the cache (no_buffering).
+     * One through the cache is done in the caller's thread there, the
+     * cache's copy and the disk's write both, event or APC or neither, and
+     * completes in the call. Pended, Hunter: The Reckoning - Redeemer took
+     * its settings' write (neither) as failed as its first level began ("a
+     * problem with the disc"), since 1.0.49; and Breakdown, which copies a
+     * level's blocks to the cache drive in 16 KiB overlapped writes with an
+     * event, took WriteFile's ERROR_IO_PENDING as a failed copy, kept the
+     * first 16 KiB, and loaded the rest as zeros: the player fell through
+     * the floor of its first room. */
+    const bool pends = nf->async ? nf->no_buffering : can_block(k);
     if (later && len && va && pends) {
         const IoRun run = {va, len};
         if (disc_read_later(k, nf, a, &run, 1, off, len, !nf->async, 0, true)) {

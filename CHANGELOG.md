@@ -1,5 +1,22 @@
 # xbased changelog
 
+## 1.0.92 (2026-11)
+
+### New
+- Extracted games play from their folder. A folder holding a game's
+  `default.xbe` and the rest of its files is read as the disc it came
+  from, and the library finds it like a disc image, with its name, icon
+  and cover. Open the folder (or its `default.xbe`) from the command line
+  too. Network paths such as `\\server\share\game` work as well.
+
+### Fixes
+- Breakdown no longer drops you through the floor of its first room after
+  the opening cutscene. The game copies each area's data from the disc to
+  the hard disk's cache, and xbased answered its writes to the cache as
+  still in progress, which the game took as a failed copy. Only the first
+  16 KB of the area made it, and the room loaded empty. Writes through the
+  hard disk's cache now finish at once, as on the console.
+
 ## 1.0.91 (2026-11)
 
 ### Fixes

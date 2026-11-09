@@ -42,8 +42,8 @@ No BIOS, MCPX ROM or hard-disk image is needed.
 
 | Platform | File | |
 |---|---|---|
-| **Windows** 10/11 (x64) | `xbased-1.0.91-windows-x64.zip` | Unzip anywhere and run `xbased.exe`. Portable: everything stays in its folder. |
-| **Linux** (x86-64) | `xbased-1.0.91-x86_64.AppImage` | `chmod +x` it and run. Ubuntu 22.04 or newer, or any distribution of the same age. |
+| **Windows** 10/11 (x64) | `xbased-1.0.92-windows-x64.zip` | Unzip anywhere and run `xbased.exe`. Portable: everything stays in its folder. |
+| **Linux** (x86-64) | `xbased-1.0.92-x86_64.AppImage` | `chmod +x` it and run. Ubuntu 22.04 or newer, or any distribution of the same age. |
 
 Get them from **[Releases](https://github.com/crazyriddler/xbased/releases/latest)**.
 
@@ -93,6 +93,8 @@ xbased doesn't include any copyrighted Xbox software.
   it, pick your own cover image, hide it, or make a **desktop shortcut** that
   starts it straight away (handy for Steam and other front ends).
 - **Disc images**: ISO, XISO and **CHD** (`chdman createdvd` or `createcd`).
+- **Extracted games**: a folder with the game's `default.xbe` and its files
+  plays as the disc, and shows in the library like an image.
 - **Memory manager**: your games' saves with their icons; export, import and
   delete.
 - **Import from xemu**: xemu's saves copied in and re-signed so games accept
@@ -214,7 +216,7 @@ xbased doesn't include any copyrighted Xbox software.
 3. Choose a game in **Games**. Box art downloads automatically (it can be
    turned off).
 
-Command line: `xbased <image.iso or .chd> [options]` starts a game directly; options
+Command line: `xbased <image.iso, .chd or a game's folder> [options]` starts a game directly; options
 are the same as the settings files' lines (`scale=2`, `uncap`, `crt=2`,
 `fullscreen=0`, `mod=<patch>`...). Settings are kept in `xbased.ini` (global)
 and `games/<TITLE ID>.<version>.ini` (per game) beside the executable on

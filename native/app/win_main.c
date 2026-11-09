@@ -38,6 +38,7 @@
 #include "native/app/ui/xbox_data.h"
 #include "native/app/ui/xemu_import.h"
 #include "native/app/win_aslr.h"
+#include "native/core/fold_image.h"
 #include "native/app/win_frame.h"
 #ifndef _WIN32
 #include <poll.h>
@@ -1314,7 +1315,7 @@ static const char *pick_disc(void)
 }
 
 #ifndef XBASED_VERSION
-#define XBASED_VERSION "1.0.91"
+#define XBASED_VERSION "1.0.92"
 #endif
 
 static void rm_tree(const char *path)
@@ -1554,7 +1555,9 @@ int main(int argc, char *argv[])
     if (!xbox_dash) {
         snprintf(g_disc, sizeof(g_disc), "%s", disc);
         game_options(g_disc);
-        g_disc_fd = open(g_disc, O_RDONLY | O_BINARY);
+        /* an extracted game: its folder (or default.xbe) read as the disc it makes */
+        char xbe[MAX_PATH * 2];
+        g_disc_fd = open(nc_fold_xbe_path(g_disc, xbe, sizeof(xbe)) ? xbe : g_disc, O_RDONLY | O_BINARY);
         if (g_disc_fd < 0) {
             nc_log("hakuX-app", "can't open the disc %s", g_disc);
         }

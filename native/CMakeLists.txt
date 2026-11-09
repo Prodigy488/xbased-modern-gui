@@ -150,7 +150,7 @@ target_include_directories(hakux_native PRIVATE "${NC_XXHASH_DIR}")
 target_compile_definitions(hakux_native PRIVATE HLE_HOST_TEST)
 target_link_libraries(hakux_native PUBLIC ${NC_CPU_LIB} hakux_hle hakux_apu nc_slirp ${NC_SYS_LIBS} z)
 target_compile_options(hakux_native PRIVATE -Wall -Wno-unused-parameter)
-target_sources(hakux_native PRIVATE core/chd_image.c)
+target_sources(hakux_native PRIVATE core/chd_image.c core/fold_image.c)
 
 # libchdr (NC_DEPS/libchdr, BSD-3, unmodified): CHD disc images
 # (core/chd_image.c), with its own LZMA, Zstandard and FLAC decoders and the
