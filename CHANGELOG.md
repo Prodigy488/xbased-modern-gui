@@ -1,5 +1,14 @@
 # xbased changelog
 
+## 1.0.93 (2026-11)
+
+### New
+- Add games has an "Other location..." entry at the end of its places. It
+  opens the system's own folder picker (a file picker where one file is
+  asked for), where you can type a network path such as `\\server\games`
+  or browse anywhere the places don't list. An extracted game's folder
+  chosen there goes straight into the library.
+
 ## 1.0.92 (2026-11)
 
 ### New
