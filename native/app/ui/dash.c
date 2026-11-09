@@ -22,7 +22,7 @@
 #endif
 
 #ifndef XBASED_VERSION
-#define XBASED_VERSION "1.0.87"
+#define XBASED_VERSION "1.0.88"
 #endif
 
 Dash D;
@@ -709,6 +709,71 @@ float draw_hints(const char *a, const char *b, const char *x, const char *y)
     return px;
 }
 
+/* The day as the console's corner says it, under the time, in the
+ * interface's language: the weekday, the day and the month (the month's
+ * genitive in Russian and Polish) */
+static void date_text(const struct tm *t, char *out, size_t n)
+{
+    static const char *const k_wd[L_COUNT][7] = {
+        {"Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"},
+        {"domingo", "lunes", "martes", "miércoles", "jueves", "viernes", "sábado"},
+        {"dimanche", "lundi", "mardi", "mercredi", "jeudi", "vendredi", "samedi"},
+        {"Sonntag", "Montag", "Dienstag", "Mittwoch", "Donnerstag", "Freitag", "Samstag"},
+        {"domenica", "lunedì", "martedì", "mercoledì", "giovedì", "venerdì", "sabato"},
+        {"domingo", "segunda-feira", "terça-feira", "quarta-feira", "quinta-feira", "sexta-feira", "sábado"},
+        {"воскресенье", "понедельник", "вторник", "среда", "четверг", "пятница", "суббота"},
+        {"niedziela", "poniedziałek", "wtorek", "środa", "czwartek", "piątek", "sobota"},
+        {"日", "月", "火", "水", "木", "金", "土"},
+        {"星期日", "星期一", "星期二", "星期三", "星期四", "星期五", "星期六"},
+        {"일", "월", "화", "수", "목", "금", "토"},
+    };
+    static const char *const k_mon[L_COUNT][12] = {
+        {"January", "February", "March", "April", "May", "June", "July", "August", "September", "October",
+         "November", "December"},
+        {"enero", "febrero", "marzo", "abril", "mayo", "junio", "julio", "agosto", "septiembre", "octubre",
+         "noviembre", "diciembre"},
+        {"janvier", "février", "mars", "avril", "mai", "juin", "juillet", "août", "septembre", "octobre",
+         "novembre", "décembre"},
+        {"Januar", "Februar", "März", "April", "Mai", "Juni", "Juli", "August", "September", "Oktober",
+         "November", "Dezember"},
+        {"gennaio", "febbraio", "marzo", "aprile", "maggio", "giugno", "luglio", "agosto", "settembre", "ottobre",
+         "novembre", "dicembre"},
+        {"janeiro", "fevereiro", "março", "abril", "maio", "junho", "julho", "agosto", "setembro", "outubro",
+         "novembro", "dezembro"},
+        {"января", "февраля", "марта", "апреля", "мая", "июня", "июля", "августа", "сентября", "октября",
+         "ноября", "декабря"},
+        {"stycznia", "lutego", "marca", "kwietnia", "maja", "czerwca", "lipca", "sierpnia", "września",
+         "października", "listopada", "grudnia"},
+        {"", "", "", "", "", "", "", "", "", "", "", ""},
+        {"", "", "", "", "", "", "", "", "", "", "", ""},
+        {"", "", "", "", "", "", "", "", "", "", "", ""},
+    };
+    const int l = (int)i18n_lang(), wd = t->tm_wday % 7, mo = t->tm_mon % 12, d = t->tm_mday;
+    const char *w = k_wd[l][wd], *m = k_mon[l][mo];
+    switch (l) {
+    case L_EN: snprintf(out, n, "%s, %s %d", w, m, d); break;
+    case L_ES: case L_PT: snprintf(out, n, "%s, %d de %s", w, d, m); break;
+    case L_FR: case L_IT: snprintf(out, n, "%s %d %s", w, d, m); break;
+    case L_DE: snprintf(out, n, "%s, %d. %s", w, d, m); break;
+    case L_RU: case L_PL: snprintf(out, n, "%s, %d %s", w, d, m); break;
+    case L_JA: snprintf(out, n, "%d月%d日 (%s)", mo + 1, d, w); break;
+    case L_ZH: snprintf(out, n, "%d月%d日 %s", mo + 1, d, w); break;
+    default: snprintf(out, n, "%d월 %d일 (%s)", mo + 1, d, w); break;
+    }
+    /* the weekday first, a capital letter (Latin-1's and Cyrillic's too) */
+    unsigned char *u = (unsigned char *)out;
+    if (u[0] >= 'a' && u[0] <= 'z') {
+        u[0] = (unsigned char)(u[0] - 32);
+    } else if (u[0] == 0xC5 && u[1] == 0x9B) {
+        u[1] = 0x9A;                            /* ś: Ś */
+    } else if (u[0] == 0xD0 && u[1] >= 0xB0 && u[1] <= 0xBF) {
+        u[1] = (unsigned char)(u[1] - 0x20);
+    } else if (u[0] == 0xD1 && u[1] >= 0x80 && u[1] <= 0x8F) {
+        u[0] = 0xD0;
+        u[1] = (unsigned char)(u[1] + 0x20);
+    }
+}
+
 void draw_header(const char *title, const char *sub)
 {
     const float W = ui_w();
@@ -727,7 +792,25 @@ void draw_header(const char *title, const char *sub)
 #else
     localtime_r(&now, &tmv);
 #endif
-    ui_text(W - 60, 40, dash_hm(tmv.tm_hour, tmv.tm_min), 30, UI_FONT_BOLD, UI_GREEN, UI_ALIGN_RIGHT);
+    /* the time, its colon breathing with the seconds, the day under it */
+    char hm[16];
+    snprintf(hm, sizeof(hm), "%s", dash_hm(tmv.tm_hour, tmv.tm_min));
+    char *colon = strchr(hm, ':');
+    if (colon) {
+        *colon = 0;
+        const char *right = colon + 1;
+        const float rw = ui_text_width(right, 30, UI_FONT_BOLD), cw = ui_text_width(":", 30, UI_FONT_BOLD);
+        const double frac = fmod(ui_time(), 1.0);
+        const float a = 0.45f + 0.55f * (float)(0.5 + 0.5 * cos(frac * 6.2831853));
+        ui_text(W - 60, 26, right, 30, UI_FONT_BOLD, UI_GREEN_HI, UI_ALIGN_RIGHT);
+        ui_text(W - 60 - rw - cw, 24, ":", 30, UI_FONT_BOLD, ui_alpha(UI_GREEN_HI, a), UI_ALIGN_LEFT);
+        ui_text(W - 60 - rw - cw - 1, 26, hm, 30, UI_FONT_BOLD, UI_GREEN_HI, UI_ALIGN_RIGHT);
+    } else {
+        ui_text(W - 60, 26, hm, 30, UI_FONT_BOLD, UI_GREEN_HI, UI_ALIGN_RIGHT);
+    }
+    char day[96];
+    date_text(&tmv, day, sizeof(day));
+    ui_text(W - 60, 66, day, 19, UI_FONT_REGULAR, UI_GREY, UI_ALIGN_RIGHT);
 }
 
 const char *dash_hm(int hour, int minute)
@@ -830,6 +913,31 @@ bool list_row(List *l, const char *label, const char *value, int *delta)
     return row_chosen(l, i);
 }
 
+void list_heading(List *l, const char *title)
+{
+    const int i = l->count++;
+    if (l->nhead < 8) {
+        l->head[l->nhead++] = i;
+    }
+    if (i < *l->scroll || i >= *l->scroll + l->visible) {
+        return;
+    }
+    /* the section's name small and green over a line, its rows under it */
+    const float ry = l->y + (i - *l->scroll) * l->row_h, ty = ry + l->row_h - 34;
+    const float tw = ui_text(l->x + 12, ty, title, 20, UI_FONT_BOLD, UI_GREEN_HI, UI_ALIGN_LEFT);
+    ui_rect_hgrad(l->x + 26 + tw, ty + 11, l->w - 38 - tw, 2, ui_alpha(UI_GREEN, 0.55f), ui_alpha(UI_GREEN, 0.0f));
+}
+
+static bool is_heading(const List *l, int i)
+{
+    for (int k = 0; k < l->nhead; k++) {
+        if (l->head[k] == i) {
+            return true;
+        }
+    }
+    return false;
+}
+
 bool list_row_icon(List *l, UiTex *icon, const char *label, const char *sub, const char *value, int *delta)
 {
     float ry;
@@ -880,7 +988,14 @@ void list_end(List *l)
     if (*l->sel >= l->count) {
         *l->sel = l->count - 1;
     }
+    /* never on a heading: on past it, the way the selection went */
+    for (int guard = 0; l->nhead && guard < l->count && is_heading(l, *l->sel); guard++) {
+        *l->sel = (*l->sel + (D.in.up ? l->count - 1 : 1)) % l->count;
+    }
     if (D.in.up || D.in.down || !D.in.wheel) {
+        if (*l->sel > 0 && is_heading(l, *l->sel - 1) && *l->sel - 1 < *l->scroll) {
+            *l->scroll = *l->sel - 1;   /* a section's first row: its heading in sight */
+        }
         if (*l->sel < *l->scroll) {
             *l->scroll = *l->sel;
         }
@@ -1332,6 +1447,13 @@ static void wait_child(void)
     cfg_load(&D.global, D.global.path);     /* the game may have changed settings */
     upscale_migrate(&D.global);
     cfg_shaders_migrate(&D.global);
+    if (D.cur && D.game.path[0]) {
+        /* and its own (the in-game menu's Game settings): the ones read
+         * before it ran went back over them as it was played again (#210) */
+        cfg_load(&D.game, D.game.path);
+        upscale_migrate(&D.game);
+        cfg_shaders_migrate(&D.game);
+    }
     cc_sync(&D.global);                     /* ... or its EEPROM (a title's own options) */
     g_auto_off = -1;    /* the scripted commands meanwhile were the game's */
 }

@@ -42,6 +42,7 @@
 #ifdef _WIN32
 #include <windows.h>
 #include "hw/xbox/hle/vk/share.h"
+#include <psapi.h>
 #endif
 #if defined(NC_DESKTOP) && !defined(_WIN32)
 #include <SDL3/SDL_vulkan.h>
@@ -1152,13 +1153,39 @@ static void remote_drop(void)
     g_rm.on = false;
 }
 
+/* ReShade in this process (its Vulkan layer, or a DLL of its in the
+ * folder): any module that exports its add-on entry */
+static bool reshade_loaded(void)
+{
+    HMODULE mods[512];
+    DWORD bytes = 0;
+    if (!K32EnumProcessModules(GetCurrentProcess(), mods, sizeof(mods), &bytes)) {
+        return false;
+    }
+    const DWORD n = bytes / sizeof(HMODULE) < 512 ? bytes / sizeof(HMODULE) : 512;
+    for (DWORD i = 0; i < n; i++) {
+        if (GetProcAddress(mods[i], "ReShadeRegisterAddon")) {
+            return true;
+        }
+    }
+    return false;
+}
+
 /* Whether this GPU's driver imports D3D12 images and fences (as RetroArch
- * asks before presenting Vulkan through DXGI): said once in the log. */
+ * asks before presenting Vulkan through DXGI): said once in the log. With
+ * ReShade loaded, no: it draws on a swapchain of this process's, which the
+ * frame's pictures leave it none of (#198), so the window has its own
+ * again, as before the frame. */
 static bool remote_can(void)
 {
     static int can = -1;
     if (can >= 0) {
         return can != 0;
+    }
+    if (reshade_loaded()) {
+        can = 0;
+        hle_log("hakuX-hle-back", "present: ReShade is loaded: the window's own swapchain, for it to draw on");
+        return false;
     }
     VkPhysicalDeviceExternalSemaphoreInfo si = { .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_EXTERNAL_SEMAPHORE_INFO,
                                                  .handleType = VK_EXTERNAL_SEMAPHORE_HANDLE_TYPE_D3D12_FENCE_BIT };

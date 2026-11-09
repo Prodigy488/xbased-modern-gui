@@ -1,5 +1,31 @@
 # xbased changelog
 
+## 1.0.88 (2026-11)
+
+### New
+- Cheats have a section of their own in Mods & patches, under the frame
+  rate and the other mods. Their names are cleaned up and written properly
+  (abbreviations and misspellings spelled out, stray symbols gone, the
+  player and the buttons at the end), and the common ones are translated
+  into the interface's language.
+- When a game has several cheat files, xbased picks the ones made for your
+  disc's exact release and region by itself, and an option that two files
+  both give shows only once.
+- The date sits under the clock at the top of the dashboard, in the
+  interface's language.
+
+### Fixes
+- The game's window no longer comes up with its title bar above the top of
+  the screen. With Windows' display scaling at 125% or more, the window
+  was taller than the screen; now it's made to fit the screen and the
+  taskbar, on the monitor the dashboard is on, and coming back from full
+  screen (Alt+Enter) keeps the title bar on screen too.
+- ReShade works again. Since 1.0.82 the session's window drew the game's
+  picture itself, which left ReShade nothing to draw on; with ReShade
+  loaded, the game now draws in its own window as it did before.
+- A game's settings changed from the in-game menu (Game settings) are no
+  longer undone when you play that game again from the dashboard.
+
 ## 1.0.87 (2026-11)
 
 ### New

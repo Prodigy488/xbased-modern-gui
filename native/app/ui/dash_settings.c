@@ -5,6 +5,7 @@
  */
 #include "native/app/ui/console_cfg.h"
 #include "native/app/ui/dash_int.h"
+#include "native/app/ui/cheat_text.h"
 #include "native/app/ui/input_map.h"
 #include "native/app/mod_fit.h"
 #include "native/app/win_mods.h"
@@ -489,7 +490,11 @@ typedef struct {
     char file[160];                 /* cheats/<TITLE ID>/<file> */
     char from[88];                  /* the file's own title */
     char label[88];
+    char shown[160];                /* the label as the screen says it (cheat_text) */
+    int shown_lang;                 /* in that language, -1 not yet */
     int idx, nopts;
+    int rank;                       /* 2 its trainer checks this disc's build, 1 it checks none */
+    bool dup;                       /* another trainer's option of the same name comes first */
 } XOpt;
 
 static XOpt g_xopts[256];
@@ -513,8 +518,11 @@ static void xcheats_scan(const char *root, const FitXbe *xbe)
         if (dup || !nc_xcheat_load(full, &x)) {
             continue;
         }
-        /* one made for another build (most name theirs) would patch
-         * nothing here: left out */
+        /* one made for another build (another region, another release:
+         * most name theirs) would patch nothing here: left out */
+        uint32_t builds[32];
+        bool checks = false;
+        const int nb = fit_cheat_builds(x.data, x.size, builds, 32, &checks);
         const bool other_build = xbe && !fit_cheat_for_build(x.data, x.size, xbe->time);
         if (nc_xcheat_for_title(&x, D.cur->g.title_id) && !other_build) {
             for (int o = 0; o < x.nopts && g_nxopts < 256; o++) {
@@ -522,8 +530,11 @@ static void xcheats_scan(const char *root, const FitXbe *xbe)
                 snprintf(e->file, sizeof(e->file), "%s", rel);
                 snprintf(e->from, sizeof(e->from), "%s", x.name);
                 snprintf(e->label, sizeof(e->label), "%s", x.labels[o]);
+                e->shown_lang = -1;
                 e->idx = o;
                 e->nopts = x.nopts;
+                e->rank = xbe && nb > 0 ? 2 : 1;
+                e->dup = false;
             }
         }
         nc_xcheat_free(&x);
@@ -544,6 +555,46 @@ static void xcheats_load(void)
     xcheats_scan(cfg_data_dir(), have ? &xbe : NULL);     /* the user's first */
     if (strcmp(cfg_data_dir(), cfg_exe_dir())) {
         xcheats_scan(cfg_exe_dir(), have ? &xbe : NULL);
+    }
+    /* the trainers that check this disc's build, when there are any: the
+     * others (that check nothing) may be another release's */
+    int best = 0;
+    for (int i = 0; i < g_nxopts; i++) {
+        best = g_xopts[i].rank > best ? g_xopts[i].rank : best;
+    }
+    int k = 0;
+    for (int i = 0; i < g_nxopts; i++) {
+        if (g_xopts[i].rank == best) {
+            g_xopts[k++] = g_xopts[i];
+        }
+    }
+    g_nxopts = k;
+    /* the trainer with the most options first (then a trainer's revision,
+     * "rev"), its options in their order, then the others' */
+    for (int i = 1; i < g_nxopts; i++) {
+        for (int j = i; j > 0; j--) {
+            const XOpt *a = &g_xopts[j - 1], *b = &g_xopts[j];
+            if (!strcmp(a->file, b->file)) {
+                break;
+            }
+            const int sa = a->nopts * 4 + (SDL_strcasestr(a->from, "rev") ? 1 : 0);
+            const int sb = b->nopts * 4 + (SDL_strcasestr(b->from, "rev") ? 1 : 0);
+            if (sb <= sa) {
+                break;
+            }
+            const XOpt t = g_xopts[j - 1];
+            g_xopts[j - 1] = g_xopts[j];
+            g_xopts[j] = t;
+        }
+    }
+    /* an option another trainer already gives (the same name): one row */
+    for (int i = 0; i < g_nxopts; i++) {
+        char a[160], b[160];
+        cheat_text(g_xopts[i].label, L_EN, a, sizeof(a));
+        for (int j = 0; j < i && !g_xopts[i].dup; j++) {
+            cheat_text(g_xopts[j].label, L_EN, b, sizeof(b));
+            g_xopts[i].dup = !SDL_strcasecmp(a, b) && strcmp(g_xopts[i].file, g_xopts[j].file);
+        }
     }
 }
 
@@ -826,29 +877,55 @@ void scr_mods(void)
             help = fp ? tip : T(S_UNCAP_HELP);
         }
     }
-    for (int i = 0; i < g_nmods; i++) {
-        ModItem *m = &g_mods[i];
-        char label[160];
-        snprintf(label, sizeof(label), "%s%s", m->cheat ? "[cheat] " : "", m->name);
-        int delta = 0;
-        if (list_row(&l, label, mod_on(m) ? T(S_ON) : T(S_OFF), &delta) || delta) {
-            if (mod_on(m)) {
-                cfg_remove_value(&D.game, m->cheat ? "cheat" : "mod", m->id);
-            } else {
-                cfg_add(&D.game, m->cheat ? "cheat" : "mod", m->id);
+    /* the mods and patches, then the cheats in a section of their own,
+     * their names written properly in the interface's language */
+    bool any_cheat = g_nxopts > 0;
+    for (int pass = 0; pass < 2; pass++) {
+        for (int i = 0; i < g_nmods; i++) {
+            ModItem *m = &g_mods[i];
+            if (m->cheat != (pass == 1)) {
+                any_cheat |= m->cheat;
+                continue;
+            }
+            char label[160];
+            if (m->cheat) {
+                cheat_text(m->name, i18n_lang(), label, sizeof(label));
+            }
+            if (!m->cheat || !label[0]) {
+                snprintf(label, sizeof(label), "%s", m->name);
+            }
+            int delta = 0;
+            if (list_row(&l, label, mod_on(m) ? T(S_ON) : T(S_OFF), &delta) || delta) {
+                if (mod_on(m)) {
+                    cfg_remove_value(&D.game, m->cheat ? "cheat" : "mod", m->id);
+                } else {
+                    cfg_add(&D.game, m->cheat ? "cheat" : "mod", m->id);
+                }
+            }
+            if (list_selected(&l)) {
+                shown = m;
             }
         }
-        if (list_selected(&l)) {
-            shown = m;
+        if (pass == 0 && any_cheat) {
+            list_heading(&l, T(S_CHEATS));
         }
     }
     static char xhelp[512];
     for (int i = 0; i < g_nxopts; i++) {
-        const XOpt *e = &g_xopts[i];
-        char label[160];
-        snprintf(label, sizeof(label), "[cheat] %s", e->label);
+        XOpt *e = &g_xopts[i];
+        if (e->shown_lang != (int)i18n_lang()) {
+            cheat_text(e->label, i18n_lang(), e->shown, sizeof(e->shown));
+            e->shown_lang = (int)i18n_lang();
+        }
+        if (!e->shown[0]) {
+            continue;       /* a trainer's empty slot ("", "---") */
+        }
+        const char *label = e->shown;
         const char *st = xcheat_states(e->file);
         const bool on = e->idx < (int)strlen(st) && st[e->idx] == '1';
+        if (e->dup && !on) {
+            continue;       /* the first trainer's row gives it (one left on stays, to turn off) */
+        }
         int delta = 0;
         if (list_row(&l, label, on ? T(S_ON) : T(S_OFF), &delta) || delta) {
             xcheat_toggle(e);

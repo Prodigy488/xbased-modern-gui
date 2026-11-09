@@ -145,7 +145,13 @@ static void set_fullscreen(bool on)
     } else {
         mode_restore();
         SetWindowLongPtrA(g_fw, GWL_STYLE, WS_OVERLAPPEDWINDOW | WS_VISIBLE | WS_CLIPCHILDREN);
-        const RECT r = g_wrect;
+        /* its place back, the title bar on the screen whatever it was */
+        RECT r = g_wrect;
+        MONITORINFO wi = {sizeof(wi)};
+        GetMonitorInfoA(MonitorFromRect(&r, MONITOR_DEFAULTTONEAREST), &wi);
+        if (r.top < wi.rcWork.top) {
+            OffsetRect(&r, 0, wi.rcWork.top - r.top);
+        }
         SetWindowPos(g_fw, HWND_NOTOPMOST, r.left, r.top, r.right - r.left, r.bottom - r.top, SWP_FRAMECHANGED);
     }
     g_fs = on;
@@ -838,16 +844,36 @@ int nc_frame_main(int argc, char **argv)
     if (!RegisterClassExW(&wc)) {
         return 3;
     }
-    /* a window's size as the run's own was (1280x960 at the desktop's
-     * scale), centered */
-    const UINT dpi = GetDpiForSystem();
-    RECT r = {0, 0, MulDiv(1280, (int)dpi, 96), MulDiv(960, (int)dpi, 96)};
-    AdjustWindowRectExForDpi(&r, WS_OVERLAPPEDWINDOW, FALSE, 0, dpi);
-    const int ww = r.right - r.left, wh = r.bottom - r.top;
+    /* on the dashboard's monitor (the primary one without it), a window's
+     * size as the run's own was (1280x960 at that monitor's scale),
+     * centered, made smaller (still 4:3) where it wouldn't fit the screen
+     * and the taskbar: at 125% or 150% on a 1080p screen it was taller than
+     * the screen, its title bar above the top edge, out of reach */
+    const char *de = getenv("XBASED_DASH_HWND");
+    HWND dash = de && de[0] ? (HWND)(uintptr_t)strtoull(de, NULL, 16) : NULL;
+    HMONITOR mon = dash && IsWindow(dash) ? MonitorFromWindow(dash, MONITOR_DEFAULTTOPRIMARY)
+                                          : MonitorFromPoint((POINT){0, 0}, MONITOR_DEFAULTTOPRIMARY);
     MONITORINFO mi = {sizeof(mi)};
-    GetMonitorInfoA(MonitorFromPoint((POINT){0, 0}, MONITOR_DEFAULTTOPRIMARY), &mi);
-    const int x = mi.rcWork.left + ((mi.rcWork.right - mi.rcWork.left) - ww) / 2;
-    const int y = mi.rcWork.top + ((mi.rcWork.bottom - mi.rcWork.top) - wh) / 2;
+    GetMonitorInfoA(mon, &mi);
+    const UINT dpi = dash && IsWindow(dash) ? GetDpiForWindow(dash) : GetDpiForSystem();
+    const int aw = mi.rcWork.right - mi.rcWork.left, ah = mi.rcWork.bottom - mi.rcWork.top;
+    RECT edge = {0, 0, 0, 0};
+    AdjustWindowRectExForDpi(&edge, WS_OVERLAPPEDWINDOW, FALSE, 0, dpi);
+    const int ew = edge.right - edge.left, eh = edge.bottom - edge.top;
+    int cw = MulDiv(1280, (int)dpi, 96), ch = MulDiv(960, (int)dpi, 96);
+    const int fit_w = aw * 95 / 100 - ew, fit_h = ah * 95 / 100 - eh;
+    if (cw > fit_w || ch > fit_h) {
+        if ((int64_t)fit_w * 3 < (int64_t)fit_h * 4) {
+            cw = fit_w;
+            ch = fit_w * 3 / 4;
+        } else {
+            ch = fit_h;
+            cw = fit_h * 4 / 3;
+        }
+    }
+    const int ww = cw + ew, wh = ch + eh;
+    const int x = mi.rcWork.left + (aw - ww) / 2;
+    const int y = mi.rcWork.top + (ah - wh) / 2;
     g_fw = CreateWindowExW(0, wcls, title, WS_OVERLAPPEDWINDOW | WS_CLIPCHILDREN, x, y, ww, wh, NULL, NULL, hi, NULL);
     if (!g_fw) {
         return 4;
