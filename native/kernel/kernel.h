@@ -179,6 +179,7 @@ typedef struct NcThread {
      * ends, a step a quantum. no_boost: KeSetDisableBoostThread's. */
     int boost;
     bool no_boost;
+    int8_t saturation;              /* KeSetBasePriorityThread's +-16: +1, -1, else 0 */
     NcCpuContext ctx;
 } NcThread;
 

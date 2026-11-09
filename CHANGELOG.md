@@ -1,5 +1,25 @@
 # xbased changelog
 
+## 1.0.91 (2026-11)
+
+### Fixes
+- Angelic Concert boots instead of staying on a black screen. It gives a
+  background thread that measures the CPU a very high priority, and
+  xbased let that thread run above everything, so the game itself never
+  got to run again. Thread priorities now stay in the range the Xbox
+  kernel allows.
+- AMF Bowling 2004 no longer hangs on its loading screen the first time it
+  loads. While it loads, the game pauses a background thread that copies
+  its files to the hard disk, and that thread could be paused while it was
+  waiting for a lock. xbased still handed it the lock, so the paused thread
+  kept it and the game waited for it for ever. A paused thread now leaves
+  the lock for the others until it runs again, as on the console.
+- America's Army - Rise of a Soldier no longer closes after its intro. The
+  game uses a rare 16-bit form of an instruction that saves the CPU flags
+  on the stack, and xbased ran it on its own stack instead of the game's.
+  That left xbased's stack slightly out of line, and it crashed soon
+  after. Those instructions are now translated properly.
+
 ## 1.0.90 (2026-11)
 
 ### New

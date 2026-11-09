@@ -608,6 +608,16 @@ struct Translator {
         bool mem = false, uses_esp = false, high8 = false;
         for (unsigned i = 0; i < in.operand_count; i++) {
             const ZydisDecodedOperand &o = ops[i];
+            /* the stack used implicitly (an instruction the cases above
+             * don't take): encoded as it is, it would push or pop the
+             * host's RSP, the shadow stack the stubs and C calls run on */
+            if (o.visibility == ZYDIS_OPERAND_VISIBILITY_HIDDEN &&
+                ((o.type == ZYDIS_OPERAND_TYPE_MEMORY &&
+                  (o.mem.base == ZYDIS_REGISTER_ESP || o.mem.base == ZYDIS_REGISTER_SP)) ||
+                 (o.type == ZYDIS_OPERAND_TYPE_REGISTER &&
+                  (o.reg.value == ZYDIS_REGISTER_ESP || o.reg.value == ZYDIS_REGISTER_SP)))) {
+                return false;
+            }
             if (o.type == ZYDIS_OPERAND_TYPE_MEMORY) {
                 mem = true;
                 if (o.mem.segment == ZYDIS_REGISTER_FS && o.visibility != ZYDIS_OPERAND_VISIBILITY_EXPLICIT &&
@@ -740,6 +750,46 @@ struct Translator {
         a.op(ZYDIS_MNEMONIC_SHL, {R(ZYDIS_REGISTER_R11D), I(9)});
         a.op(ZYDIS_MNEMONIC_OR, {R(ZYDIS_REGISTER_R13D), R(ZYDIS_REGISTER_R11D)});
         push_r(ZYDIS_REGISTER_R13D);
+        a.op(ZYDIS_MNEMONIC_POPFQ, {});
+        return true;
+    }
+
+    /* PUSHF and POPF with an operand-size prefix (66 9C, 66 9D): the low
+     * word of the flags. Passed to the host as they were, they pushed and
+     * popped 2 bytes of the host's RSP: America's Army - Rise of a Soldier
+     * runs a 66 9C after its intro, the shadow stack went 2 bytes off, and
+     * the next C call from the stubs crashed on its first aligned store. */
+    bool pushf16()
+    {
+        a.op(ZYDIS_MNEMONIC_PUSHFQ, {});
+        a.op(ZYDIS_MNEMONIC_POP, {R(ZYDIS_REGISTER_R10)});
+        a.op(ZYDIS_MNEMONIC_MOV, {R(ZYDIS_REGISTER_R13), R(ZYDIS_REGISTER_R10)});
+        a.op(ZYDIS_MNEMONIC_AND, {R(ZYDIS_REGISTER_R13D), I((int32_t)((GUEST_FLAGS | 0x2) & 0xFFFF))});
+        a.op(ZYDIS_MNEMONIC_MOV, {R(ZYDIS_REGISTER_R11D), FR4(vif, 0)});
+        a.op(ZYDIS_MNEMONIC_SHL, {R(ZYDIS_REGISTER_R11D), I(9)});
+        a.op(ZYDIS_MNEMONIC_OR, {R(ZYDIS_REGISTER_R13D), R(ZYDIS_REGISTER_R11D)});
+        a.op(ZYDIS_MNEMONIC_PUSH, {R(ZYDIS_REGISTER_R10)});
+        a.op(ZYDIS_MNEMONIC_POPFQ, {});
+        a.op(ZYDIS_MNEMONIC_MOV, {M(ZYDIS_REGISTER_R12D, -2, 2), R(ZYDIS_REGISTER_R13W)}, true);
+        esp_add(-2);
+        return true;
+    }
+
+    bool popf16()
+    {
+        a.op(ZYDIS_MNEMONIC_MOVZX, {R(ZYDIS_REGISTER_R13D), M(ZYDIS_REGISTER_R12D, 0, 2)}, true);
+        esp_add(2);
+        a.op(ZYDIS_MNEMONIC_PUSHFQ, {});
+        a.op(ZYDIS_MNEMONIC_POP, {R(ZYDIS_REGISTER_R10)});
+        a.op(ZYDIS_MNEMONIC_AND, {R(ZYDIS_REGISTER_R10D), I((int32_t)(GUEST_FLAGS & 0xFFFF0000u))});
+        a.op(ZYDIS_MNEMONIC_MOV, {R(ZYDIS_REGISTER_R11D), R(ZYDIS_REGISTER_R13D)});
+        a.op(ZYDIS_MNEMONIC_SHR, {R(ZYDIS_REGISTER_R11D), I(9)});
+        a.op(ZYDIS_MNEMONIC_AND, {R(ZYDIS_REGISTER_R11D), I(1)});
+        a.op(ZYDIS_MNEMONIC_MOV, {FR4(vif, 0), R(ZYDIS_REGISTER_R11D)});
+        a.op(ZYDIS_MNEMONIC_AND, {R(ZYDIS_REGISTER_R13D), I((int32_t)(GUEST_FLAGS & 0xFFFF))});
+        a.op(ZYDIS_MNEMONIC_OR, {R(ZYDIS_REGISTER_R13D), I(0x202)});
+        a.op(ZYDIS_MNEMONIC_OR, {R(ZYDIS_REGISTER_R13D), R(ZYDIS_REGISTER_R10D)});
+        a.op(ZYDIS_MNEMONIC_PUSH, {R(ZYDIS_REGISTER_R13)});
         a.op(ZYDIS_MNEMONIC_POPFQ, {});
         return true;
     }
@@ -982,6 +1032,10 @@ struct Translator {
             return pushfd() ? CONTINUE : FAIL;
         case ZYDIS_MNEMONIC_POPFD:
             return popfd() ? CONTINUE : FAIL;
+        case ZYDIS_MNEMONIC_PUSHF:
+            return pushf16() ? CONTINUE : FAIL;
+        case ZYDIS_MNEMONIC_POPF:
+            return popf16() ? CONTINUE : FAIL;
         case ZYDIS_MNEMONIC_LEAVE:
             if (in.operand_width != 32) {
                 return FAIL;

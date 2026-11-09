@@ -472,14 +472,20 @@ static void boost(NcThread *t, int inc)
 }
 
 /* Ends the waits that are satisfied (inc: the signal's increment, 0 for a
- * timer's or none) or timed out; the earliest timeout left. */
+ * timer's or none) or timed out; the earliest timeout left. A suspended
+ * thread's wait is left as it is until it is resumed (nc_ps resume): on NT
+ * its suspend APC took it out of the wait, and the signal goes to another
+ * waiter or stays. Satisfied here, a suspended thread took the object and
+ * kept it: AMF Bowling 2004 suspends its cache copier while it waits on the
+ * game's file lock, the copier got the lock as the main thread let it go,
+ * and the main thread waited on it for ever at its first load. */
 static uint64_t check_waits(NcKernel *k, int inc)
 {
     const uint64_t now = nc_ke_now_ns();
     uint64_t earliest = 0;
     for (unsigned i = 0; i < NC_MAX_THREADS; i++) {
         NcThread *t = &k->threads[i];
-        if (t->state != NC_T_WAITING) {
+        if (t->state != NC_T_WAITING || t->suspend) {
             continue;
         }
         int idx = satisfied(k, t, &t->wait);
@@ -1549,18 +1555,30 @@ static NcThread *thread_arg(NcKernel *k, uint32_t kthread)
 
 #define BASE_PRIORITY 8
 
-/* KeSetBasePriorityThread(Thread, Increment) -> old increment. An increment of
- * +-16 saturates to the top or bottom of the dynamic range. */
+/* A thread's base priority as an increment over the process's: +-16 when
+ * saturated (KeSetBasePriorityThread). */
+static int base_increment(const NcThread *t)
+{
+    return t->saturation ? 16 * t->saturation : t->priority - BASE_PRIORITY;
+}
+
+/* KeSetBasePriorityThread(Thread, Increment) -> old increment. As on NT, the
+ * title's threads stay in the variable range: an increment of +-16 saturates
+ * to its top or bottom (15, 1), and any other lands in it, clamped to 1..15.
+ * Angelic Concert gives its idle counter +14: at 22 it ran above the main
+ * thread, which had raised itself to 15 to measure it and never ran again,
+ * a black screen. */
 static uint64_t KeSetBasePriorityThread(NcKernel *k, NcFrame *f, const uint32_t *a)
 {
     NcThread *t = thread_arg(k, a[0]);
     if (!t) {
         return 0;
     }
-    int old = t->priority - BASE_PRIORITY;
-    int inc = (int32_t)a[1];
-    int p = inc >= 16 ? 15 : inc <= -16 ? 1 : BASE_PRIORITY + inc;
-    t->priority = p < 1 ? 1 : p > 31 ? 31 : p;
+    const int old = base_increment(t);
+    const int inc = (int32_t)a[1];
+    t->saturation = inc >= 16 ? 1 : inc <= -16 ? -1 : 0;
+    const int p = t->saturation ? (t->saturation > 0 ? 15 : 1) : BASE_PRIORITY + inc;
+    t->priority = p < 1 ? 1 : p > 15 ? 15 : p;
     t->boost = 0;
     k->resched = true;
     return (uint32_t)old;
@@ -1570,7 +1588,7 @@ static uint64_t KeSetBasePriorityThread(NcKernel *k, NcFrame *f, const uint32_t 
 static uint64_t KeQueryBasePriorityThread(NcKernel *k, NcFrame *f, const uint32_t *a)
 {
     const NcThread *t = thread_arg(k, a[0]);
-    return t ? (uint32_t)(t->priority - BASE_PRIORITY) : 0;
+    return t ? (uint32_t)base_increment(t) : 0;
 }
 
 /* KeSetPriorityThread(Thread, Priority) -> old priority */
