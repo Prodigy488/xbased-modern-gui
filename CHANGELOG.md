@@ -1,5 +1,16 @@
 # xbased changelog
 
+## 1.0.99 (2026-11)
+
+### Fixes
+- Fixed-function lighting: the lit colour's base (the scene ambient and the
+  emission) is made as the console makes it when the material's colours
+  come from the vertices, and each light's ambient takes the vertex colour
+  it is set to. Some lit surfaces were too bright or the wrong tint.
+- Homebrew that drives the graphics chip itself (no D3D) has its vertices
+  placed on the chip's own 1/16-pixel grid: 189 more of the chip test
+  program's pictures now match the console's exactly (803 of 3556).
+
 ## 1.0.98 (2026-11)
 
 ### Fixes

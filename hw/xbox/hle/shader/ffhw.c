@@ -118,11 +118,24 @@ static void lighting(Buf *b, const HleFfhwKey *k)
     /* the ambient source scaled by the emission register, plus the
      * emission source (the scene ambient register for the material: D3D
      * folds ambient * material ambient + emissive into it) */
-    char amb[16];
-    snprintf(amb, sizeof(amb), "c[%u].rgb", HLE_FFHW_C_AMBIENT);
-    put(b, "    oD0 = vec4(%s * c[%u].rgb + %s, %s);\n",
-        k->src[1] == 0 ? amb : src_rgb(k->src[1]), HLE_FFHW_C_EMISSION,
-        k->src[0] == 0 ? amb : src_rgb(k->src[0]), a);
+    /* ... as the chip makes it (xemu's tests on a console): with the
+     * emission or the ambient from the material, the scene ambient register
+     * plus the other one's vertex colour scaled by the emission register;
+     * with both from vertex colours, the emission's colour plus the
+     * ambient's scaled by it. (The scene ambient scaled by the emission
+     * register was added to the emission source whatever they were:
+     * nxdk_pgraph_tests' Material_color_source, every case with an emission
+     * off the console's.) */
+    if (k->src[0] == 0 || k->src[1] == 0) {
+        put(b, "    oD0 = vec4(c[%u].rgb, %s);\n", HLE_FFHW_C_AMBIENT, a);
+        const unsigned add = k->src[0] != 0 ? k->src[0] : k->src[1];
+        if (add) {
+            put(b, "    oD0.rgb += %s * c[%u].rgb;\n", src_rgb(add), HLE_FFHW_C_EMISSION);
+        }
+    } else {
+        put(b, "    oD0 = vec4(%s + %s * c[%u].rgb, %s);\n", src_rgb(k->src[0]), src_rgb(k->src[1]),
+            HLE_FFHW_C_EMISSION, a);
+    }
     put(b, "    oD1 = vec4(0.0, 0.0, 0.0, v4.a);\n");
     /* the direction to the eye: the eye position for a local viewer, else
      * along -z (D3D's eye space looks down +z) */
@@ -193,12 +206,12 @@ static void lighting(Buf *b, const HleFfhwKey *k)
                "        float dn = sc.y * nh + sc.z;\n"
                "        float pf = nl <= 0.0 || nh <= -sc.x ? 0.0 : dn == 0.0 ? 10000.0 :\n"
                "                   dn > 0.0 ? clamp((nh + sc.x) / dn, 0.0, 10000.0) : 0.0;\n"
-               "        oD0.rgb += c[%u].rgb * att;\n"
+               "        oD0.rgb += %s * c[%u].rgb * att;\n"
                "        oD0.rgb += %s * c[%u].rgb * (att * nl);\n"
                "        oD1.rgb += %s * c[%u].rgb * (att * pf);\n"
                "      }\n"
                "    }\n",
-            HLE_FFHW_C_SPEC, L + HLE_FFHW_L_AMBIENT, src_rgb(k->src[2]), L + HLE_FFHW_L_DIFFUSE,
+            HLE_FFHW_C_SPEC, src_rgb(k->src[1]), L + HLE_FFHW_L_AMBIENT, src_rgb(k->src[2]), L + HLE_FFHW_L_DIFFUSE,
             src_rgb(k->src[3]), L + HLE_FFHW_L_SPECULAR);
     }
 }

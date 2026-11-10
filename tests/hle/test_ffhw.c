@@ -66,7 +66,7 @@ static void test_lit_skinned(void)
     HT_CHECK(strstr(buf, "tN = normalize(tN);") != NULL);
     HT_CHECK(strstr(buf, "vec4 sp = XF(tPos, 0);") != NULL);   /* skinned: eye space */
     /* ambient from the diffuse register, scaled by the emission register */
-    HT_CHECK(strstr(buf, "oD0 = vec4(v3.rgb * c[72].rgb + c[71].rgb, v3.a);") != NULL);
+    HT_CHECK(strstr(buf, "oD0 = vec4(c[71].rgb, v3.a);\n    oD0.rgb += v3.rgb * c[72].rgb;") != NULL);
     HT_CHECK(strstr(buf, "/* light 0 */") && strstr(buf, "/* light 1 */") &&
              strstr(buf, "/* light 2 */") && !strstr(buf, "/* light 3 */"));
     HT_CHECK(strstr(buf, "nh = max(dot(tN, c[80].xyz), 0.0);") != NULL);  /* infinite: half */

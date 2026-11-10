@@ -1312,8 +1312,12 @@ void hle_draw_rs_brief(uint32_t out[9])
 /* debug.hakux.eqtol=0: EQUAL depth tests exact; 1: one-sided (LESSEQUAL a step
  * toward the eye, no shader test) */
 static bool g_eqtol_off, g_zeq_off;
-/* debug.hakux.snap=trunc: vertex positions truncated to 1/16 pixel each, as
- * before the constant subpixel shift (ff.h HLE_SUBPIXEL_GLSL), for A/B */
+/* Vertex positions truncated to 1/16 pixel each, as the NV2A rasterizer
+ * does (ff.h HLE_SUBPIXEL_GLSL): for a title without D3D (homebrew, the
+ * chip's own tests: nxdk_pgraph_tests, 451 of its pictures nearer the
+ * console's, 189 more exact), where nothing relies on the shift that keeps a
+ * D3D game's decals on their surfaces. debug.hakux.snap=trunc: for any
+ * title; =bias: the shift for any. */
 static bool g_snap_trunc;
 /* New at each hle_draw_psframe_poll that reads the properties (every 3
  * swaps): the draw path reads its own (skipvsh, vtok, psdbg) at its next draw */
@@ -3107,8 +3111,9 @@ void hle_draw_psframe_poll(uint64_t swap)
     }
     v[0] = 0;
     hle_prop_get("debug.hakux.snap", v);
-    if (g_snap_trunc != !strcmp(v, "trunc")) {
-        g_snap_trunc = !strcmp(v, "trunc");
+    const bool trunc = !strcmp(v, "trunc") || (strcmp(v, "bias") && !hle_xbe_d3d_lib(&g_hle.title.xbe));
+    if (g_snap_trunc != trunc) {
+        g_snap_trunc = trunc;
         hle_log("hakuX-hle-pipe", "vertex positions: %s",
                 g_snap_trunc ? "each truncated to 1/16 pixel" : "all moved by the rounding bias (1/32 pixel)");
     }
