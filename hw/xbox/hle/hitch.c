@@ -387,6 +387,7 @@ static void hang_snapshot(void)
             (uint32_t)env->regs[R_EBP], esp, fs);
     hle_log(TAG, "hang code @%08x: %s", eip - 16, hx);
     hle_log(TAG, "hang stack @%08x: %s", esp, sk);
+    hle_host_dump_threads();
     /* debug: HAKUX_HLE_HITCH_PEEK=<hex va>:<len>[,...], guest memory at the hang */
     const char *pk = getenv("HAKUX_HLE_HITCH_PEEK");
     while (pk && *pk) {

@@ -19,6 +19,7 @@ HleCpu nc_hle_regs;
 
 static NcVm *g_vm;
 static NcCpu *g_cpu;
+static NcKernel *g_kernel;
 static bool g_flush;
 static unsigned g_flushes;
 
@@ -26,6 +27,17 @@ void nc_hle_host_init(NcKernel *k, NcVm *vm, NcCpu *cpu)
 {
     g_vm = vm;
     g_cpu = cpu;
+    g_kernel = k;
+}
+
+/* A hang's first look: the kernel's last calls and every thread (what it waits on, where, its
+ * stack). Racy reads of a running guest, as the rest of the hang snapshot. */
+void hle_host_dump_threads(void)
+{
+    if (g_kernel) {
+        nc_kernel_dump_recent(-1);
+        nc_kernel_dump_threads(g_kernel, -1);
+    }
 }
 
 /* ---------------------------------------------------------- the guest CPU */

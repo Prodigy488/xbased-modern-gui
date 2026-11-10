@@ -34,6 +34,8 @@ typedef struct HleCpu {
 HleCpu *hle_host_cpu(void);
 /* Makes the guest CPU leave its JIT code at the next block. */
 void hle_host_kick(void);
+/* The kernel's recent calls and every guest thread into the log (a hang's snapshot). */
+void hle_host_dump_threads(void);
 /* The guest's CPU waits on its own thread for the host (on: from here; off:
  * to here; nested), for GPU work or the decoder at a store or an access the
  * HLE holds: the guest's time (its clocks, its timers) goes on for the

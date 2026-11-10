@@ -1,5 +1,11 @@
 # xbased changelog
 
+## 1.0.76.6 (Modern GUI fork)
+
+- When a game hangs (the "HANG started" lines in the log), the log now also lists every guest thread:
+  what it waits on, where it is, its stack, and the kernel's last calls. It shows what a stuck game is
+  waiting for (Marvel vs. Capcom 2 stalls after loading its shaders with every thread blocked).
+
 ## 1.0.76.5 (Modern GUI fork)
 
 - Dr. Muto no longer crashes after its intro movies. Its code has MMX instructions with a 0x66 prefix
