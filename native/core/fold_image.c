@@ -194,8 +194,15 @@ static bool table_build(Node *dir, uint8_t **out)
         at += len;
     }
     const uint32_t size = (at + SECTOR - 1) / SECTOR * SECTOR;
-    uint8_t *t = malloc(size);
+    /* an entry's links are 16 bits, in units of 4 bytes: a table past
+     * 256 KiB (thousands of files in one folder) can't name its entries,
+     * and was written with links cut short (files not found, or others) */
+    uint8_t *t = at <= 0x40000u ? malloc(size) : NULL;
     if (!t) {
+        if (at > 0x40000u) {
+            nc_log("hakuX-native", "disc: the folder %s has more files (%u) than a disc's folder can list",
+                   dir->name[0] ? dir->name : "of the game", dir->nkids);
+        }
         free(order);
         free(off);
         return false;

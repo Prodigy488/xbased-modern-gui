@@ -63,7 +63,13 @@ static struct {
  * published by index for GetVisibilityTestResult (front end), and written
  * to the guest's report when it has one (push-buffer mode's tests have only
  * that: HLE_VIS_NO_INDEX). */
-#define VIS_SLOTS      4096                     /* query pool entries (ring) */
+/* The pool's entries, a ring. A slot is reset from the host as it is taken, which the query it
+ * held last must be done with first (VUID-vkResetQueryPool-firstQuery-02741): it is taken again
+ * only once that query's submission has completed and been read (vis_draw). Fable makes ~300
+ * queries a frame; with 4096 slots the ring came round every 13 frames and nothing checked
+ * what it came round to. */
+#define VIS_SLOTS      32768
+#define VIS_BLOCK      1024                     /* slots a recording resets at its start */
 #define VIS_INDICES    HLE_VIS_INDICES
 #define VIS_MAX_PARTS  16
 #define VIS_PENDING    1024
@@ -71,6 +77,13 @@ static struct {
 static struct {
     VkQueryPool pool;
     uint32_t next;                              /* ring position */
+    uint32_t rec_first;                         /* ... of the open recording's first query */
+    uint64_t *slot_after;                       /* per slot: the submission its last query went
+                                                   with (HLE_SURF_PARKED: the open recording's;
+                                                   0: none yet) */
+    uint64_t reaped;                            /* the completed value vis_reap last read up to */
+    uint32_t blk_first, blk_n;                  /* the slots the open recording reset at its start */
+    uint64_t ring_waits, ring_lost;             /* slots waited for, parts not counted */
     bool active;                                /* a test is open */
     int32_t in_pass;                            /* its query in the open pass, -1 none */
     uint32_t parts[VIS_MAX_PARTS], nparts;
@@ -104,7 +117,42 @@ static bool vis_init(void)
         return false;
     }
     T.vkResetQueryPool(g_hvk.dev, g_vis.pool, 0, VIS_SLOTS);
+    if (!g_vis.slot_after) {
+        g_vis.slot_after = g_new0(uint64_t, VIS_SLOTS);
+    }
     return true;
+}
+
+static void vis_reap(uint64_t completed);
+
+/* A recording begins (outside any pass): the slots its tests will take from here are reset in
+ * it, the GPU running the reset before their queries. Only free ones (vis_draw's rule); a test
+ * past them resets its slot from the host. */
+static void vis_rec_begin(VkCommandBuffer cb)
+{
+    g_vis.blk_first = g_vis.next;
+    g_vis.blk_n = 0;
+    if (!g_vis.pool) {
+        return;
+    }
+    vis_reap(hle_tl_completed());
+    uint32_t n = 0;
+    while (n < VIS_BLOCK) {
+        const uint64_t last = g_vis.slot_after[(g_vis.next + n) % VIS_SLOTS];
+        if (last == HLE_SURF_PARKED || last > g_vis.reaped) {
+            break;
+        }
+        n++;
+    }
+    if (!n) {
+        return;
+    }
+    const uint32_t first = g_vis.next % VIS_SLOTS, a = MIN(n, VIS_SLOTS - first);
+    T.vkCmdResetQueryPool(cb, g_vis.pool, first, a);
+    if (n > a) {
+        T.vkCmdResetQueryPool(cb, g_vis.pool, 0, n - a);
+    }
+    g_vis.blk_n = n;
 }
 
 /* A draw inside the open pass while a test is open: its query starts. */
@@ -114,8 +162,38 @@ static void vis_draw(VkCommandBuffer cb)
         g_vis_dbg.off || !vis_init()) {
         return;
     }
-    uint32_t slot = g_vis.next++ % VIS_SLOTS;
-    T.vkResetQueryPool(g_hvk.dev, g_vis.pool, slot, 1);    /* the ring is far ahead of use */
+    const uint32_t slot = g_vis.next % VIS_SLOTS;
+    const uint64_t last = g_vis.slot_after[slot];
+    if (g_vis.next - g_vis.blk_first < g_vis.blk_n) {
+        /* one the recording reset at its start (free then, and reset before this query) */
+        g_vis.next++;
+        g_vis.slot_after[slot] = HLE_SURF_PARKED;
+        T.vkCmdBeginQuery(cb, g_vis.pool, slot,
+                          g_hvk.caps.occl_precise ? VK_QUERY_CONTROL_PRECISE_BIT : 0);
+        g_vis.in_pass = (int32_t)slot;
+        return;
+    }
+    if (last == HLE_SURF_PARKED) {
+        /* the ring came round inside one recording: no slot for this pass's part */
+        if (g_vis.ring_lost++ == 0) {
+            hle_log("hakuX-hle-back", "vis: over %u queries in one submission, a test's draws "
+                    "not counted", VIS_SLOTS);
+        }
+        return;
+    }
+    if (last) {
+        /* a slot used before: its query run by the GPU, and read, before it is reset */
+        if (last > hle_tl_completed()) {
+            g_vis.ring_waits++;
+            hle_tl_wait(last);
+        }
+        if (last > g_vis.reaped) {
+            vis_reap(hle_tl_completed());
+        }
+    }
+    g_vis.next++;
+    g_vis.slot_after[slot] = HLE_SURF_PARKED;
+    T.vkResetQueryPool(g_hvk.dev, g_vis.pool, slot, 1);
     T.vkCmdBeginQuery(cb, g_vis.pool, slot,
                       g_hvk.caps.occl_precise ? VK_QUERY_CONTROL_PRECISE_BIT : 0);
     g_vis.in_pass = (int32_t)slot;
@@ -188,6 +266,9 @@ static void cmd_vis_end(const HleCmdVis *c)
 
 static void vis_stamp(uint64_t value)
 {
+    for (; g_vis.slot_after && g_vis.rec_first != g_vis.next; g_vis.rec_first++) {
+        g_vis.slot_after[g_vis.rec_first % VIS_SLOTS] = value;
+    }
     for (uint32_t i = 0; i < g_vis.npend; i++) {
         if (g_vis.pend[i].after == HLE_SURF_PARKED) {
             g_vis.pend[i].after = value;
@@ -236,6 +317,7 @@ static void vis_reap(uint64_t completed)
         vis_report(p->report, count);
     }
     g_vis.npend = j;
+    g_vis.reaped = MAX(g_vis.reaped, completed);
 }
 
 static void on_complete(uint64_t completed)
@@ -516,6 +598,7 @@ static VkCommandBuffer cb_get(void)
         hle_draw_state_lost();
         gput_begin(f->cb, g_back.cur);
         pt_slot_begin(f->cb, g_back.cur);
+        vis_rec_begin(f->cb);
         g_back.recording = true;
         hle_surf_rec_begin();
     }
@@ -2135,7 +2218,13 @@ static void cmd_readback(const HleCmdReadback *c)
     /* without zero-copy RAM, the arena copy that lands in guest memory */
     bool fits = c->fb && s && s->texel_bytes && h &&
                 (uint64_t)c->pitch * (h - 1) + (uint64_t)w * s->texel_bytes <= c->fb_len;
-    if (s && linear && written && (g_hram.zero_copy || fits) && hle_surf_ensure(s) &&
+    /* ... and with it, the rows the GPU writes in place: inside guest RAM (a surface's offset,
+     * pitch and size are the title's) */
+    const bool in_ram = !g_hram.zero_copy ||
+                        (s && s->texel_bytes && h &&
+                         (uint64_t)c->pa + (uint64_t)c->pitch * (h - 1) + (uint64_t)w * s->texel_bytes <=
+                         g_hram.size);
+    if (s && linear && written && in_ram && (g_hram.zero_copy || fits) && hle_surf_ensure(s) &&
         (s->aspect & VK_IMAGE_ASPECT_COLOR_BIT) && s->texel_bytes &&
         c->pitch % s->texel_bytes == 0) {
         VkCommandBuffer cb = cb_get();

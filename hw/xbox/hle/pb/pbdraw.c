@@ -15,6 +15,8 @@
 #include "hw/xbox/hle/vk/guest_ram.h"
 #include "hw/xbox/hle/vk/quirks.h"
 #include "hw/xbox/hle/pb/pbres.h"
+#include "hw/xbox/hle/pb/vimm.h"
+#include "hw/xbox/hle/pb/kvfmt.h"
 #include "hw/xbox/hle/tex/xdk.h"
 #include "hw/xbox/hle/tex/xdk_res.h"
 #include "hw/xbox/hle/tex/xg_swizzle.h"
@@ -74,6 +76,8 @@
 
 #define NV097_SET_VERTEX3F                0x1500u   /* x y z: the third word emits */
 #define NV097_SET_VERTEX4F                0x1518u   /* x y z w: the fourth word emits */
+#define NV097_SET_NORMAL3F                0x1530u   /* the named attributes' forms, to ... */
+#define NV097_SET_WEIGHT4F                0x16C0u   /* ... this one's four words (vimm.c) */
 #define NV097_SET_VERTEX_DATA2F_M         0x1880u   /* attribute a at + 8 a */
 #define NV097_SET_VERTEX_DATA2S           0x1900u   /* ... + 4 a: two shorts */
 #define NV097_SET_VERTEX_DATA4UB          0x1940u   /* ... + 4 a: four bytes, unit range */
@@ -82,13 +86,14 @@
 
 /* SET_BEGIN_END's primitives Vulkan has no topology for (converted to
  * indices: hle_draw_prim_indices) */
+#define NV2A_PRIM_POINTS    1u
 #define NV2A_PRIM_LINE_LOOP 3u
 #define NV2A_PRIM_QUADS     8u
 
 #define VPSCL 58                            /* the viewport's constant slots */
 #define VPOFF 59
 #define MAX_INDICES (1u << 20)
-#define ATTRS 16
+#define ATTRS HLE_VIMM_ATTRS
 #define MAX_IMM 65535u                      /* immediate vertices a draw (16-bit indices) */
 #define MAX_INLINE (1u << 20)               /* inline-array words a draw */
 #define MAX_SENT 4096
@@ -139,6 +144,8 @@ typedef struct PbObj {
     bool want;                          /* ... drawn into since its last landing */
     uint8_t unread;                     /* its landings in a row the guest didn't take */
     bool display;                       /* shown: the front-buffer path keeps its memory */
+    uint32_t frees;                     /* hle_barrier_frees over its memory when it was made
+                                           or last named as the colour target (obj_freed) */
 } PbObj;
 
 /* A texture the stage registers described: the back end's image of it,
@@ -163,6 +170,8 @@ static struct {
     uint32_t disp_w, disp_h;            /* the device's display (guest pixels) */
     uint32_t r[0x2000 / 4];             /* the methods read here, as last written */
     bool rt_dirty;
+    bool rt_named;                      /* SET_SURFACE_COLOR_OFFSET since the last look: the
+                                           title named its colour target (obj_owns) */
     uint32_t rt, ds;                    /* the bound targets' object ids */
     uint32_t rt_w, rt_h;                /* the targets' physical size */
     uint32_t aa_x, aa_y;                /* their antialiasing scale (1, 2) */
@@ -281,6 +290,7 @@ static void coh_pend_wait(uint32_t pa, uint32_t len);
 static void coh_pend_wait_inplace(uint32_t pa, uint32_t len);
 static void coh_wait(uint64_t v);
 static uint64_t coh_land(PbObj *o);
+static void obj_owns(PbObj *o);
 static void coh_serve(void);
 static void coh_shown(PbObj *o);
 static bool coh_display_over(uint32_t pa, uint32_t len);
@@ -735,6 +745,7 @@ static uint32_t object(uint32_t pa, uint32_t xfmt, uint32_t pitch, uint32_t w, u
     o->d.pitch = pitch;
     o->d.levels = 1;
     o->d.faces = 1;
+    obj_owns(o);
     uint32_t olen;
     o->display = coh_len(o, &olen) && coh_display_over(pa, olen);  /* a frame buffer's memory */
     o->shown_seq = o->display ? g_coh_shows : 0;
@@ -882,6 +893,50 @@ static bool obj_superseded(const PbObj *o)
     return o->mem_seq && o->written <= o->mem_seq;
 }
 
+/* The bytes of o's memory */
+static uint32_t obj_bytes(const PbObj *o)
+{
+    const HleFmtInfo *fi = hle_fmt_info(o->d.xfmt);
+    return o->d.pitch ? o->d.pitch * o->d.h : fi ? o->d.w * o->d.h * (fi->bpp / 8) : 0;
+}
+
+/* o's memory is its own as of now (made, or named as the colour target) */
+static void obj_owns(PbObj *o)
+{
+    o->frees = hle_barrier_frees(o->d.pa, obj_bytes(o));
+}
+
+/* The title freed o's memory since: it is another owner's, and nothing of
+ * o's image goes into it. The decoder runs behind the title, which may let
+ * a target go before the decoder reaches its unbind (D3D's release waits
+ * for the target's last draw, not for what follows it in the push buffer):
+ * Top Spin draws a player's name into a 112 x 23 target, saves it and frees
+ * it as a career starts; the writeback at the unbind put the name over the
+ * heap's new pages. */
+static bool obj_freed(const PbObj *o)
+{
+    if (hle_barrier_frees(o->d.pa, obj_bytes(o)) == o->frees) {
+        return false;
+    }
+    static unsigned s_logged;
+    if (s_logged < 8) {
+        s_logged++;
+        hle_log("hakuX-hle-pb", "surface %u (%08x %ux%u): its memory was freed since it was bound, its "
+                "image stays out of it (first 8 logged)", o->id, o->d.pa, o->d.w, o->d.h);
+    }
+    return true;
+}
+
+/* A landing of o's image was queued: freed meanwhile (the count is read
+ * after the queueing, the free counts before it drops the queued ones, so
+ * one of the two sees the other), it is dropped. */
+static void obj_landing_queued(const PbObj *o)
+{
+    if (obj_freed(o)) {
+        hle_tl_land_freed(o->d.pa, obj_bytes(o));
+    }
+}
+
 /* debug: HAKUX_HLE_PB_RTLOG=1 logs the CPU's writes into targets, with the
  * swaps and display starts around them */
 static bool rtlog_on(void)
@@ -994,6 +1049,9 @@ static void writeback(uint32_t id)
         ((uint64_t)d->pitch * d->h > WRITEBACK_MAX && !(cpu_wb && o && o->cpu_used))) {
         return;
     }
+    if (o && obj_freed(o)) {
+        return;
+    }
     /* the CPU's writes since the image last took them go into it first. The
      * decoder runs behind the CPU: it met this unbind after the title had
      * written its next frame there, and the writeback landed the older image
@@ -1017,6 +1075,9 @@ static void writeback(uint32_t id)
     hle_barrier_arm_landing(d->pa, len, hle_fe_last_value() + 1);
     hle_fe_commit();
     wb_note(d->pa, len, hle_fe_last_value() + 1);
+    if (o) {
+        obj_landing_queued(o);
+    }
     g_pd.writebacks++;
 }
 
@@ -1209,6 +1270,16 @@ static void sync_rt(void)
         g_pd.rt_fresh = true;
         g_pd.vp_key[0] = g_pd.vp_key[1] = ~0u;
     }
+    /* The title named its colour target: the memory is that target's as of
+     * now. Each time it does, not only when the target changes: one freed
+     * and made again where it was (a device reset's frame buffers) is the
+     * same object here, bound as before, and its memory was freed since. */
+    if (g_pd.rt_named) {
+        g_pd.rt_named = false;
+        if (g_pd.rt_obj) {
+            obj_owns(g_pd.rt_obj);
+        }
+    }
     if (rt && covers_display(g_pd.rt_obj)) {
         g_pd.frame_rt = rt;
         g_pd.frame_aa_x = g_pd.aa_x;
@@ -1342,12 +1413,8 @@ static void clear(uint32_t flags)
     bool zfloat = R(NV097_SET_CONTROL0) & 0x1000u;
     HleCmdClear *c = begin(HLE_OP_CLEAR, sizeof(*c));
     c->flags = flags & 0xF3;
-    c->color = R(NV097_SET_COLOR_CLEAR_VALUE);
-    if ((R(NV097_SET_SURFACE_FORMAT) & 0xF) == 3) {     /* R5G6B5: the value is in its format */
-        uint32_t v = c->color;
-        c->color = 0xFF000000u | ((v >> 11) & 0x1F) * 255 / 31 << 16 |
-                   ((v >> 5) & 0x3F) * 255 / 63 << 8 | (v & 0x1F) * 255 / 31;
-    }
+    /* the value is in the target's format (a 16-bit one's: R5G6B5, X1R5G5B5) */
+    c->color = hle_kv_clear_color(R(NV097_SET_SURFACE_FORMAT) & 0xF, R(NV097_SET_COLOR_CLEAR_VALUE));
     if (zf == 2) {
         c->z = zfloat ? zfloat_clear(zs >> 8, true) : (zs >> 8) / 16777215.0f;
         c->stencil = zs & 0xFF;
@@ -2084,6 +2151,12 @@ static uint64_t ff_program(void)
         k.texmat |= (uint8_t)((R(0x0420 + 4 * s) & 1) << s);
     }
     k.points = R(0x0318) & 1;
+    for (unsigned s = 0; s < 4 && !k.texgen_inf; s++) {
+        for (unsigned j = 0; j < 3; j++) {  /* SET_TEXGEN_VIEW_MODEL, where a stage reflects */
+            k.texgen_inf |= (k.texgen[s][j] == HLE_FFHW_TG_SPHERE || k.texgen[s][j] == HLE_FFHW_TG_REFLECTION) &&
+                            (R(0x09CC) & 1);
+        }
+    }
     return send_vsh(&k, HLE_FFHW_SLOTS, &g_vh_ff);
 }
 
@@ -2102,11 +2175,7 @@ static void ff_consts(float (*c)[4])
     regs_f(c[HLE_FFHW_C_AMBIENT], 0x0A10, 3);
     regs_f(&c[HLE_FFHW_C_AMBIENT][3], 0x03B4, 1);
     regs_f(c[HLE_FFHW_C_EMISSION], 0x03A8, 3);
-    float sp[6], spb[6];
-    regs_f(sp, 0x09E0, 6);
-    regs_f(spb, 0x1E28, 6);
-    c[HLE_FFHW_C_PARAMS][0] = hle_ffhw_specular_power(sp);
-    c[HLE_FFHW_C_PARAMS][1] = hle_ffhw_specular_power(spb);
+    regs_f(c[HLE_FFHW_C_SPEC], 0x09E0, 3);      /* SET_SPECULAR_PARAMS: L, M, N */
     c[HLE_FFHW_C_PARAMS][2] = (R(0x043C) & 0x1FF) / 8.0f;
     regs_f(c[HLE_FFHW_C_POINT], 0x0A30, 8);
     for (unsigned i = 0; i < 8; i++) {
@@ -2283,8 +2352,13 @@ bool hle_pbd_blit_images(uint32_t sbase, uint32_t sp, uint32_t dbase, uint32_t d
         hle_log("hakuX-hle-pb", "blit %08x/%u -> %08x/%u bpp %u %ux%u from %u,%u to %u,%u objects %u -> %u",
                 sbase, sp, dbase, dp, bpp, w, h, ix, iy, ox, oy, src, dst);
     }
-    if (so && so->d.pitch && !dd && dp) {
-        dst = object(dbase, so->d.xfmt, dp, MAX(dp / bpp, ox + w), oy + h);
+    /* a target made for the destination is its rows in memory, of a size a surface has (the
+     * blit's place and size are the title's, 16 bits each) */
+    /* ... and as wide as its pitch (rows wider than it spill under the next: memory's copy) */
+    const uint32_t nw = bpp && ox + w <= dp / bpp ? dp / bpp : 0, nh = oy + h;
+    if (so && so->d.pitch && !dd && dp && nw && nw <= 8192 && nh <= 8192 &&
+        (uint64_t)dbase + (uint64_t)dp * nh <= hle_ram_size()) {
+        dst = object(dbase, so->d.xfmt, dp, nw, nh);
         so = obj_of(src);                   /* (a slot may have gone to it) */
         dd = obj_of(dst);
     }
@@ -2680,6 +2754,9 @@ static uint32_t target_part(uint32_t pa, uint32_t code, const HleFmtInfo *fi, ui
                             uint32_t w, uint32_t h, PbObj *dst)
 {
     PbObj *src = NULL;
+    if (!pitch) {
+        return dst ? dst->id : 0;           /* a stage's pitch not set: no rows to find it by */
+    }
     for (unsigned i = 0; i < g_pd.nobjs; i++) {
         PbObj *o = &g_pd.objs[i];
         const HleFmtInfo *oi = !o->cube && o->d.pitch == pitch && !o->d.parent ? hle_fmt_info(o->d.xfmt) : NULL;
@@ -3131,6 +3208,10 @@ static unsigned writeback_range(uint32_t pa, uint32_t end, bool gpu_newer, const
             kept++;
             continue;
         }
+        if (obj_freed(next)) {
+            kept++;                         /* the title's memory no longer */
+            continue;
+        }
         if (coh_managed(next, &len)) {
             const uint64_t l = coh_land(next);
             *lv = MAX(*lv, l);
@@ -3159,6 +3240,7 @@ static unsigned writeback_range(uint32_t pa, uint32_t end, bool gpu_newer, const
         hle_barrier_arm_landing(next->d.pa, len, v);
         hle_fe_commit();
         wb_note(next->d.pa, len, v);
+        obj_landing_queued(next);
         *lv = MAX(*lv, v);
         if (!gpu_newer) {
             hle_log("hakuX-hle-pb", "%s %08x+%u: surface %u (%08x %ux%u) written back", what, pa, end - pa,
@@ -3283,6 +3365,67 @@ void hle_pbd_vis_counts(uint64_t *tests, uint64_t *kicks)
     *kicks = g_pd.vis_kicks;
 }
 
+/* What a draw's last vertex left in the attributes it took from arrays: on
+ * the NV2A that is each one's current value from then on (the registers the
+ * vertex went through keep it), and an attribute without an array in a
+ * later draw takes it. Jet Set Radio Future draws a panel of its map without
+ * a colour array after a draw with one, and the panel has that draw's last
+ * colour (xemu's pull request 623, from its tests on a console).
+ *
+ * Kept as the element's bytes and format, and made the current value only
+ * when something reads it (a draw without that array, an immediate method,
+ * a savestate): most draws follow one with the same arrays, and a current
+ * value changed after every draw would give every draw a constants block of
+ * its own (emit). */
+static struct {
+    uint32_t pending;                   /* attributes (bits) whose element waits */
+    uint8_t fmt[ATTRS];
+    uint8_t raw[ATTRS][16];
+} g_carry;
+
+static void carry_apply(uint32_t attrs)
+{
+    attrs &= g_carry.pending;
+    if (!attrs) {
+        return;
+    }
+    for (unsigned a = 0; a < ATTRS; a++) {
+        if ((attrs >> a) & 1) {
+            hle_vimm_element(g_carry.fmt[a], g_carry.raw[a], g_pd.cur[a]);
+        }
+    }
+    g_carry.pending &= ~attrs;
+    g_pd.cgen++;
+}
+
+/* The arrays' elements of vertex `last` (inl: of an inline draw's, the vertex at that word of
+ * the inline data), kept */
+static void carry_latch(uint32_t last, const uint32_t *inl)
+{
+    uint32_t off = 0;
+    for (unsigned a = 0; a < ATTRS; a++) {
+        const uint32_t fmt = R(NV097_SET_VERTEX_DATA_ARRAY_FORMAT + 4 * a);
+        const uint32_t n = hle_vimm_element_bytes(fmt & 0xFF);
+        if (!((fmt >> 4) & 0xF)) {
+            continue;
+        }
+        const uint8_t *p;
+        if (inl) {
+            p = (const uint8_t *)inl + off;
+            off += (attr_bytes(fmt) + 3) & ~3u;
+        } else {
+            const uint64_t pa = (uint64_t)(R(NV097_SET_VERTEX_DATA_ARRAY_OFFSET + 4 * a) & 0x7FFFFFFFu) +
+                                (uint64_t)(fmt >> 8) * last;
+            p = n && pa < hle_ram_size() ? hle_pa_ptr((uint32_t)pa, n) : NULL;
+        }
+        if (n && p) {
+            memcpy(g_carry.raw[a], p, n);
+            g_carry.fmt[a] = (uint8_t)fmt;
+            g_carry.pending |= 1u << a;
+        }
+    }
+}
+
 /* The rest of a draw whose vertices and indices d holds: the stages'
  * textures, the constants (a program's, or the fixed-function stage's from
  * its methods) and the attributes' current values after them, the state
@@ -3292,6 +3435,18 @@ static void emit(HleCmdDraw *d)
     const bool ff = (R(NV097_SET_TRANSFORM_EXECUTION_MODE) & 3) != 2;
     uint8_t *cb;
     uint32_t c_off;
+    if (g_carry.pending) {
+        /* the attributes this draw has no array for take their current
+         * values: what an earlier draw's last vertex left, first */
+        uint32_t arrays = 0;
+        for (unsigned a = 0; a < ATTRS; a++) {
+            arrays |= (d->attr[a] & 0xFF ? 1u : 0u) << a;
+        }
+        carry_apply(~arrays);
+    }
+    if (!ff && g_pd.prim == NV2A_PRIM_POINTS && !(R(0x0318) & 1)) {
+        d->pt_size = 0x8000u | (R(0x043C) & 0x1FFu);    /* HLE_VSH_PT_FIXED: no point params */
+    }
     /* a draw whose constants and current attributes are the last one's, in
      * the same submission (its block lives until that completes): that
      * block. Crimson Sea's 2300 draws a frame copied 3.3 KB each; a
@@ -3673,9 +3828,11 @@ static void draw_arrays(void)
         d.attr[a] = (fmt & 0xFF) | b << 8 | (pa - base[b]) << 16;
     }
     for (unsigned b = 0; b < d.nbind; b++) {
-        uint32_t st = d.bind_stride[b];
-        uint32_t from = base[b] + (st ? lo * st : 0);
-        uint32_t len = st ? (hi - lo) * st + MAX(end[b], 1u) : end[b];
+        uint32_t st = d.bind_stride[b], from, len;
+        if (!hle_vimm_span(base[b], st, lo, hi, end[b], hle_ram_size(), &from, &len)) {
+            skip(SK_DRAW_ARRAYS_SPAN);      /* not memory, or a stride no host draws with */
+            return;
+        }
         coh_pend_wait(from, len);           /* a copy queued into it lands first */
         const uint8_t *src = hle_pa_ptr(from, len);
         if (src && hle_quirk(HLE_QUIRK_VB_ALIGN) && vb_misaligned(&d, b, base[b])) {
@@ -3784,80 +3941,39 @@ static void draw(void)
     rt_first_land(false);
     hle_draw_arena_hold(true);
     if (g_pd.nimm) {
-        draw_imm();
+        draw_imm();                         /* (its vertices were the current values) */
     } else if (g_pd.ninl) {
         draw_inline();
+        uint32_t vsize = 0;
+        for (unsigned a = 0; a < ATTRS; a++) {
+            const uint32_t fmt = R(NV097_SET_VERTEX_DATA_ARRAY_FORMAT + 4 * a);
+            vsize += (fmt >> 4) & 0xF ? (attr_bytes(fmt) + 3) & ~3u : 0;
+        }
+        const uint32_t n = vsize ? g_pd.ninl * 4 / vsize : 0;
+        if (n) {
+            carry_latch(0, g_pd.inl + (size_t)(n - 1) * vsize / 4);
+        }
     } else {
         draw_arrays();
+        carry_latch(g_pd.idx[g_pd.nidx - 1], NULL);
     }
     hle_draw_arena_hold(false);
 }
 
-/* An attribute's current value (immediate data); the position's last word
- * emits a vertex in a draw. */
-static void attr_set(unsigned a, const float x[4], bool emit_vertex)
+/* SET_VERTEX3F / 4F, the named attributes' methods and SET_VERTEX_DATA* (vimm.c): an attribute's
+ * current value; the position's last word emits a vertex in a draw. True if m was one. */
+static bool vertex_data(uint32_t m, uint32_t v)
 {
-    memcpy(g_pd.cur[a], x, 16);
+    bool vertex;
+    carry_apply(~0u);                       /* what a draw left is the value a word changes */
+    if (hle_vimm_method(m, v, g_pd.cur, &vertex) < 0) {
+        return false;
+    }
     g_pd.cgen++;
-    if (emit_vertex && g_pd.in_draw && g_pd.nimm < MAX_IMM) {
+    if (vertex && g_pd.in_draw && g_pd.nimm < MAX_IMM) {
         memcpy(g_pd.imm + (size_t)g_pd.nimm * ATTRS * 4, g_pd.cur, sizeof(g_pd.cur));
         g_pd.nimm++;
     }
-}
-
-/* SET_VERTEX3F / 4F and SET_VERTEX_DATA*: true if m was one. */
-static bool vertex_data(uint32_t m, uint32_t v)
-{
-    float x[4];
-    unsigned a, comp, last;
-    if (m >= NV097_SET_VERTEX3F && m < NV097_SET_VERTEX4F + 16) {
-        bool four = m >= NV097_SET_VERTEX4F;
-        a = 0;
-        comp = (m - (four ? NV097_SET_VERTEX4F : NV097_SET_VERTEX3F)) / 4;
-        last = four ? 3 : 2;
-        memcpy(x, g_pd.cur[0], 16);
-        memcpy(&x[comp], &v, 4);
-        if (!four) {
-            x[3] = 1.0f;
-        }
-    } else if (m >= NV097_SET_VERTEX_DATA2F_M && m < NV097_SET_VERTEX_DATA2S) {
-        a = (m - NV097_SET_VERTEX_DATA2F_M) / 8;
-        comp = ((m - NV097_SET_VERTEX_DATA2F_M) / 4) & 1;
-        last = 1;
-        memcpy(x, g_pd.cur[a], 16);
-        memcpy(&x[comp], &v, 4);
-        x[2] = 0.0f;
-        x[3] = 1.0f;
-    } else if (m >= NV097_SET_VERTEX_DATA2S && m < NV097_SET_VERTEX_DATA4UB) {
-        a = (m - NV097_SET_VERTEX_DATA2S) / 4;
-        comp = last = 0;
-        x[0] = (float)(int16_t)(v & 0xFFFF);
-        x[1] = (float)(int16_t)(v >> 16);
-        x[2] = 0.0f;
-        x[3] = 1.0f;
-    } else if (m >= NV097_SET_VERTEX_DATA4UB && m < NV097_SET_VERTEX_DATA4S_M) {
-        a = (m - NV097_SET_VERTEX_DATA4UB) / 4;
-        comp = last = 0;
-        for (unsigned c = 0; c < 4; c++) {
-            x[c] = ((v >> (8 * c)) & 0xFF) / 255.0f;
-        }
-    } else if (m >= NV097_SET_VERTEX_DATA4S_M && m < NV097_SET_VERTEX_DATA4F_M) {
-        a = (m - NV097_SET_VERTEX_DATA4S_M) / 8;
-        comp = ((m - NV097_SET_VERTEX_DATA4S_M) / 4) & 1;
-        last = 1;
-        memcpy(x, g_pd.cur[a], 16);
-        x[2 * comp] = (float)(int16_t)(v & 0xFFFF);
-        x[2 * comp + 1] = (float)(int16_t)(v >> 16);
-    } else if (m >= NV097_SET_VERTEX_DATA4F_M && m < NV097_SET_VERTEX_DATA4F_M + 16 * ATTRS) {
-        a = (m - NV097_SET_VERTEX_DATA4F_M) / 16;
-        comp = ((m - NV097_SET_VERTEX_DATA4F_M) / 4) & 3;
-        last = 3;
-        memcpy(x, g_pd.cur[a], 16);
-        memcpy(&x[comp], &v, 4);
-    } else {
-        return false;
-    }
-    attr_set(a, x, a == 0 && comp == last);
     return true;
 }
 
@@ -4004,6 +4120,7 @@ static const bool k_pbd_acts[2048] = {
     [0x09D0 / 4 ... 0x09DC / 4] = true,
     [0x0A50 / 4 ... 0x0A5C / 4] = true,
     [NV097_SET_VERTEX3F / 4 ... (NV097_SET_VERTEX4F + 12) / 4] = true,
+    [NV097_SET_NORMAL3F / 4 ... (NV097_SET_WEIGHT4F + 12) / 4] = true,
     [NV097_SET_VERTEX_DATA2F_M / 4 ... (NV097_SET_VERTEX_DATA4F_M + 16 * ATTRS - 4) / 4] = true,
     [NV097_SET_TRANSFORM_PROGRAM / 4 ... (NV097_SET_TRANSFORM_PROGRAM + 0x7C) / 4] = true,
     [NV097_SET_TRANSFORM_CONSTANT / 4 ... (NV097_SET_TRANSFORM_CONSTANT + 0x7C) / 4] = true,
@@ -4031,9 +4148,11 @@ void hle_pbd_method(uint32_t m, uint32_t v)
     if (!g_pd.on || m >= 0x2000) {
         return;
     }
+#if HAKUX_DIAG
     if (g_pd.in_draw && g_pd.ndm < 12) {     /* debug: what an empty draw held */
         g_pd.dm[g_pd.ndm++] = m << 16 | (v & 0xFFFF);
     }
+#endif
     if (g_pd.r[m >> 2] != v && (g_ff_regs[m >> 8] >> ((m >> 2) & 63) & 1)) {
         g_pd.ffgen++;                       /* (D3D sends matrices again unchanged) */
     }
@@ -4141,11 +4260,14 @@ void hle_pbd_method(uint32_t m, uint32_t v)
         g_pd.rt_dirty = true;               /* the window clip's rectangles */
     }
     switch (m) {
+    case NV097_SET_SURFACE_COLOR_OFFSET:
+        g_pd.rt_named = true;
+        g_pd.rt_dirty = true;
+        break;
     case NV097_SET_SURFACE_CLIP_HORIZONTAL:
     case NV097_SET_SURFACE_CLIP_VERTICAL:
     case NV097_SET_SURFACE_FORMAT:
     case NV097_SET_SURFACE_PITCH:
-    case NV097_SET_SURFACE_COLOR_OFFSET:
     case NV097_SET_SURFACE_ZETA_OFFSET:
     case NV097_SET_CONTROL0:
         g_pd.rt_dirty = true;
@@ -4442,6 +4564,9 @@ static uint64_t coh_land(PbObj *o)
     if (coh_mem_newer(o)) {
         return 0;                           /* its memory is the newer */
     }
+    if (obj_freed(o)) {
+        return 0;                           /* its memory is the title's no longer */
+    }
     for (int tries = 0; !hle_tl_land_room(2) && tries < 4; tries++) {
         const uint64_t ov = tries < 3 ? hle_tl_land_oldest() : 0;
         coh_wait(ov ? ov : hle_fe_last_value() + 1);
@@ -4508,6 +4633,7 @@ static uint64_t coh_land(PbObj *o)
     o->land_w = o->written;
     o->want = false;
     hle_barrier_guard_landing(o->d.pa, len, v);
+    obj_landing_queued(o);
     g_coh.lands++;
     return v;
 }
@@ -5100,6 +5226,7 @@ void hle_pbd_state_get(HlePbdState *s, const float **imm, const uint32_t **inl, 
     s->pload = g_pd.pload;
     s->cload = g_pd.cload;
     memcpy(s->consts, g_pd.consts, sizeof(s->consts));
+    carry_apply(~0u);                       /* (what the last draw left, into them) */
     memcpy(s->cur, g_pd.cur, sizeof(s->cur));
     s->in_draw = g_pd.in_draw;
     s->prim = g_pd.prim;
@@ -5133,6 +5260,7 @@ bool hle_pbd_state_set(const HlePbdState *s, const float *imm, const uint32_t *i
     g_pd.cload = s->cload;
     memcpy(g_pd.consts, s->consts, sizeof(g_pd.consts));
     memcpy(g_pd.cur, s->cur, sizeof(g_pd.cur));
+    g_carry.pending = 0;
     g_pd.in_draw = s->in_draw;
     g_pd.prim = s->prim;
     g_pd.nimm = s->nimm;

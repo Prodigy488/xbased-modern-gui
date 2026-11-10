@@ -15,6 +15,7 @@
 #include "hw/xbox/hle/prop.h"
 #include "hw/xbox/hle/hitch.h"
 #include "hw/xbox/hle/tex/xdk.h"
+#include "hw/xbox/hle/pb/kvfmt.h"
 #include "hw/xbox/hle/tex/xdk_res.h"
 #include "hw/xbox/hle/mem/guestmem.h"
 #include "hw/xbox/hle/shader/ff.h"
@@ -26,7 +27,9 @@
 #include "hw/xbox/hle/vk/back_int.h"
 #include "hw/xbox/hle/vk/batch.h"
 #include "hw/xbox/hle/vk/quirks.h"
+#include "hw/xbox/hle/vk/retire.h"
 #include "hw/xbox/hle/vk/guest_ram.h"
+#include "hw/xbox/hle/vk/idhint.h"
 #include "hw/xbox/hle/vk/pcache.h"
 #include "hw/xbox/hle/vk/pipeasync.h"
 
@@ -66,7 +69,7 @@ enum {
     TSS_BUMPENVMAT00 = 22,      /* 00, 01, 10, 11: SetTextureState_BumpEnv pushes types
                                    22..25 to BUMP_ENV_MAT 0..3 (Otogi 0xf5c50) */
     TSS_BUMPENVLSCALE = 26, TSS_BUMPENVLOFFSET,
-    TSS_TEXCOORDINDEX = 28, TSS_BORDERCOLOR = 29,
+    TSS_TEXCOORDINDEX = 28, TSS_BORDERCOLOR = 29, TSS_COLORKEYCOLOR = 30,
 };
 
 /* Two floats (bits) as IEEE halves, a in the low 16 bits (GLSL
@@ -289,6 +292,12 @@ static bool tex_format(uint32_t x, TexFmt *o)
     }
     case HLE_XFMT_R8B8: case HLE_XFMT_LIN_R8B8: {
         VkComponentMapping m = SW(G, R, R, G);
+        o->fmt = VK_FORMAT_R8G8_UNORM; o->sw = m; return true;
+    }
+    /* Y16 (D3D's L16): the NV2A gives its two bytes as green (the high one)
+     * and blue, red and alpha 1 (xemu's test on a console) */
+    case HLE_XFMT_L16: case HLE_XFMT_LIN_L16: {
+        VkComponentMapping m = SW(ONE, G, R, ONE);
         o->fmt = VK_FORMAT_R8G8_UNORM; o->sw = m; return true;
     }
     case HLE_XFMT_DXT1: o->fmt = VK_FORMAT_BC1_RGBA_UNORM_BLOCK; return true;
@@ -850,83 +859,94 @@ static void white_init(VkCommandBuffer cb)
 
 /* ---- textures ------------------------------------------------------------------ */
 
-/* Lookup by id (many per draw): a per-id hint, checked on use, and misses
- * remembered until a texture is created (g_tex_gen). */
-#define TEX_IDS 8193
-static uint16_t g_tex_hint[TEX_IDS];
-static uint32_t g_tex_miss[TEX_IDS], g_tex_gen = 1;
+/* Lookup by id (many per draw): a hint by id (vk/idhint.h), checked on use,
+ * and misses remembered until a texture is created. */
+static HleIdHint g_tex_hint = HLE_IDHINT_INIT;
 
 static HleVkTex *tex_find(uint32_t id)
 {
     if (!id) {
         return NULL;
     }
-    if (id < TEX_IDS) {
-        unsigned h = g_tex_hint[id];
-        if (h && g_dr.tex[h - 1].id == id) {
-            return &g_dr.tex[h - 1];
-        }
-        if (g_tex_miss[id] == g_tex_gen) {
-            return NULL;
-        }
+    const unsigned h = hle_idhint_get(&g_tex_hint, id);
+    if (h && g_dr.tex[h - 1].id == id) {
+        return &g_dr.tex[h - 1];
+    }
+    if (hle_idhint_missed(&g_tex_hint, id)) {
+        return NULL;
     }
     for (unsigned i = 0; i < HLE_MAX_TEX; i++) {
         if (g_dr.tex[i].id == id) {
-            if (id < TEX_IDS) {
-                g_tex_hint[id] = i + 1;
-            }
+            hle_idhint_set(&g_tex_hint, id, i + 1);
             return &g_dr.tex[i];
         }
     }
-    if (id < TEX_IDS) {
-        g_tex_miss[id] = g_tex_gen;
-    }
+    hle_idhint_miss(&g_tex_hint, id);
     return NULL;
 }
 
 /* Retired textures: the image, its views and memory are destroyed and the
  * bindless slot reused once the timeline passes the work that may sample
- * them (HLE_SURF_PARKED: the submission that closes the open recording). */
+ * them (vk/retire.h: parked until the submission that closes the open
+ * recording). h: the image, its view, its cube view, its memory. */
 #define TEX_RETIRE_MAX 2048
-static struct {
-    VkImage img;
-    VkImageView view, cube_view;
-    VkDeviceMemory mem;
-    uint32_t slot;
-    uint64_t after;
-} g_retire[TEX_RETIRE_MAX];
-static unsigned g_nretire;
+_Static_assert(HLE_RETIRE_PARKED == HLE_SURF_PARKED, "one sentinel");
+static HleRetireTab g_retire = { .max = TEX_RETIRE_MAX };
 static uint32_t g_free_slot[HLE_MAX_IMAGES];
 static unsigned g_nfree_slot;
 static uint64_t g_tex_retired;
 
+#define H64(x) ((uint64_t)(uintptr_t)(x))
+
+static void retired_gone(const HleRetired *e, void *ctx)
+{
+    (void)ctx;
+    if (e->h[2]) {
+        T.vkDestroyImageView(g_hvk.dev, (VkImageView)(uintptr_t)e->h[2], NULL);
+    }
+    T.vkDestroyImageView(g_hvk.dev, (VkImageView)(uintptr_t)e->h[1], NULL);
+    T.vkDestroyImage(g_hvk.dev, (VkImage)(uintptr_t)e->h[0], NULL);
+    T.vkFreeMemory(g_hvk.dev, (VkDeviceMemory)(uintptr_t)e->h[3], NULL);
+    if (e->slot && g_nfree_slot < ARRAY_SIZE(g_free_slot)) {
+        g_free_slot[g_nfree_slot++] = e->slot;
+    }
+    g_tex_retired++;
+}
+
 void hle_draw_tex_reap(uint64_t completed)
 {
-    unsigned j = 0;
-    for (unsigned i = 0; i < g_nretire; i++) {
-        if (g_retire[i].after == HLE_SURF_PARKED || g_retire[i].after > completed) {
-            g_retire[j++] = g_retire[i];
-            continue;
-        }
-        if (g_retire[i].cube_view) {
-            T.vkDestroyImageView(g_hvk.dev, g_retire[i].cube_view, NULL);
-        }
-        T.vkDestroyImageView(g_hvk.dev, g_retire[i].view, NULL);
-        T.vkDestroyImage(g_hvk.dev, g_retire[i].img, NULL);
-        T.vkFreeMemory(g_hvk.dev, g_retire[i].mem, NULL);
-        if (g_retire[i].slot && g_nfree_slot < ARRAY_SIZE(g_free_slot)) {
-            g_free_slot[g_nfree_slot++] = g_retire[i].slot;
-        }
-        g_tex_retired++;
-    }
-    g_nretire = j;
+    hle_retire_reap(&g_retire, completed, retired_gone, NULL);
 }
 
 void hle_draw_tex_stamp(uint64_t value)
 {
-    for (unsigned i = 0; i < g_nretire; i++) {
-        if (g_retire[i].after == HLE_SURF_PARKED) {
-            g_retire[i].after = value;
+    hle_retire_stamp(&g_retire, value);
+}
+
+static void retire_full(HleRetireTab *t, void *ctx)
+{
+    (void)t;
+    (void)ctx;
+    hle_tl_wait(hle_tl_submitted());            /* everything before is done */
+    hle_draw_tex_reap(hle_tl_completed());
+}
+
+/* An image (0: none) and a slot let go. The table full, everything submitted
+ * is waited for; the ones retired since the last submission stay through
+ * that, and when they alone fill the table it grows: a title that lets go of
+ * more than TEX_RETIRE_MAX images and surface slots between two submissions
+ * (everything at once, between levels) wrote past the table's end, over its
+ * own count and the free slots' list. */
+static void retire(VkImage img, VkImageView view, VkImageView cube_view, VkDeviceMemory mem,
+                   uint32_t slot)
+{
+    const HleRetired r = { .h = { H64(img), H64(view), H64(cube_view), H64(mem) }, .slot = slot,
+                           .after = HLE_RETIRE_PARKED };
+    if (!hle_retire_put(&g_retire, &r, retire_full, NULL)) {
+        static bool s_logged;                   /* (kept: not destroyed, its slot not reused) */
+        if (!s_logged) {
+            s_logged = true;
+            hle_log("hakuX-hle-back", "no memory for the retired textures' table: one kept");
         }
     }
 }
@@ -934,13 +954,7 @@ void hle_draw_tex_stamp(uint64_t value)
 static void tex_free(HleVkTex *t)
 {
     if (t->img) {
-        if (g_nretire == TEX_RETIRE_MAX) {
-            hle_tl_wait(hle_tl_submitted());    /* full: everything before is done */
-            hle_draw_tex_reap(hle_tl_completed());
-        }
-        g_retire[g_nretire++] = (typeof(g_retire[0])){
-            .img = t->img, .view = t->view, .cube_view = t->cube_view, .mem = t->mem,
-            .slot = t->slot, .after = HLE_SURF_PARKED };
+        retire(t->img, t->view, t->cube_view, t->mem, t->slot);
     }
     memset(t, 0, sizeof(*t));
 }
@@ -1004,7 +1018,7 @@ void hle_draw_cmd_tex(const HleCmdTex *c, VkCommandBuffer cb)
         *t = (HleVkTex){ .id = c->id, .xfmt = c->xfmt, .w = c->w, .h = c->h, .d = cd,
                          .levels = c->levels, .faces = c->faces, .fmt = tf.fmt,
                          .vol = cd > 1 };
-        g_tex_gen++;                    /* remembered misses may now hit */
+        hle_idhint_made(&g_tex_hint);   /* remembered misses may now hit */
         if (!make_image(t, &tf, VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT)) {
             static unsigned s_fail;
             if (s_fail++ < 8) {
@@ -1096,12 +1110,8 @@ static uint32_t surf_slot(HleVkSurf *s, uint32_t ord)
                  * recordings that may sample it complete. */
                 uint32_t ns = take_slot();
                 if (ns) {
-                    if (g_nretire == TEX_RETIRE_MAX) {
-                        hle_tl_wait(hle_tl_submitted());
-                        hle_draw_tex_reap(hle_tl_completed());
-                    }
-                    g_retire[g_nretire++] = (typeof(g_retire[0])){
-                        .slot = g_dr.sslot[i].slot, .after = HLE_SURF_PARKED };
+                    retire(VK_NULL_HANDLE, VK_NULL_HANDLE, VK_NULL_HANDLE, VK_NULL_HANDLE,
+                           g_dr.sslot[i].slot);
                     g_dr.sslot[i].slot = ns;
                 }
                 g_dr.sslot[i].view = view;
@@ -1136,12 +1146,7 @@ void hle_draw_forget_surf(uint32_t id)
             i++;
             continue;
         }
-        if (g_nretire == TEX_RETIRE_MAX) {
-            hle_tl_wait(hle_tl_submitted());
-            hle_draw_tex_reap(hle_tl_completed());
-        }
-        g_retire[g_nretire++] = (typeof(g_retire[0])){
-            .slot = g_dr.sslot[i].slot, .after = HLE_SURF_PARKED };
+        retire(VK_NULL_HANDLE, VK_NULL_HANDLE, VK_NULL_HANDLE, VK_NULL_HANDLE, g_dr.sslot[i].slot);
         g_dr.sslot[i] = g_dr.sslot[--g_dr.nsslot];
     }
 }
@@ -3615,17 +3620,43 @@ void hle_draw_cmd_draw(const HleCmdDraw *c, VkCommandBuffer cb, uint32_t rt_id, 
             }
         }
         for (unsigned st = 0; st < 4; st++) {
+            /* the colour key (psh.c color_key): the stage's operation and
+             * colour, its alpha left out for a texture without one */
+            const unsigned op = s->tss[st][TSS_COLORKEYOP] & 3;
+            if (op && c->tex[st]) {
+                const HleVkTex *t = tex_find(c->tex[st]);
+                const HleVkSurf *sf = t ? NULL : hle_surf_get(c->tex[st]);
+                const uint32_t xf = t ? t->xfmt : sf ? sf->d.xfmt : 0;
+                const bool noalpha = xf == HLE_XFMT_X8R8G8B8 || xf == HLE_XFMT_LIN_X8R8G8B8 ||
+                                     xf == HLE_XFMT_X1R5G5B5 || xf == HLE_XFMT_LIN_X1R5G5B5;
+                k.pk.tex_modes |= HLE_PSH_CKEY_BITS(st, op, noalpha);
+                k.pk.ckey[st] = s->tss[st][TSS_COLORKEYCOLOR] & (noalpha ? 0x00FFFFFFu : 0xFFFFFFFFu);
+            }
+        }
+        for (unsigned st = 0; st < 4; st++) {
             /* the bound texture's dimensionality picks the fetch, as on the
              * NV2A (and LLE): a volume under a 2D-coordinate mode is read in
              * 3D (Conker's menu: animated electricity, a 256 x 128 x 4 volume,
              * bump-env mapped), PROJECT3D on a 2D texture s/q, t/q */
             unsigned m = (k.pk.tex_modes >> (5 * st)) & 0x1F;
             HleVkTex *t = c->tex[st] ? tex_find(c->tex[st]) : NULL;
-            bool vol = t && t->vol, flat = c->tex[st] && !vol && !(t && t->faces == 6);
+            const HleVkSurf *sf = c->tex[st] && !t ? hle_surf_get(c->tex[st]) : NULL;
+            bool vol = t && t->vol, cube = (t && t->faces == 6) || (sf && sf->d.faces == 6);
+            bool flat = c->tex[st] && !vol && !cube;
             if (vol) {
                 k.pk.vol |= 1u << st;
             } else if (m == HLE_PST_PROJECT3D && flat && !((k.pk.shadow >> st) & 1)) {
                 k.pk.tex_modes -= (HLE_PST_PROJECT3D - HLE_PST_PROJECT2D) << (5 * st);
+            }
+            /* ... and a 2D texture under a mode that fetches a cube or a
+             * volume, a cube under PROJECT2D (psh.h HLE_PSH_TKIND): the
+             * other kinds' views of its slot are the white texture's */
+            const bool cube_mode = m == HLE_PST_CUBEMAP || m == HLE_PST_DOT_STR_CUBE ||
+                                   m == HLE_PST_DOT_RFLCT_DIFF || m == HLE_PST_DOT_RFLCT_SPEC ||
+                                   m == HLE_PST_DOT_RFLCT_SPEC_CONST;
+            if (!((k.pk.fbfetch >> st) & 1) && !((k.pk.shadow >> st) & 1) &&
+                ((flat && (cube_mode || m == HLE_PST_DOT_STR_3D)) || (cube && m == HLE_PST_PROJECT2D))) {
+                k.pk.compare |= HLE_PSH_TKIND_BIT(st);
             }
         }
         /* the stages that sample a 2D image through samp() (as psh.c
@@ -3828,6 +3859,7 @@ void hle_draw_cmd_draw(const HleCmdDraw *c, VkCommandBuffer cb, uint32_t rt_id, 
         k.vk.w1_mask = (uint16_t)w1s;
         k.vk.flat = s->rs[RS_SHADEMODE] == 0x1D00;
         k.vk.spec_off = !s->spec;
+        k.vk.pt_size = (uint16_t)c->pt_size;
         k.vk.fog_table = s->rs[RS_FOGENABLE] && (s->rs[RS_FOGTABLEMODE] & 3) != 0;
     }
     if (!s->psh) {
@@ -3843,6 +3875,16 @@ void hle_draw_cmd_draw(const HleCmdDraw *c, VkCommandBuffer cb, uint32_t rt_id, 
     k.src = s->rs[RS_SRCBLEND];
     k.dst = s->rs[RS_DESTBLEND];
     k.op = s->rs[RS_BLENDOP];
+    /* A target whose format has no alpha of its own (X8R8G8B8, X1R5G5B5:
+     * the bits are forced) blends as if its alpha were 1; its image has an
+     * alpha channel here, holding whatever the draws put out. Dinosaur
+     * Hunting composites its smoke by the destination's alpha into such a
+     * target (black blots on the water). */
+    if (k.blend_en && rt && (rt->d.xfmt == HLE_XFMT_X8R8G8B8 || rt->d.xfmt == HLE_XFMT_LIN_X8R8G8B8 ||
+                             rt->d.xfmt == HLE_XFMT_X1R5G5B5 || rt->d.xfmt == HLE_XFMT_LIN_X1R5G5B5)) {
+        k.src = hle_kv_blend_factor_forced_alpha(k.src);
+        k.dst = hle_kv_blend_factor_forced_alpha(k.dst);
+    }
     /* The NV2A's signed equations, ADDSIGNED (0xF006) and REVSUBTRACTSIGNED
      * (0xF005), add and subtract the colours as two's-complement bytes,
      * saturating: Midnight Club 3 counts its headlight volumes' front and back

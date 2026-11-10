@@ -39,7 +39,12 @@ typedef struct HleVshKey {
                                    their four-component format (the driver's lacks
                                    vertex support: AMD's for 8 and 16 bits), the
                                    fourth read past them: w is 1 (in the padding too) */
+    uint16_t pt_size;           /* a point list without point parameters
+                                   (SET_POINT_PARAMS_ENABLE off): HLE_VSH_PT_FIXED |
+                                   SET_POINT_SIZE, the size in eighths of a pixel,
+                                   whatever the program leaves in oPts; 0: oPts */
 } HleVshKey;
+#define HLE_VSH_PT_FIXED 0x8000u
 
 /* Parses nslots 4-dword instructions (stopping at the FINAL one) and writes
  * the GLSL into buf. Returns the length, or 0 when a slot does not decode,

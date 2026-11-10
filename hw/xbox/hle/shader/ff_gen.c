@@ -576,17 +576,23 @@ size_t hle_ff_ps_glsl(const HleFfPsKey *k, char *buf, size_t cap)
     /* a NaN factor is 1, unfogged; the distance signed, as D3D's fog modes
      * (psh.c) */
     case 1:  put(&b, "  float fogf = isnan(vFog) ? 1.0 : clamp(vFog, 0.0, 1.0);\n"); break;
-    case 2:  put(&b, "  float fogf = clamp(exp(-vFog * pc.fog.z), 0.0, 1.0);\n"); break;
+    /* the table modes: an infinite coordinate or a factor that is no number
+     * is 1 in LINEAR and EXP, 0 in EXP2 (psh.c) */
+    case 2:  put(&b, "  float fogf = exp(-vFog * pc.fog.z);\n"
+                     "  fogf = isinf(vFog) || isnan(fogf) ? 1.0 : clamp(fogf, 0.0, 1.0);\n"); break;
     case 3:  put(&b, "  float fd = vFog * pc.fog.z;\n"
-                     "  float fogf = clamp(exp(-fd * fd), 0.0, 1.0);\n"); break;
-    default: put(&b, "  float fogf = clamp((pc.fog.y - vFog) / "
-                     "(pc.fog.y - pc.fog.x), 0.0, 1.0);\n"); break;
+                     "  float fogf = exp(-fd * fd);\n"
+                     "  fogf = isinf(vFog) || isnan(fogf) ? 0.0 : clamp(fogf, 0.0, 1.0);\n"); break;
+    default: put(&b, "  float fogf = (pc.fog.y - vFog) / (pc.fog.y - pc.fog.x);\n"
+                     "  fogf = isinf(vFog) || isnan(fogf) ? 1.0 : clamp(fogf, 0.0, 1.0);\n"); break;
     }
     if (k->fog) {
         put(&b, "  cur.rgb = mix(unpackUnorm4x8(pc.fog_color).zyx, cur.rgb, fogf);\n");
     }
     if (k->alpha_test && k->alpha_func < 8) {
-        put(&b, "  { float a = cur.a, r = pc.alpha_ref; if (!(%s)) discard; }\n",
+        /* in eight bits, as the pixel shaders' (psh.c) */
+        put(&b, "  { float a = floor(clamp(cur.a, 0.0, 1.0) * 255.0 + 0.5), "
+                "r = floor(pc.alpha_ref * 255.0 + 0.5); if (!(%s)) discard; }\n",
             k_cmp[k->alpha_func]);
     }
     if (k->fbfetch & HLE_FB_ZEQ) {

@@ -50,6 +50,9 @@ typedef struct HlePshKey {
     uint32_t dot_map;                   /* PSDotMapping */
     uint32_t input_tex;                 /* PSInputTexture */
     uint32_t compare;                   /* PSCompareMode */
+    uint32_t ckey[4];                   /* the stages' colour keys (A8R8G8B8), where one is on
+                                           (HLE_PSH_CKEY): its alpha 0 where the texture's
+                                           format has none */
     uint8_t alpha_test;                 /* ALPHATESTENABLE */
     uint8_t alpha_func;                 /* D3DCMP_* - 0x200 (0..7) */
     uint8_t flat;
@@ -104,6 +107,23 @@ typedef struct HlePshKey {
  * stage (bit = stage) whose texture was defined with its signed bytes
  * flipped (hle_tex_sign_xor): read centred on 0x80, filtered as signed. */
 #define HLE_PSH_TFLIP(k) ((k)->input_tex & 15)
+/* HlePshKey.tex_modes bits 20-27 (PSTextureModes has 20): per stage, 2 bits
+ * (stage 0 lowest), the colour key's operation, SET_TEXTURE_CONTROL0 1:0: a
+ * fetched texel equal to the stage's SET_COLOR_KEY_COLOR (ckey) has its
+ * alpha 0 (1), is (0, 0, 0, 0) (2), or the pixel is not drawn (3). Bits
+ * 28-31: the stage's texture format has no alpha, and the key's alpha is
+ * not compared (X1R5G5B5, X8R8G8B8). */
+#define HLE_PSH_CKEY(k, s) (((k)->tex_modes >> (20 + 2 * (s))) & 3u)
+#define HLE_PSH_CKEY_NOALPHA(k, s) (((k)->tex_modes >> (28 + (s))) & 1u)
+#define HLE_PSH_CKEY_BITS(s, op, noalpha) \
+    ((uint32_t)((op) & 3u) << (20 + 2 * (s)) | (uint32_t)((noalpha) ? 1u : 0u) << (28 + (s)))
+/* HlePshKey.compare bits 16-19 (PSCompareMode has 16): the stage's texture is
+ * of another kind than its mode fetches, and is read as the NV2A reads it
+ * (psh.c): a 2D texture under a mode that fetches a cube (CUBEMAP,
+ * DOT_STR_CUBE, DOT_RFLCT_DIFF, DOT_RFLCT_SPEC) or a volume (DOT_STR_3D), a
+ * cube under PROJECT2D. */
+#define HLE_PSH_TKIND(k, s) (((k)->compare >> (16 + (s))) & 1u)
+#define HLE_PSH_TKIND_BIT(s) (1u << (16 + (s)))
 #define HLE_PSH_RECT 0x10u              /* HlePshKey.vol: a linear texture kept to its size */
 #define HLE_PSH_RECT4 0x20u             /* HlePshKey.vol: each stage's in pc.scr (programs) */
 

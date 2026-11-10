@@ -159,6 +159,11 @@ static uint32_t ld(uint32_t off)
 
 static void census(uint32_t off, bool write, uint32_t v)
 {
+#if !HAKUX_DIAG
+    (void)off;                          /* (a build's made to investigate) */
+    (void)write;
+    (void)v;
+#else
     uint32_t key = off & ~3u;
     unsigned i = (key * 2654435761u) >> 20 & (CENSUS_SLOTS - 1);
     for (unsigned k = 0; k < 16; k++, i = (i + 1) & (CENSUS_SLOTS - 1)) {
@@ -180,6 +185,7 @@ static void census(uint32_t off, bool write, uint32_t v)
         g_census.r[i].rd++;
     }
     g_census.r[i].last = v;
+#endif
 }
 
 /* Once a second from the vblank thread: the busiest registers since. */
@@ -221,8 +227,9 @@ static bool fifo_empty(void)
     return !g_pbmode || ld(NV_PFIFO_CACHE1_DMA_GET) == ld(NV_PFIFO_CACHE1_DMA_PUT);
 }
 
-/* ---- debug: the GPU event trace (host.h hle_host_gpu_trace) ---- */
 uint64_t nc_ke_now_ns(void);           /* native/kernel/ke.c */
+#if HAKUX_DIAG
+/* ---- debug: the GPU event trace (host.h hle_host_gpu_trace) ---- */
 #define GTR_N 32768u
 static struct {
     uint64_t ns;
@@ -277,6 +284,7 @@ void hle_host_gpu_trace_dump(const char *why, uint32_t mark)
         }
     }
 }
+#endif
 
 static uint32_t pmc_intr(void)
 {
@@ -293,9 +301,20 @@ static uint32_t pmc_intr(void)
     return v;
 }
 
+/* The line as the registers have it, looked at and set as one step. The
+ * vblank and alarm threads, the decoder (a trap) and the guest (its ISR
+ * clearing what it handled) each change a register and then come here: with
+ * the look and the set apart, one of them set the level it had seen before
+ * another's change, after that one's: a line left low with an interrupt
+ * pending (taken a vblank late), or high with none (its ISR run for nothing
+ * until the next change). */
+static pthread_mutex_t g_irq_mu = PTHREAD_MUTEX_INITIALIZER;
+
 static void update_irq(void)
 {
+    pthread_mutex_lock(&g_irq_mu);
     nc_irq_set(NV2A_IRQ, (ld(NV_PMC_INTR_EN_0) & 1) && pmc_intr());
+    pthread_mutex_unlock(&g_irq_mu);
 }
 
 /* ---- PTIMER's alarm ---- */
@@ -870,7 +889,9 @@ static void *vblank_thread(void *arg)
         }
         if (g_census.on && next - g_census.t_log >= 1000000000ull) {
             g_census.t_log = next;
-            census_log();
+            if (HAKUX_DIAG) {
+                census_log();
+            }
         }
     }
     return NULL;
@@ -885,7 +906,7 @@ void nc_dev_nv2a_set_ram(uint32_t bytes)
 
 void nc_dev_nv2a_init(void)
 {
-    g_regs = calloc(1, NV2A_SIZE); /* pages are touched only where the guest writes */
+    g_regs = calloc(1, NV2A_SIZE + 16); /* pages are touched only where the guest writes (a word of slack past the end) */
     nc_wr32(g_regs + NV_PMC_BOOT_0, 0x02A000A1u);
     nc_wr32(g_regs + NV_PFB_CSTATUS, 64u << 20);
     char v[PROP_VALUE_MAX] = "";
@@ -1004,7 +1025,7 @@ static void misc_write(void *opaque, uint32_t off, uint64_t value, unsigned size
 
 void nc_dev_misc_init(void)
 {
-    g_misc = calloc(1, MISC_SIZE);
+    g_misc = calloc(1, MISC_SIZE + 16);
     const NcMmioDev dev = {"misc", MISC_BASE, MISC_SIZE, misc_read, misc_write, NULL};
     nc_mmio_register(&dev);
 }

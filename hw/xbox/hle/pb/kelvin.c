@@ -40,7 +40,7 @@ enum {
     TSS_MIPFILTER, TSS_MIPMAPLODBIAS, TSS_MAXMIPLEVEL, TSS_MAXANISOTROPY,
     TSS_COLORKEYOP, TSS_COLORSIGN, TSS_ALPHAKILL,
     TSS_BUMPENVMAT00 = 22,              /* .. 11, then LSCALE, LOFFSET */
-    TSS_BORDERCOLOR = 29,
+    TSS_BORDERCOLOR = 29, TSS_COLORKEYCOLOR = 30,
 };
 
 static struct {
@@ -168,6 +168,7 @@ static void tss(uint32_t *t, unsigned s)
     t[TSS_ALPHAKILL] = (ctl0 >> 2) & 1;
     t[TSS_COLORSIGN] = filt & 0xF0000000u;
     t[TSS_BORDERCOLOR] = R(b + 0x24);
+    t[TSS_COLORKEYCOLOR] = R(0x0AE0 + 4 * s);           /* SET_COLOR_KEY_COLOR */
     /* SET_TEXTURE_SET_BUMP_ENV_MAT 00 01 11 10 (the NV2A's order, as LLE
      * takes it), SCALE, OFFSET, where written; the stage keeps 00 01 10 11.
      * Read as 00 01 10 11, D3D's 0.5 x identity was (0.5, 0, 0.5, 0): every
@@ -211,7 +212,9 @@ void hle_kelvin_state(HleCmdState *st)
         rs[RS_ZENABLE] = R(0x030C) ? ((R(0x0290) & 0x10000u) ? 2 : 1) : 0;
     }
     if (W(0x0308) || W(0x039C) || W(0x03A0)) {
-        /* CULLMODE is the winding culled: the front one for GL_FRONT */
+        /* CULLMODE is the winding culled: the front one for GL_FRONT. The
+         * front face is clockwise until one is set (a value that is neither
+         * winding never reaches the register: kvfmt.h) */
         uint32_t ff = W(0x03A0) && R(0x03A0) ? R(0x03A0) : 0x900;
         rs[RS_FRONTFACE] = ff;
         rs[RS_CULLMODE] = !R(0x0308) ? 0 : R(0x039C) == 0x404 ? ff : (ff ^ 1);
@@ -275,6 +278,8 @@ void hle_kelvin_state(HleCmdState *st)
     for (unsigned s = 0; s < HLE_TSS_STAGES; s++) {
         if (W(0x1B0C + 64 * s)) {
             tss(st->tss[s], s);
+        } else if (W(0x0AE0 + 4 * s)) {
+            st->tss[s][TSS_COLORKEYCOLOR] = R(0x0AE0 + 4 * s);
         }
     }
     if (W(0x03B8)) {

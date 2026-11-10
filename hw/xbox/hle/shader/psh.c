@@ -273,6 +273,27 @@ static void alpha_kill(Buf *b, const HlePshKey *k, unsigned s, unsigned m)
     }
 }
 
+/* The colour key (SET_COLOR_KEY_COLOR, the mode in SET_TEXTURE_CONTROL0): a
+ * stage's fetched texel, as eight bits a channel, equal to the stage's key
+ * is made transparent or is not drawn at all. The titles that use it cut
+ * sprites out of a flat background with it (Top Spin's crowd, each
+ * spectator a quad in a block of the key's colour). After the fetch and the
+ * alpha kill, for the modes that fetch (as the NV2A, by xemu's tests on a
+ * console). */
+static void color_key(Buf *b, const HlePshKey *k, unsigned s, unsigned m)
+{
+    static const char *const k_act[4] = { "", "t%u.a = 0.0;", "t%u = vec4(0.0);", "discard;" };
+    const unsigned op = HLE_PSH_CKEY(k, s);
+    if (!op || m == HLE_PST_NONE || m == HLE_PST_PASSTHRU || m == HLE_PST_CLIPPLANE ||
+        m == HLE_PST_DOTPRODUCT) {
+        return;
+    }
+    put(b, "  if (ckey(t%u, 0x%08xu, 0x%08xu)) { ", s, (unsigned)k->ckey[s],
+        HLE_PSH_CKEY_NOALPHA(k, s) ? 0x00FFFFFFu : 0xFFFFFFFFu);
+    put(b, k_act[op], s);
+    put(b, " }\n");
+}
+
 /* Stage s's texture has channels the texture unit gives as signed bytes
  * (SET_TEXTURE_FILTER 31:28) and its mode samples one: the combiners take
  * them signed, -1..1. A bump-env, dot-product or dependent stage that reads
@@ -451,7 +472,7 @@ size_t hle_psh_glsl(const HlePshKey *k, char *buf, size_t cap, unsigned *unsuppo
             "  vec2 v = floor(c * 255.0 + 0.5);\n"
             "  return mix(v, v - 256.0, greaterThanEqual(v, vec2(128.0))) / 127.0;\n"
             "}\n"
-            "%s"
+            "%s%s%s"
             "void main() {\n"
             "  vec4 v0 = vDiffuse, v1 = vSpecular;\n"
             "  vec4 vTex3 = %s;\n", interp, interp, k->wbuf ? HLE_WBUF_IN_GLSL : "",
@@ -466,7 +487,30 @@ size_t hle_psh_glsl(const HlePshKey *k, char *buf, size_t cap, unsigned *unsuppo
          * stage maps so: other shaders' text, and their cached SPIR-V, stay) */
         hilo1 ? "  if (m == 4u) { uvec4 i = uvec4(c * 255.0 + 0.5);\n"
                 "    return vec3(float(i.a << 8 | i.r), float(i.g << 8 | i.b), 65535.0) / 65535.0; }\n" : "",
-        sfun, k->point_sprite ? "vec4(gl_PointCoord, 1.0, 1.0)" : "vTex3i");
+        sfun,
+        /* a texture of another kind than its stage's mode fetches (HLE_PSH_TKIND), as the NV2A
+         * reads it (xemu's tests on a console): a 2D one under a cube mode at the direction's
+         * two minor coordinates over the major one, -1..1, as they are (cube2d; samp2: by
+         * normalised coordinates whatever its layout); a cube under PROJECT2D along
+         * (1, t, -s) (sampc) */
+        (k->compare >> 16) & 0xFu ?
+            "vec2 cube2d(vec3 d) {\n"
+            "  vec3 a = abs(d);\n"
+            "  if (a.x > a.y && a.x > a.z) return vec2(d.x > 0.0 ? -d.z : d.z, d.y) / a.x;\n"
+            "  if (a.y > a.x && a.y > a.z) return vec2(d.x, d.y > 0.0 ? -d.z : d.z) / a.y;\n"
+            "  return vec2(d.z > 0.0 ? d.x : -d.x, d.y) / a.z;\n"
+            "}\n"
+            "vec4 samp2(uint s, vec2 uv) {\n"
+            "  uint ti = pc.tex[s] & 0xFFFFu, si = pc.tex[s] >> 16;\n"
+            "  return texture(sampler2D(uTex2D[nonuniformEXT(ti)], uSmp[nonuniformEXT(si)]), uv);\n"
+            "}\n" : "",
+        /* the colour key's test (color_key), in the shaders that have one */
+        (k->tex_modes >> 20) & 0xFFu ?
+            "bool ckey(vec4 t, uint key, uint mask) {\n"
+            "  uvec4 c = uvec4(clamp(t, 0.0, 1.0) * 255.0 + 0.5);\n"
+            "  return (((c.a << 24) | (c.r << 16) | (c.g << 8) | c.b) & mask) == (key & mask);\n"
+            "}\n" : "",
+        k->point_sprite ? "vec4(gl_PointCoord, 1.0, 1.0)" : "vTex3i");
     if (k->wbuf) {
         put(&b, HLE_WBUF_CALC_GLSL);
     }
@@ -489,7 +533,17 @@ size_t hle_psh_glsl(const HlePshKey *k, char *buf, size_t cap, unsigned *unsuppo
     default: put(&b, "  float fogf = (pc.fog.y - %s) / (pc.fog.y - pc.fog.x);\n", fd); break;
     }
     if (k->fog >= 2) {
-        put(&b, "  fogf = isnan(fogf) ? 1.0 : clamp(fogf, 0.0, 1.0);\n");
+        /* A coordinate that is infinite, or a factor that is no number: the
+         * NV2A gives 1 (unfogged) in the linear modes and plain EXP, 0 in
+         * EXP_ABS and the EXP2 modes, whatever the parameters (xemu's tests
+         * on a console, its pull requests 660, 2485, 2089). A program's RCP
+         * of a zero w lands +infinity in oFog: by the formula alone that is
+         * full fog in linear and EXP, and MechAssault's intro, Marvel vs.
+         * Capcom 2's character select and Capcom vs. SNK 2 EO's sprites were
+         * the fog's colour. */
+        const bool one = k->fog == 4 || (k->fog == 2 && !k->fog_abs);
+        put(&b, "  fogf = isinf(vFog) || isnan(fogf) ? %s : clamp(fogf, 0.0, 1.0);\n",
+            one ? "1.0" : "0.0");
     }
     put(&b, "  vec4 fogr = vec4(col(pc.fog_color).rgb, fogf);\n"
             "  float dot1 = 0.0, dot2 = 0.0, dot3 = 0.0;\n%s",
@@ -517,11 +571,13 @@ size_t hle_psh_glsl(const HlePshKey *k, char *buf, size_t cap, unsigned *unsuppo
              * (an 8-bit target holds blue: back to its colour) */
             put(&b, "  vec4 t%u = subpassLoad(uFb)%s;\n", s, k->out_bgra ? ".bgra" : "");
             alpha_kill(&b, k, s, m);
+            color_key(&b, k, s, m);
             continue;
         }
         if (((k->shadow >> s) & 1) && (m == HLE_PST_PROJECT2D || m == HLE_PST_PROJECT3D)) {
             shadow_sample(&b, k, s, m == HLE_PST_PROJECT3D);
             alpha_kill(&b, k, s, m);
+            color_key(&b, k, s, m);
             continue;
         }
         switch (m) {
@@ -543,6 +599,11 @@ size_t hle_psh_glsl(const HlePshKey *k, char *buf, size_t cap, unsigned *unsuppo
             }
             break;
         case HLE_PST_PROJECT2D:
+            if (HLE_PSH_TKIND(k, s)) {          /* a cube: along (1, t, -s) */
+                put(&b, "  vec4 t%u;\n  { vec2 p = nvproj(vTex%u).xy;\n"
+                        "    t%u = sampc(%uu, normalize(vec3(1.0, p.y, -p.x))); }\n", s, s, s, s);
+                break;
+            }
             put(&b, (k->vol >> s) & 1 ? "  vec4 t%u = samp3(%uu, vec3(nvproj(vTex%u).xy, 0.0));\n"
                                       : "  vec4 t%u = samp(%uu, nvproj(vTex%u).xy);\n", s, s, s);
             break;
@@ -550,7 +611,8 @@ size_t hle_psh_glsl(const HlePshKey *k, char *buf, size_t cap, unsigned *unsuppo
             put(&b, "  vec4 t%u = samp3(%uu, nvproj(vTex%u));\n", s, s, s);
             break;
         case HLE_PST_CUBEMAP:
-            put(&b, "  vec4 t%u = sampc(%uu, vTex%u.xyz);\n", s, s, s);
+            put(&b, HLE_PSH_TKIND(k, s) ? "  vec4 t%u = samp2(%uu, cube2d(vTex%u.xyz));\n"
+                                        : "  vec4 t%u = sampc(%uu, vTex%u.xyz);\n", s, s, s);
             break;
         case HLE_PST_BUMPENVMAP:
         case HLE_PST_BUMPENVMAP_LUM: {
@@ -607,7 +669,8 @@ size_t hle_psh_glsl(const HlePshKey *k, char *buf, size_t cap, unsigned *unsuppo
             break;
         }
         case HLE_PST_DOT_STR_3D:                    /* stage 3: (dot1, dot2, dot3) */
-            put(&b, "  vec4 t%u = samp3(%uu, vec3(dot1, dot2, dot3));\n", s, s);
+            put(&b, HLE_PSH_TKIND(k, s) ? "  vec4 t%u = samp2(%uu, vec2(dot1, dot2));\n"
+                                        : "  vec4 t%u = samp3(%uu, vec3(dot1, dot2, dot3));\n", s, s);
             break;
         case HLE_PST_DOTPRODUCT:
             put(&b, "  vec4 t%u = vec4(0.0);\n", s);
@@ -622,17 +685,18 @@ size_t hle_psh_glsl(const HlePshKey *k, char *buf, size_t cap, unsigned *unsuppo
             put(&b, "  vec4 t%u = samp(%uu, vec2(dot%u, dot%u));\n", s, s, s - 1, s);
             break;
         case HLE_PST_DOT_STR_CUBE:                  /* stage 3: N */
-            put(&b, "  vec4 t%u = sampc(%uu, vec3(dot1, dot2, dot3));\n", s, s);
-            break;
         case HLE_PST_DOT_RFLCT_DIFF:                /* stage 2: N */
-            put(&b, "  vec4 t%u = sampc(%uu, vec3(dot1, dot2, dot3));\n", s, s);
+            put(&b, HLE_PSH_TKIND(k, s) ? "  vec4 t%u = samp2(%uu, cube2d(vec3(dot1, dot2, dot3)));\n"
+                                        : "  vec4 t%u = sampc(%uu, vec3(dot1, dot2, dot3));\n", s, s);
             break;
         case HLE_PST_DOT_RFLCT_SPEC:                /* stage 3: N reflected about E */
         case HLE_PST_DOT_RFLCT_SPEC_CONST:          /* (E = the eye vector: q coordinates) */
             put(&b, "  vec4 t%u;\n  { vec3 n = vec3(dot1, dot2, dot3), "
                     "e = vec3(vTex1.w, vTex2.w, vTex3.w);\n"
-                    "    t%u = sampc(%uu, 2.0 * n * dot(n, e) / max(dot(n, n), 1e-8) - e); }\n",
-                s, s, s);
+                    "    vec3 rv = 2.0 * n * dot(n, e) / max(dot(n, n), 1e-8) - e;\n"
+                    "    t%u = %s; }\n",
+                s, s, HLE_PSH_TKIND(k, s) ? (s == 3 ? "samp2(3u, cube2d(rv))" : "samp2(2u, cube2d(rv))")
+                                          : (s == 3 ? "sampc(3u, rv)" : "sampc(2u, rv)"));
             if (m == HLE_PST_DOT_RFLCT_SPEC_CONST) {
                 unsup |= 1u << m;
             }
@@ -668,6 +732,7 @@ size_t hle_psh_glsl(const HlePshKey *k, char *buf, size_t cap, unsigned *unsuppo
             }
         }
         alpha_kill(&b, k, s, m);
+        color_key(&b, k, s, m);
     }
     put(&b, "  vec4 r0 = vec4(0.0, 0.0, 0.0, t0.a), r1 = vec4(0.0);\n"
             "  vec4 t0s = t0, t3s = t3;\n");      /* as sampled (debug views 15, 16) */
@@ -678,8 +743,11 @@ size_t hle_psh_glsl(const HlePshKey *k, char *buf, size_t cap, unsigned *unsuppo
     final_combiner(&b, k);
     put(&b, "  outc = clamp(outc, 0.0, 1.0);\n");
     if (k->alpha_test && k->alpha_func < 8) {
-        put(&b, "  { float a = outc.a, r = pc.alpha_ref; if (!(%s)) discard; }\n",
-            k_cmp[k->alpha_func]);
+        /* the NV2A tests the alpha it would write, eight bits, against the reference's eight
+         * (as xemu): compared as floats, an alpha within half a step of the reference fell
+         * on the other side, and EQUAL / NOTEQUAL held for no computed alpha */
+        put(&b, "  { float a = floor(outc.a * 255.0 + 0.5), r = floor(pc.alpha_ref * 255.0 + 0.5); "
+                "if (!(%s)) discard; }\n", k_cmp[k->alpha_func]);
     }
     if (k->fbfetch & HLE_FB_ZEQ) {
         put(&b, "%s", HLE_ZEQ_TEST_GLSL(k->fbfetch));
@@ -688,8 +756,8 @@ size_t hle_psh_glsl(const HlePshKey *k, char *buf, size_t cap, unsigned *unsuppo
         "outc", "t0", "v0", "r0", "vec4(vec3(fogf), 1.0)", "v1", "t3", "vec4(vec3(r0.a), 1.0)",
         "t2",
         /* 16-pixel bands: stage 1 (a shadow compare), its r / 65535 */
-        "((int(gl_FragCoord.y) & 16) == 0 ? t1 : "
-        "vec4(vec3(clamp(vTex1.z / vTex1.w / 65535.0, 0.0, 1.0)), 1.0))",
+        ("((int(gl_FragCoord.y) & 16) == 0 ? t1 : "
+         "vec4(vec3(clamp(vTex1.z / vTex1.w / 65535.0, 0.0, 1.0)), 1.0))"),
         "vec4(vec3(vSpecular.a), 1.0)", "vec4(vec3(t0.a), 1.0)", "vec4(vec3(t3.a), 1.0)",
         "vec4(fract(vTex3.xy / vTex3.w), 0.0, 1.0)", "vec4(clamp(abs(vTex3.xyz) * 0.25, 0.0, 1.0), 1.0)",
         "t3s", "t0s" };

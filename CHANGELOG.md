@@ -1,5 +1,57 @@
 # xbased changelog
 
+## 1.0.94 (2026-11)
+
+This update comes out of a review of the whole core: the processor's
+translator, the kernel, the devices, savestates and the graphics chip.
+
+### New
+- The graphics chip follows the console more closely in a dozen rules,
+  each taken from tests run on a console rather than from one game:
+  - A texture's colour key is cut out, as sprites drawn over a flat
+    background colour expect.
+  - Textures in the L6V5U5 and L16 formats are drawn (they were skipped).
+  - A flat texture where a cube map is expected, and a cube map where a
+    flat texture is expected, are read as the console reads them instead
+    of as white or as the cube's first face.
+  - Fog whose distance is infinite or not a number follows the fog mode;
+    it could cover the picture with the fog's colour.
+  - Fixed-function specular highlights and spotlight cones use the
+    console's own curve, and reflection maps follow the infinite viewer
+    setting.
+  - A draw without a colour or normal array takes the last vertex of the
+    draw before it, as the console's registers do.
+  - Points drawn through a vertex program have the size the game set.
+  - Blending by the destination's alpha into a render target without
+    alpha, and the alpha such a target is cleared to.
+  - A render state given a value the console rejects keeps the value it
+    had.
+- Games can catch processor exceptions with their own handlers (access
+  violations, divisions by zero, invalid instructions and breakpoints),
+  and a group of rare instructions that used to stop a game now run.
+
+### Fixes
+- Savestates, disc images, game folders, mods and cheat files are read as
+  files that may come from anywhere. A damaged or altered one is refused
+  instead of writing outside xbased's folders or over its own memory.
+- A savestate made with a patch longer than 256 bytes switched on loads
+  again.
+- Values a game hands over (vertex data, texture sizes, long paths,
+  accesses at the edge of a device's registers) no longer reach past the
+  emulator's own buffers.
+- A picture the graphics chip drew is no longer copied back over memory
+  the game has freed and given another use.
+- A long session no longer slows down as the game keeps making textures.
+- Vertex data at odd addresses is drawn right on drivers that are strict
+  about it, and occlusion tests no longer run out of room in scenes that
+  use thousands of them.
+
+### Performance
+- Release builds no longer keep internal statistics while a game runs:
+  about 3 % more speed where the processor is the limit and less
+  processor use everywhere else. The log is shorter for it: the lines of
+  statistics every few seconds are gone, the rest is as before.
+
 ## 1.0.93 (2026-11)
 
 ### New

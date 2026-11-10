@@ -156,7 +156,11 @@ static bool entry_ok(const uint8_t *dir, uint32_t size, uint32_t off)
  * reach. The tree's depth is bounded by the entries the table can hold, not a
  * fixed count (an image tool may leave the tree a list: Conker: Live &
  * Reloaded's Audio, 78 entries 77 deep), with no recursion; a loop in a
- * damaged table ends where it meets an entry already seen. The pass reads the
+ * damaged table ends where it meets an entry already seen. The walk's stack
+ * holds an entry per 4 bytes of the table, the most there can be: links may
+ * name entries that overlap (a crafted image's: nothing checks that they
+ * don't), one every 4 bytes, and sized for whole entries (14 bytes and a
+ * name) the stack was written past its end by such a chain. The pass reads the
  * entries as they are laid out, each sector's from its start until its
  * padding, so a table whose links an image tool got wrong still shows every
  * file: a file the search missed was the title's disc error. Stops when fn
@@ -168,7 +172,7 @@ bool nc_disc_dir_each(const uint8_t *dir, uint32_t size, bool (*fn)(void *ctx, c
     }
     const uint32_t slots = size / 4 + 1;
     uint8_t *seen = calloc((slots + 7) / 8, 1);
-    uint32_t *stack = malloc(sizeof(*stack) * (size / 14 + 2));
+    uint32_t *stack = malloc(sizeof(*stack) * ((size_t)size / 4 + 2));
     bool hit = false;
     if (!seen || !stack) {
         free(seen);
@@ -251,7 +255,7 @@ static bool disc_find(const NcDisc *d, const char *path, NcDiscFile *out)
         while (*end && *end != '\\' && *end != '/') {
             end++;
         }
-        if (!(cur.attr & 0x10) || !cur.size) {
+        if (!(cur.attr & 0x10) || !cur.size || cur.size > NC_DISC_DIR_MAX) {
             return false;
         }
         uint8_t *dir = malloc(cur.size);
@@ -532,13 +536,13 @@ bool nc_disc_find_orig(const NcDisc *d, const char *path, NcDiscFile *out)
 
 bool nc_disc_read_orig(const NcDisc *d, const NcDiscFile *f, uint64_t off, void *buf, size_t len)
 {
-    return f->sector < NC_DISC_OVERLAY && off + len <= f->size &&
+    return f->sector < NC_DISC_OVERLAY && off <= f->size && len <= f->size - off &&
            image_read(d->fd, buf, len, d->part_off + (uint64_t)f->sector * NC_XDVDFS_SECTOR + off);
 }
 
 bool nc_disc_read_file(const NcDisc *d, const NcDiscFile *f, uint64_t off, void *buf, size_t len)
 {
-    if (off + len > f->size) {
+    if (off > f->size || len > f->size - off) {     /* not off + len: it wraps */
         return false;
     }
     return f->sector >= NC_DISC_OVERLAY

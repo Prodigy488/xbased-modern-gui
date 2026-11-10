@@ -8,6 +8,7 @@
 #include "hw/xbox/hle/mem/barrier.h"
 #include "hw/xbox/hle/mem/guestmem.h"
 #include "hw/xbox/hle/pb/kelvin.h"
+#include "hw/xbox/hle/pb/kvfmt.h"
 #include "hw/xbox/hle/pb/pbdraw.h"
 #include "hw/xbox/hle/pb/pbmode.h"
 #include "hw/xbox/hle/pb/pbstate.h"
@@ -421,7 +422,7 @@ static int kelvin(uint32_t m, uint32_t v)
  * (polled once a decode pass, pblog_poll): the next n */
 static int g_pblog = -1;
 
-static void pblog_poll(void)
+static __attribute__((unused)) void pblog_poll(void)
 {
     if (g_pblog < 0) {
         const char *e = getenv("HAKUX_HLE_PBLOG");
@@ -439,7 +440,11 @@ static void pblog_poll(void)
 
 static inline unsigned pblog_left(void)
 {
+#if HAKUX_DIAG
     return g_pblog > 0 ? (unsigned)g_pblog-- : 0;
+#else
+    return 0;
+#endif
 }
 
 static void log_object(const char *what, uint32_t handle)
@@ -690,38 +695,53 @@ static bool contig_pa(uint32_t va, uint32_t *pa)
 
 static bool run_record(uint32_t v)
 {
-    const uint32_t *w = (const uint32_t *)hle_pa_ptr(v >> 5, 16);
-    uint32_t fix = 0, buf, ret;
-    if (!w || (w[0] && !contig_pa(w[0], &fix)) || !contig_pa(w[1], &buf) || !contig_pa(w[3], &ret) ||
-        (w[2] & 3) || !hle_pa_ptr(buf + w[2], 4)) {
+    /* the record and each fixup's header are the guest's memory, which its other threads may
+     * write meanwhile: read once, into what is checked and then used */
+    const uint8_t *rec = hle_pa_ptr(v >> 5, 16);
+    uint32_t w[4], fix = 0, buf, ret;
+    if (!rec) {
+        return false;
+    }
+    memcpy(w, rec, sizeof(w));
+    uint8_t *end = NULL;
+    if ((w[0] && !contig_pa(w[0], &fix)) || !contig_pa(w[1], &buf) || !contig_pa(w[3], &ret) ||
+        (w[2] & 3) || !(end = hle_pa_ptr(buf + w[2], 4))) {
         return false;
     }
     /* the fixups, checked whole before any is applied */
     unsigned n = 0;
     for (uint32_t e = fix; e; n++) {
-        const uint32_t *h = (const uint32_t *)hle_pa_ptr(e, 8);
+        const uint8_t *h = hle_pa_ptr(e, 8);
         if (!h || n >= RUN_FIXUPS_MAX) {
             return false;
         }
-        if (h[0] == 0xFFFFFFFFu) {
+        const uint32_t len = hle_ldl_le(h), off = hle_ldl_le(h + 4);
+        if (len == 0xFFFFFFFFu) {
             break;
         }
-        if (!hle_pa_ptr(e + 8, h[0]) || !hle_pa_ptr(buf + h[1], h[0])) {
+        if (!hle_pa_ptr(e + 8, len) || !hle_pa_ptr(buf + off, len)) {
             return false;
         }
-        e += 8 + h[0];
+        e += 8 + len;
     }
-    for (uint32_t e = fix; e;) {
-        const uint32_t *h = (const uint32_t *)hle_pa_ptr(e, 8);
-        if (h[0] == 0xFFFFFFFFu) {
+    /* ... and applied: as many as were checked, each as it reads now */
+    for (uint32_t e = fix; e && n; n--) {
+        const uint8_t *h = hle_pa_ptr(e, 8);
+        const uint32_t len = h ? hle_ldl_le(h) : 0xFFFFFFFFu, off = h ? hle_ldl_le(h + 4) : 0;
+        if (len == 0xFFFFFFFFu) {
             break;
         }
-        memmove(hle_pa_ptr(buf + h[1], h[0]), hle_pa_ptr(e + 8, h[0]), h[0]);
-        hle_mem_mark_written(buf + h[1], h[0]);
-        e += 8 + h[0];
+        uint8_t *d = hle_pa_ptr(buf + off, len);
+        const uint8_t *s = hle_pa_ptr(e + 8, len);
+        if (!d || !s) {
+            break;                              /* changed since it was checked */
+        }
+        memmove(d, s, len);
+        hle_mem_mark_written(buf + off, len);
+        e += 8 + len;
     }
     const uint32_t jump = (w[3] & 0x0FFFFFFFu) + 1;
-    memcpy(hle_pa_ptr(buf + w[2], 4), &jump, 4);
+    memcpy(end, &jump, 4);
     hle_mem_mark_written(buf + w[2], 4);
     if ((v & 0x1F) == 3) {
         /* the DPC's DMA_SUBROUTINE write, through the guest's way in (the
@@ -781,11 +801,13 @@ static int count_method(void *opaque, unsigned subch, uint32_t m, uint32_t v)
             log_object(m ? "context" : "object", v);
         }
     }
+#if HAKUX_DIAG
     /* debug (the log line's top methods): one method in 16, counted 16;
      * every method's count cost ~3% of the decoder (a 64 KB table) */
     if (!(++g_pb.hist_tick & 15)) {
         g_pb.hist[subch][(m & 0x1FFFu) / 4] += 16;
     }
+#endif
     if (m == NV_NO_OPERATION && !v) {
         return HLE_PB_GO;                       /* padding (Crimson Sea: 1.3M a second) */
     }
@@ -844,6 +866,9 @@ static int count_method(void *opaque, unsigned subch, uint32_t m, uint32_t v)
         return HLE_PB_GO;
     }
     if (g_pb.obj_class[subch] == 0x97) {
+        if (!hle_kv_takes(m, v)) {
+            return HLE_PB_GO;                   /* a value the method doesn't take: its state stays */
+        }
         int r = kelvin(m, v);
         hle_kelvin_method(m, v);                /* its register shadow: the draw state */
         hle_pbd_method(m, v);
@@ -878,7 +903,9 @@ static uint32_t count_run(void *opaque, unsigned subch, uint32_t m, bool noninc,
     if (g_pb.obj_class[subch & 7] == 0x97) {
         hle_pbd_run(m, noninc, w, n);
     }
+#if HAKUX_DIAG
     g_pb.hist[subch & 7][(m & 0x1FFFu) / 4] += n;    /* debug: a run counts at its first method */
+#endif
     return n;
 }
 
@@ -906,7 +933,9 @@ static bool dma_object(uint32_t *base, uint32_t *limit, uint32_t *inst)
 
 static void consume_pass(void)
 {
+#if HAKUX_DIAG
     pblog_poll();
+#endif
     boundary_take();
     hle_pbd_front_serve();      /* before the stalls below: the guest's write waits on it */
     if (__atomic_exchange_n(&g_pb.disp_req, false, __ATOMIC_ACQ_REL)) {
@@ -1632,7 +1661,7 @@ void hle_pb_stop(void)
 
 void hle_pb_diag(void)
 {
-    if (!g_pb.on) {
+    if (!HAKUX_DIAG || !g_pb.on) {
         return;
     }
     if (g_pb.flip_wait && !g_pb.dumped && hle_now_ns() - g_pb.flip_wait_ns > 100000000) {

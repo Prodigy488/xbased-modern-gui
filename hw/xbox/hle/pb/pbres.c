@@ -343,18 +343,28 @@ static bool tex_define(uint32_t id, const uint32_t h5[5], const HleResDesc *dp,
      * a linear texture a linear one */
     bool x4444 = (d.fmt == HLE_XFMT_A4R4G4B4 || d.fmt == HLE_XFMT_LIN_A4R4G4B4) &&
                  !g_hvk.caps.x4444;
+    /* R6G5B5 (L6V5U5): no host format, A8R8G8B8 too (hle_tex_expand_r6g5b5), its signed
+     * channels as h5[2] says */
+    bool r655 = d.fmt == HLE_XFMT_R6G5B5 || d.fmt == HLE_XFMT_LIN_R6G5B5;
+    bool x16 = x4444 || r655;           /* 16-bit texels expanded to 32 */
     uint32_t oxfmt = p8 || dxtd ? HLE_XFMT_A8R8G8B8 :
-                     x4444 ? (d.fmt == HLE_XFMT_LIN_A4R4G4B4 ? HLE_XFMT_LIN_A8R8G8B8
-                                                            : HLE_XFMT_A8R8G8B8) : d.fmt;
+                     x16 ? (fi->flags & HLE_FI_LIN ? HLE_XFMT_LIN_A8R8G8B8 : HLE_XFMT_A8R8G8B8) : d.fmt;
     const HleFmtInfo *ofi = hle_fmt_info(oxfmt);
-    uint32_t faces = d.kind == HLE_RK_CUBE ? 6 : 1, levels = MAX(ri.levels, 1u), total = 0;
+    uint32_t faces = d.kind == HLE_RK_CUBE ? 6 : 1, levels = MAX(ri.levels, 1u);
     uint32_t depth = vol ? MAX(d.d, 1u) : 1;
+    /* what it comes to in the arena, in 64 bits: an expanded volume (P8, DXT) is up to eight
+     * times its data */
+    uint64_t total64 = 0;
     for (uint32_t l = 0; l < levels; l++) {
         uint32_t row;
-        total += level_bytes(ofi, MAX(d.w >> l, 1u), MAX(d.h >> l, 1u), &row) *
-                 MAX(depth >> l, 1u);
+        total64 += (uint64_t)level_bytes(ofi, MAX(d.w >> l, 1u), MAX(d.h >> l, 1u), &row) *
+                   MAX(depth >> l, 1u);
     }
-    total *= faces;
+    total64 *= faces;
+    if (total64 > (1u << 30)) {
+        return false;                           /* more than any arena */
+    }
+    const uint32_t total = (uint32_t)total64;
     uint8_t *dst;
     uint32_t off = arena_alloc(total, 16, &dst);
     if (off == HLE_ARENA_FULL) {
@@ -372,11 +382,11 @@ static bool tex_define(uint32_t id, const uint32_t h5[5], const HleResDesc *dp,
             uint32_t sw, sh, bo;
             hle_res_level(&d, l, &sw, &sh, &bo);
             HleXgRect img = { bo, bo, w, h };
-            /* x4444: the 16-bit texels to a scratch copy first, expanded below */
+            /* x16: the 16-bit texels to a scratch copy first, expanded below */
             uint8_t *out = dst + pos;
             uint32_t orow = row;
             g_autofree uint8_t *t16 = NULL;
-            if (x4444) {
+            if (x16) {
                 orow = w * 2;
                 out = t16 = g_malloc((size_t)orow * h * dd);
             }
@@ -408,7 +418,7 @@ static bool tex_define(uint32_t id, const uint32_t h5[5], const HleResDesc *dp,
                     memcpy(out + y * orow, s + y * sp, orow);
                 }
             }
-            if (h5[2] && !p8 && !dxtd && !x4444 && !(fi->flags & HLE_FI_DXT)) {
+            if (h5[2] && !p8 && !dxtd && !x16 && !(fi->flags & HLE_FI_DXT)) {
                 /* signed channels (hle_tex_sign_xor): their bytes flipped */
                 const size_t nt = (size_t)w * h * dd;
                 if (fi->bpp == 32) {
@@ -425,6 +435,9 @@ static bool tex_define(uint32_t id, const uint32_t h5[5], const HleResDesc *dp,
             }
             if (x4444) {
                 expand_4444((const uint16_t *)t16, (size_t)w * h * dd, (uint32_t *)(dst + pos));
+            } else if (r655) {
+                hle_tex_expand_r6g5b5((const uint16_t *)t16, (size_t)w * h * dd, h5[2],
+                                      (uint32_t *)(dst + pos));
             }
             pos += n;
         }
@@ -587,10 +600,13 @@ void hle_res_upload(uint32_t id, uint32_t pa, uint32_t pitch, uint32_t n,
          * rows, as they are now, through the arena (allocated before the
          * command: a full arena kicks one) */
         uint32_t arena = 0;
-        if ((!g_hram.zero_copy || hle_barrier_contended(clo, chi - clo)) && chi > clo) {
+        const uint8_t *src = chi > clo ? hle_pa_ptr(clo, chi - clo) : NULL;
+        if (!src) {
+            continue;                           /* rows that are not memory: none to read, either way */
+        }
+        if (!g_hram.zero_copy || hle_barrier_contended(clo, chi - clo)) {
             uint8_t *dst;
-            const uint8_t *src = hle_pa_ptr(clo, chi - clo);
-            uint32_t off = src ? hle_draw_arena_alloc(chi - clo, &dst) : HLE_ARENA_FULL;
+            uint32_t off = hle_draw_arena_alloc(chi - clo, &dst);
             if (off == HLE_ARENA_FULL) {
                 continue;                       /* cmd_upload would skip it too */
             }

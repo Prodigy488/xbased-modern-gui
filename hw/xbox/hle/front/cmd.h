@@ -311,6 +311,8 @@ typedef struct HleCmdDraw {
                                    diffuse register's current value (float4), 0 = none */
     float wscale;               /* untransformed FF draws: 1 / the projection's W-buffer
                                    far w (W-buffering stores w / wfar); 0 = keep z */
+    uint32_t pt_size;           /* a program's point list without point parameters:
+                                   HLE_VSH_PT_FIXED | SET_POINT_SIZE (vsh.h); else 0 */
 } HleCmdDraw;
 
 #define HLE_DRAW_GUEST_FVF (1u << 31)

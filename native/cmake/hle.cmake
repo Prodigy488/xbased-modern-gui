@@ -59,6 +59,8 @@ add_library(hakux_hle STATIC
   ${NC_HLE}/pb/pbres.c
   ${NC_HLE}/pb/pbstate.c
   ${NC_HLE}/pb/pusher.c
+  ${NC_HLE}/pb/vimm.c
+  ${NC_HLE}/pb/kvfmt.c
   ${NC_HLE}/shader/ff_gen.c
   ${NC_HLE}/shader/ffhw.c
   ${NC_HLE}/shader/glsl_compile.c
@@ -75,6 +77,7 @@ add_library(hakux_hle STATIC
   ${NC_HLE}/vk/compat.c
   ${NC_HLE}/vk/draw.c
   ${NC_HLE}/vk/quirks.c
+  ${NC_HLE}/vk/retire.c
   ${NC_HLE}/vk/gamma.c
   ${NC_HLE}/vk/guest_ram.c
   ${NC_HLE}/vk/pcache.c

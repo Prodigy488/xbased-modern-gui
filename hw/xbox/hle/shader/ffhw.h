@@ -44,7 +44,9 @@ typedef struct HleFfhwKey {
     uint8_t texgen[4][4];               /* stage, S T R Q: HLE_FFHW_TG_* */
     uint8_t texmat;                     /* SET_TEXTURE_MATRIX_ENABLE, a bit per stage */
     uint8_t points;                     /* SET_POINT_PARAMS_ENABLE */
-    uint8_t pad[6];
+    uint8_t texgen_inf;                 /* SET_TEXGEN_VIEW_MODEL: the infinite viewer (where a
+                                           stage makes a sphere or a reflection map) */
+    uint8_t pad[5];
 } HleFfhwKey;                           /* 48 bytes: three program slots */
 
 #define HLE_FFHW_SLOTS (sizeof(HleFfhwKey) / 16)
@@ -62,10 +64,11 @@ enum {
     HLE_FFHW_C_EYE = 70,                /* SET_EYE_POSITION */
     HLE_FFHW_C_AMBIENT = 71,            /* SET_SCENE_AMBIENT_COLOR, SET_MATERIAL_ALPHA */
     HLE_FFHW_C_EMISSION = 72,           /* SET_MATERIAL_EMISSION */
-    HLE_FFHW_C_PARAMS = 73,             /* specular power (front, back), point size */
+    HLE_FFHW_C_PARAMS = 73,             /* z: the point size */
     HLE_FFHW_C_POINT = 74,              /* SET_POINT_PARAMS (8) */
     HLE_FFHW_C_LIGHTS = 76,             /* per light HLE_FFHW_LIGHT_VEC4: */
-    HLE_FFHW_COUNT = 156,
+    HLE_FFHW_C_SPEC = 156,              /* SET_SPECULAR_PARAMS' first three (L, M, N) */
+    HLE_FFHW_COUNT = 157,
 };
 enum {
     HLE_FFHW_L_AMBIENT, HLE_FFHW_L_DIFFUSE, HLE_FFHW_L_SPECULAR,
@@ -89,9 +92,5 @@ static inline int hle_ffhw_is(const uint32_t *tokens, unsigned nslots)
 {
     return tokens && nslots >= HLE_FFHW_SLOTS && tokens[0] == HLE_FFHW_MAGIC;
 }
-
-/* The specular exponent SET_SPECULAR_PARAMS's six coefficients stand for
- * (D3D derives them from the material's power). */
-float hle_ffhw_specular_power(const float p[6]);
 
 #endif

@@ -77,6 +77,10 @@ static void skinning(Buf *b, const HleFfhwKey *k)
 
 static void texgen(Buf *b, const HleFfhwKey *k)
 {
+    /* the direction a reflection is taken about: from the eye to the vertex,
+     * or straight ahead for every vertex (SET_TEXGEN_VIEW_MODEL's infinite
+     * viewer: xemu's tests on a console, its pull request 3087) */
+    const char *view = k->texgen_inf ? "vec3(0.0, 0.0, 1.0)" : "normalize(tPos.xyz)";
     for (unsigned s = 0; s < 4; s++) {
         put(b, "    oT%u = v%u;\n", s, 9 + s);
         for (unsigned j = 0; j < 4; j++) {
@@ -87,11 +91,11 @@ static void texgen(Buf *b, const HleFfhwKey *k)
             } else if (g == HLE_FFHW_TG_OBJECT) {
                 put(b, "    oT%u.%c = dot(c[%u], pos);\n", s, c, plane);
             } else if (g == HLE_FFHW_TG_SPHERE && j < 2) {
-                put(b, "    { vec3 r = reflect(normalize(tPos.xyz), tN);\n"
+                put(b, "    { vec3 r = reflect(%s, tN);\n"
                        "      oT%u.%c = r.%c / (2.0 * length(r + vec3(0.0, 0.0, 1.0))) + 0.5; }\n",
-                    s, c, c);
+                    view, s, c, c);
             } else if (g == HLE_FFHW_TG_REFLECTION && j < 3) {
-                put(b, "    oT%u.%c = reflect(normalize(tPos.xyz), tN).%c;\n", s, c, c);
+                put(b, "    oT%u.%c = reflect(%s, tN).%c;\n", s, c, view, c);
             } else if (g == HLE_FFHW_TG_NORMAL && j < 3) {
                 put(b, "    oT%u.%c = tN.%c;\n", s, c, c);
             }
@@ -155,25 +159,46 @@ static void lighting(Buf *b, const HleFfhwKey *k)
                    "      nh = max(dot(tN, normalize(VP + eyeV)), 0.0);\n",
                 L + HLE_FFHW_L_POSITION, L + HLE_FFHW_L_RANGE, L + HLE_FFHW_L_ATTENUATION);
             if (t == 3) {
-                /* D3D's spot: the direction scaled by 1 / (cos(theta/2) -
-                 * cos(phi/2)), w = -cos(phi/2) times that: rho past the
-                 * outer cone 0, inside the inner one 1, between linear */
+                /* The spot: its direction comes scaled by 1 / (cos(theta/2)
+                 * - cos(phi/2)) with w = -cos(phi/2) times that, so s below
+                 * is 0 at the outer cone and 1 at the inner one. Between
+                 * them the NV2A takes the falloff curve as a ratio of two
+                 * lines, (s + L) / (M s + N), by SET_LIGHT_SPOT_FALLOFF's
+                 * three numbers (the same form as the specular power's;
+                 * xemu's pull request 3078, from its tests on a console). A
+                 * falloff of 1 is (0, 0, 1): the straight line this was for
+                 * every falloff. */
                 put(b, "      vec4 sd = c[%u];\n"
-                       "      float inv = 1.0 / length(sd.xyz), cphi = -inv * sd.w;\n"
-                       "      float sdv = dot(sd.xyz, VP), rho = inv * sdv;\n"
-                       "      if (rho <= cphi) att = 0.0;\n"
-                       "      else if (rho <= inv + cphi) att *= sdv + sd.w;\n",
-                    L + HLE_FFHW_L_SPOT);
+                       "      float s = dot(sd.xyz, VP) + sd.w;\n"
+                       "      if (s <= 0.0) att = 0.0;\n"
+                       "      else if (s < 1.0) {\n"
+                       "        vec3 fo = c[%u].xyz;\n"
+                       "        float dn = fo.y * s + fo.z;\n"
+                       "        att *= s <= -fo.x ? 0.0 : dn == 0.0 ? 1.0 :\n"
+                       "               dn > 0.0 ? clamp((s + fo.x) / dn, 0.0, 1.0) : 0.0;\n"
+                       "      }\n",
+                    L + HLE_FFHW_L_SPOT, L + HLE_FFHW_L_FALLOFF);
             }
         }
+        /* The specular factor: the NV2A has no power function. It takes
+         * n.h through a ratio of two lines, (x + L) / (M x + N), by
+         * SET_SPECULAR_PARAMS' first three numbers, which D3D fits to the
+         * material's power (0 below x = -L, 1 at x = 1); xemu's pull request
+         * 3076, from its tests on a console. The power was worked back from
+         * the numbers and raised here: the same at a power of 1, a wider
+         * foot to the highlight above it, and nothing for numbers that
+         * weren't D3D's. */
         put(b, "      if (lit) {\n"
-               "        float pf = nl == 0.0 || nh == 0.0 ? 0.0 : pow(nh, c[%u].x);\n"
+               "        vec3 sc = c[%u].xyz;\n"
+               "        float dn = sc.y * nh + sc.z;\n"
+               "        float pf = nl <= 0.0 || nh <= -sc.x ? 0.0 : dn == 0.0 ? 10000.0 :\n"
+               "                   dn > 0.0 ? clamp((nh + sc.x) / dn, 0.0, 10000.0) : 0.0;\n"
                "        oD0.rgb += c[%u].rgb * att;\n"
                "        oD0.rgb += %s * c[%u].rgb * (att * nl);\n"
                "        oD1.rgb += %s * c[%u].rgb * (att * pf);\n"
                "      }\n"
                "    }\n",
-            HLE_FFHW_C_PARAMS, L + HLE_FFHW_L_AMBIENT, src_rgb(k->src[2]), L + HLE_FFHW_L_DIFFUSE,
+            HLE_FFHW_C_SPEC, L + HLE_FFHW_L_AMBIENT, src_rgb(k->src[2]), L + HLE_FFHW_L_DIFFUSE,
             src_rgb(k->src[3]), L + HLE_FFHW_L_SPECULAR);
     }
 }
@@ -258,62 +283,4 @@ size_t hle_ffhw_glsl(const uint32_t *tokens, unsigned nslots, const HleVshKey *v
         return 0;
     }
     return hle_vsh_glsl_wrap(vk, body, k.fog != 0, buf, cap);
-}
-
-/* ---- the specular exponent ---- */
-
-/* D3D turns the material's power into six coefficients of the hardware's
- * specular curve; the exponent comes back from the first (and the fourth,
- * the half power's) by piecewise fits over the powers D3D produces (the
- * curve fit of the hardware tests, LLE's pgraph_kelvin_map.c, read as
- * reference). */
-static float fit(float c0, unsigned i)
-{
-    static const struct { double a, b, c; uint8_t ratio; } k_fit[9] = {
-        { 1.000108475163, -9.838607076280, 54.829089549713, 0 },
-        { 1.199164441703, -3.292603784852, 7.799987995214, 0 },
-        { 8.653441252033, 29.189473787191, 43.586027561823, 0 },
-        { -531.307758450301, 117.398468683934, 113.155490738338, 1 },
-        { -4.662713151292, 1.221108944572, 1.217360986939, 1 },
-        { -124.435242105211, 35.401219563514, 35.408114377045, 1 },
-        { 10672560.259502287954, 21565843.555823743343, 10894794.336297152564, 0 },
-        { -51973801.463933646679, -104199997.554352939129, -52225454.356278456748, 0 },
-        { 972270.324080004124, 2025882.096547174733, 1054898.052467488218, 0 },
-    };
-    const double x = c0;
-    return (float)(k_fit[i].ratio ? k_fit[i].a * x / (k_fit[i].b + k_fit[i].c * x)
-                                  : k_fit[i].a + k_fit[i].b * x + k_fit[i].c * x * x);
-}
-
-static float power_of(float c0)
-{
-    /* where each fit starts: the coefficient at powers 1.25, 4, 9, 20, 90,
-     * 375, 650, 1000, 1250 */
-    static const float k_step[9] = {
-        -0.022553957999f, -0.421539008617f, -0.678715527058f, -0.838916420937f,
-        -0.961754500866f, -0.990773200989f, -0.994858562946f, -0.996561050415f,
-        -0.999547004700f,
-    };
-    for (unsigned i = 0; i < 9; i++) {
-        if (c0 > k_step[i]) {
-            return fit(c0, i);
-        }
-    }
-    return 0.0f;
-}
-
-float hle_ffhw_specular_power(const float p[6])
-{
-    if (p[1] > 0.0f && p[2] < 1.0f) {
-        return p[2] - 2.0f * p[0];      /* powers below 1 */
-    }
-    if (p[0] > 0.0f || p[3] > 0.0f) {
-        return 0.0001f;                 /* not D3D's */
-    }
-    const float pw = power_of(p[0]), half = power_of(p[3]);
-    /* past 1250 the half power's coefficients carry it */
-    if (pw == 0.0f || (half > pw && p[0] < -0.1f)) {
-        return 2.0f * half;
-    }
-    return pw;
 }

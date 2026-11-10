@@ -49,6 +49,8 @@ typedef struct HleCaps {
                                    A8R8G8B8 on the way into the arena (pb/pbres.c) */
     bool vids;                  /* VK_EXT_vertex_input_dynamic_state, else the vertex
                                    layout is in the pipeline (vk/draw.c PipeKey.vi) */
+    bool legacy_vattr;          /* VK_EXT_legacy_vertex_attributes: an attribute may lie at an
+                                   address its component size does not divide */
     bool push;                  /* the push block (HleFfPush) fits the push constants,
                                    else it is a storage buffer (vk/draw.c, set 3) */
     bool push_desc;             /* VK_KHR_push_descriptor for fbfetch's set 2, else sets

@@ -7,6 +7,7 @@
 #include "hw/xbox/hle/hle.h"
 #include "hw/xbox/hle/tex/xdk.h"
 #include "hw/xbox/hle/vk/back_int.h"
+#include "hw/xbox/hle/vk/idhint.h"
 
 #define T (g_hvk.t)
 #define HLE_MAX_VK_SURF 256
@@ -15,19 +16,15 @@
 
 static HleVkSurf g_surf[HLE_MAX_VK_SURF];
 
-/* Lookup by id (several per draw): a per-id hint, set only while that
- * surface is live (unhint takes it away when it is parked or destroyed, so
- * a hit needs no check), and misses remembered until a surface is created
- * (g_surf_gen). */
-#define SURF_IDS 8193
-static uint16_t g_surf_hint[SURF_IDS];
-static uint32_t g_surf_miss[SURF_IDS], g_surf_gen = 1;
+/* Lookup by id (several per draw): a hint by id (vk/idhint.h), set only
+ * while that surface is live (unhint takes it away when it is parked or
+ * destroyed, so a hit needs no check), and misses remembered until a surface
+ * is created. */
+static HleIdHint g_surf_hint = HLE_IDHINT_INIT;
 
 static void unhint(const HleVkSurf *s)
 {
-    if (s->id < SURF_IDS && g_surf_hint[s->id] == s - g_surf + 1) {
-        g_surf_hint[s->id] = 0;
-    }
+    hle_idhint_forget(&g_surf_hint, s->id, (unsigned)(s - g_surf) + 1);
 }
 
 static uint32_t g_rec_gen;          /* render thread only */
@@ -241,26 +238,20 @@ HleVkSurf *hle_surf_get(uint32_t id)
     if (!id) {
         return NULL;
     }
-    if (id < SURF_IDS) {
-        unsigned h = g_surf_hint[id];
-        if (h) {
-            return &g_surf[h - 1];
-        }
-        if (g_surf_miss[id] == g_surf_gen) {
-            return NULL;
-        }
+    const unsigned h = hle_idhint_get(&g_surf_hint, id);
+    if (h) {
+        return &g_surf[h - 1];
+    }
+    if (hle_idhint_missed(&g_surf_hint, id)) {
+        return NULL;
     }
     for (unsigned i = 0; i < HLE_MAX_VK_SURF; i++) {
         if (surf_live(&g_surf[i], id)) {
-            if (id < SURF_IDS) {
-                g_surf_hint[id] = i + 1;
-            }
+            hle_idhint_set(&g_surf_hint, id, i + 1);
             return &g_surf[i];
         }
     }
-    if (id < SURF_IDS) {
-        g_surf_miss[id] = g_surf_gen;
-    }
+    hle_idhint_miss(&g_surf_hint, id);
     return NULL;
 }
 
@@ -292,7 +283,7 @@ HleVkSurf *hle_surf_define(const HleSurfDesc *d)
             memset(s, 0, sizeof(*s));
             s->alive = true;
             s->id = d->id;
-            g_surf_gen++;                       /* remembered misses may now hit */
+            hle_idhint_made(&g_surf_hint);      /* remembered misses may now hit */
             s->d = *d;
             s->fmt = surf_format(d->xfmt, &s->aspect, &s->texel_bytes);
             s->scale = surf_scale(d, s->aspect);
@@ -408,6 +399,10 @@ bool hle_surf_ensure(HleVkSurf *s)
         return true;
     }
     if (s->fmt == VK_FORMAT_UNDEFINED || !s->d.w || !s->d.h) {
+        return false;
+    }
+    /* no image the device has no size for (a surface is up to 8192 a side, some devices' images 4096) */
+    if (s->w > g_hvk.props.limits.maxImageDimension2D || s->h > g_hvk.props.limits.maxImageDimension2D) {
         return false;
     }
     bool depth = !(s->aspect & VK_IMAGE_ASPECT_COLOR_BIT);
