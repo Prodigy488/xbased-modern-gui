@@ -1,5 +1,15 @@
 # xbased changelog
 
+## 1.0.76.3 (Modern GUI fork)
+
+- New: Settings > System > "Scan games for missing kernel functions". It reads every game in your
+  library (just the headers of each default.xbe, it doesn't start anything) and lists which Xbox
+  kernel functions each one imports that this emulator doesn't implement yet. The report is saved as
+  compat_report.txt in the data folder (the "Open the scan report" row opens it): games with the
+  most gaps first, then each missing function with how many games need it. A game that stops with
+  "kunimpl" in its log is one of these. It only finds kernel gaps, not graphics or timing problems,
+  and a function being imported doesn't mean the game calls it.
+
 ## 1.0.76.2 (Modern GUI fork)
 
 - The mouse pointer stays hidden while a game runs (it could come back after a message box, a focus

@@ -312,6 +312,112 @@ void xd_make_key(XdGame *g)
     snprintf(g->key, sizeof(g->key), "%08X.%u~%06x", g->title_id, g->version % 1000u, h & 0xFFFFFFu);
 }
 
+/* A thunk-table or section-header address (the XBE's addresses are in its own base) to a file
+ * offset in the XBE: the section that holds it. false when none does. */
+static bool xbe_va_off(const uint8_t *x, size_t n, uint32_t va, uint32_t *off)
+{
+    const uint32_t base = rd32(x + 0x104), count = rd32(x + 0x11C), tab = rd32(x + 0x120) - base;
+    if (count > 256 || tab > n || (uint64_t)count * 0x38 > n - tab) {
+        return false;
+    }
+    for (uint32_t i = 0; i < count; i++) {
+        const uint8_t *s = x + tab + i * 0x38;
+        const uint32_t vaddr = rd32(s + 4), raw = rd32(s + 12), rawsize = rd32(s + 16);
+        if (va >= vaddr && va - vaddr < rawsize) {
+            *off = raw + (va - vaddr);
+            return true;
+        }
+    }
+    return false;
+}
+
+bool xd_read_imports(const char *path, XdImports *out)
+{
+    memset(out, 0, sizeof(*out));
+    Disc d = {NULL, 0, open(path, O_RDONLY | O_BINARY)};
+    if (d.chd >= 0 && !nc_chd_attach(d.chd)) {
+        close(d.chd);
+        d.chd = -1;
+    }
+    if (d.chd < 0 && !(d.f = fopen(path, "rb"))) {
+        snprintf(out->err, sizeof(out->err), "can't open the image");
+        return false;
+    }
+    static const int64_t k_bases[] = {0, 0x18300000, 0xFD90000, 0x2080000, 0x30600000};
+    uint8_t vd[0x20];
+    bool found = false;
+    for (size_t i = 0; i < sizeof(k_bases) / sizeof(k_bases[0]) && !found; i++) {
+        d.base = k_bases[i];
+        found = rd_at(&d, 0x10000, vd, sizeof(vd)) && !memcmp(vd, "MICROSOFT*XBOX*MEDIA", 20);
+    }
+    uint32_t sec = 0, xsize = 0;
+    uint8_t *x = NULL;
+    const char *err = NULL;
+    if (!found || !dir_find(&d, rd32(vd + 20), rd32(vd + 24), "default.xbe", &sec, &xsize) || xsize < 0x200) {
+        err = "no default.xbe on the disc";
+    } else {
+        uint8_t h0[0x200];
+        if (!rd_at(&d, (int64_t)sec * 2048, h0, sizeof(h0)) || memcmp(h0, "XBEH", 4)) {
+            err = "default.xbe is not an XBE";
+        } else {
+            uint32_t size = rd32(h0 + 0x108);
+            size = size < 0x200 ? 0x200 : size > xsize ? xsize : size > (4u << 20) ? 4u << 20 : size;
+            x = malloc(size);
+            if (!x || !rd_at(&d, (int64_t)sec * 2048, x, size)) {
+                err = "can't read the XBE's headers";
+            } else {
+                /* the kernel thunk address is stored xored with a key by build kind: debug, retail or
+                 * Chihiro; the one that lands in the image is the right one */
+                static const uint32_t k_keys[] = {0x5B6D40B6u, 0xEFB1F152u, 0x2290059Du};
+                const uint32_t base = rd32(x + 0x104), image = rd32(x + 0x10C);
+                uint32_t off = 0, thunk = 0;
+                for (size_t i = 0; i < sizeof(k_keys) / sizeof(k_keys[0]); i++) {
+                    const uint32_t t = rd32(x + 0x158) ^ k_keys[i];
+                    if (t >= base && t - base < image && xbe_va_off(x, size, t, &off)) {
+                        thunk = t;
+                        break;
+                    }
+                }
+                if (!thunk) {
+                    err = "no kernel import table";
+                } else {
+                    uint8_t th[4 * 520];
+                    const size_t want = sizeof(th) < xsize - off ? sizeof(th) : (size_t)(xsize - off);
+                    if (off >= xsize || !rd_at(&d, (int64_t)sec * 2048 + off, th, want & ~3u)) {
+                        err = "can't read the import table";
+                    } else {
+                        out->ok = true;
+                        for (size_t i = 0; i + 4 <= want; i += 4) {
+                            const uint32_t v = rd32(th + i);
+                            if (!v) {
+                                break;
+                            }
+                            if (!(v & 0x80000000u)) {
+                                out->non_ordinal = true;
+                                break;
+                            }
+                            if (out->n < sizeof(out->ord) / sizeof(out->ord[0]) && (v & 0x7FFFFFFFu) < 0x10000u) {
+                                out->ord[out->n++] = (uint16_t)(v & 0x7FFFFFFFu);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+    free(x);
+    if (d.chd >= 0) {
+        nc_chd_detach(d.chd);
+        close(d.chd);
+    } else {
+        fclose(d.f);
+    }
+    if (err) {
+        snprintf(out->err, sizeof(out->err), "%s", err);
+    }
+    return out->ok;
+}
+
 void xd_free_game(XdGame *g)
 {
     free(g->icon);

@@ -1611,9 +1611,11 @@ static uint64_t KeBoostPriorityThread(NcKernel *k, NcFrame *f, const uint32_t *a
 
 void nc_ke_register(NcKernel *k)
 {
-    g_boot_ns = nc_ke_now_ns();
-    clock_boot();
-    nc_ke_update_time(k);
+    if (!nc_kernel_dry_run()) {     /* a dry run only lists the functions (nc_kernel_impl_table) */
+        g_boot_ns = nc_ke_now_ns();
+        clock_boot();
+        nc_ke_update_time(k);
+    }
 
     nc_kernel_impl(k, "KeInitializeEvent", KeInitializeEvent);
     nc_kernel_impl(k, "KeSetEvent", KeSetEvent);

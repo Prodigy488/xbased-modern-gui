@@ -3305,9 +3305,11 @@ static uint64_t ObReferenceObjectByName(NcKernel *k, NcFrame *f, const uint32_t 
 
 void nc_io_register(NcKernel *k)
 {
-    g_trace_io = getenv("NC_TRACE_IO") != NULL;
-    link_set("\\??\\D:", "\\Device\\CdRom0");
-    link_set("\\??\\CdRom0:", "\\Device\\CdRom0");     /* the kernel's own, as on the Xbox (the dashboard's) */
+    if (!nc_kernel_dry_run()) {
+        g_trace_io = getenv("NC_TRACE_IO") != NULL;
+        link_set("\\??\\D:", "\\Device\\CdRom0");
+        link_set("\\??\\CdRom0:", "\\Device\\CdRom0");     /* the kernel's own, as on the Xbox (the dashboard's) */
+    }
     nc_kernel_impl(k, "ExReadWriteRefurbInfo", ExReadWriteRefurbInfo);
     nc_kernel_impl(k, "IoDismountVolumeByName", IoDismountVolumeByName);
 

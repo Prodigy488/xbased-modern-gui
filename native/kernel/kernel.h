@@ -658,6 +658,12 @@ uint32_t nc_kernel_resolve(const NcKernel *k, unsigned ordinal);
 /* Whether ordinal is a function export this kernel has (a call to one it
  * hasn't stops the guest). */
 bool nc_kernel_implemented(const NcKernel *k, unsigned ordinal);
+/* Which function exports have an implementation, without a kernel booted (the
+ * dashboard's library scan): true at [ordinal]. Built once by registering them
+ * all in a throwaway kernel; during that (nc_kernel_dry_run) the register
+ * functions leave out what touches a running guest. */
+const bool *nc_kernel_impl_table(void);
+bool nc_kernel_dry_run(void);
 
 /* From inside a kernel function: the call returns by first running the guest
  * routine(args...), then returning to its caller with the routine's EAX. */

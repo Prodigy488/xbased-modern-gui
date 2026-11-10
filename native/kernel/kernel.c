@@ -97,6 +97,44 @@ uint32_t nc_kernel_resolve(const NcKernel *k, unsigned ordinal)
     return e->abi == NC_KABI_DATA ? k->data_va[ordinal] : k->tramp_va[ordinal];
 }
 
+static bool g_dry_run;
+
+bool nc_kernel_dry_run(void)
+{
+    return g_dry_run;
+}
+
+const bool *nc_kernel_impl_table(void)
+{
+    static bool tab[NC_KORDINAL_MAX];
+    static bool done;
+    if (!done) {
+        NcKernel *k = calloc(1, sizeof(*k));
+        if (k) {
+            g_dry_run = true;
+            nc_ob_register(k);
+            nc_ps_register(k);
+            nc_ke_register(k);
+            nc_mm_register(k);
+            nc_ex_register(k);
+            nc_rtl_register(k);
+            nc_seh_register(k);
+            nc_timer_register(k);
+            nc_intr_register(k);
+            nc_apc_register(k);
+            nc_io_register(k);
+            nc_xc_register(k);
+            g_dry_run = false;
+            for (unsigned o = 0; o < NC_KORDINAL_MAX; o++) {
+                tab[o] = k->impl[o] != NULL;
+            }
+            free(k);
+        }
+        done = true;
+    }
+    return tab;
+}
+
 bool nc_kernel_implemented(const NcKernel *k, unsigned ordinal)
 {
     const NcKExport *e = nc_kernel_export(ordinal);

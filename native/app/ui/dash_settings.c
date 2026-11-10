@@ -4,6 +4,7 @@
  * remapping, online play.
  */
 #include "native/app/ui/console_cfg.h"
+#include "native/app/ui/compat_scan.h"
 #include "native/app/ui/homebrew.h"
 #include "native/app/ui/dash_int.h"
 #include "native/app/ui/skin.h"
@@ -300,6 +301,33 @@ void scr_settings(void)
         static const char *pn[] = {"HDTV (component)", "Standard (composite)", "S-Video", "SCART (RGB)", "VGA"};
         opt_choice(&l, S_AVPACK, "avpack", pv, pn, 5, "hdtv");
         opt_bool(&l, S_PREBUILD, "prebuild", false, false);
+        {
+            /* which kernel functions each game imports that this emulator lacks, read from the images */
+            char lbl[160] = "";
+            if (cs_busy()) {
+                snprintf(lbl, sizeof(lbl), T(S_SCAN_BUSY), cs_done(), cs_total());
+            } else {
+                snprintf(lbl, sizeof(lbl), "%s", cs_result());
+            }
+            if (list_row(&l, T(S_SCAN_GAMES), lbl[0] ? lbl : NULL, NULL) && !cs_busy()) {
+                cs_start();
+            }
+            if (cs_report_exists() && !cs_busy() && list_row(&l, T(S_SCAN_OPEN), NULL, NULL)) {
+                char url[1100] = "file:///";
+                size_t o = strlen(url);
+                for (const char *c = cs_report_path(); *c && o + 4 < sizeof(url); c++) {
+                    if (*c == '\\') {
+                        url[o++] = '/';
+                    } else if (*c == ' ') {
+                        o += (size_t)snprintf(url + o, sizeof(url) - o, "%%20");
+                    } else {
+                        url[o++] = *c;
+                    }
+                }
+                url[o] = 0;
+                SDL_OpenURL(url);
+            }
+        }
         break;
     }
     case 3: {

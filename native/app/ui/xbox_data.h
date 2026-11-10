@@ -33,6 +33,17 @@ typedef struct XdGame {
  * False when it isn't one; the title is the file's name then. */
 bool xd_read_game(const char *path, XdGame *g);
 void xd_free_game(XdGame *g);
+/* The kernel functions a game's default.xbe imports (its kernel thunk table, by ordinal), read
+ * from the image without running it. */
+typedef struct XdImports {
+    uint16_t ord[512];
+    unsigned n;
+    bool ok;                /* the table was found and read */
+    bool non_ordinal;       /* an entry that isn't an ordinal import (the loader refuses such a title) */
+    char err[64];           /* when !ok: why */
+} XdImports;
+bool xd_read_imports(const char *path, XdImports *out);
+
 /* g->key from its title id, version and (with no id) its title; the title is set first */
 void xd_make_key(XdGame *g);
 /* A file's name without its folders, extension and (...) [...] groups. */
