@@ -1135,6 +1135,40 @@ static void kill_block(NcCpu *cpu, Block *b)
     }
 }
 
+/* The Xbox's Pentium III has MMX and SSE, not SSE2, and ignores an operand-size prefix (0x66) on
+ * an MMX opcode: "66 0F DC 02" ran there as the MMX PADDUSB MM0,[EDX]. Some titles carry such
+ * prefixes (Dr. Muto's saturating-add helper: movd/paddusb/movd with 0x66 on each), and a modern
+ * decoder reads them as the SSE2 forms: 128-bit operands, memory that has to be 16-byte aligned,
+ * and a fault (reported at address -1) where the Xbox read 8 bytes from anywhere. The prefix is
+ * replaced by a DS override, which changes nothing, so the instruction decodes as MMX and keeps
+ * its length. Not when F2/F3 is there: those forms are SSE2's own. */
+static void mmx_ignore_66(uint8_t *b, unsigned n)
+{
+    unsigned i = 0, p66 = ~0u;
+    while (i < n && i < 14) {
+        const uint8_t c = b[i];
+        if (c == 0x66) {
+            p66 = i;
+        } else if (c == 0xF2 || c == 0xF3) {
+            return;
+        } else if (c != 0x67 && c != 0x2E && c != 0x36 && c != 0x3E && c != 0x26 && c != 0x64 && c != 0x65 && c != 0xF0) {
+            break;
+        }
+        i++;
+    }
+    if (p66 == ~0u || i + 1 >= n || b[i] != 0x0F) {
+        return;
+    }
+    const uint8_t o = b[i + 1];
+    const bool mmx = (o >= 0x60 && o <= 0x6B) || o == 0x6E || o == 0x6F || (o >= 0x70 && o <= 0x76) || o == 0x7E ||
+                     o == 0x7F || o == 0xC4 || o == 0xC5 || (o >= 0xD1 && o <= 0xD3) || o == 0xD5 || o == 0xD7 ||
+                     (o >= 0xD8 && o <= 0xE5) || (o >= 0xE7 && o <= 0xEF) || (o >= 0xF1 && o <= 0xF3) ||
+                     (o >= 0xF5 && o <= 0xF9) || (o >= 0xFC && o <= 0xFE);
+    if (mmx) {
+        b[p66] = 0x3E;
+    }
+}
+
 static Block *translate(NcCpu *cpu, uint32_t eip, bool bypass)
 {
     if ((size_t)(cpu->code_end - cpu->code_p) < 64 * 1024) {
@@ -1182,7 +1216,10 @@ static Block *translate(NcCpu *cpu, uint32_t eip, bool bypass)
                                                                                : 0x1000 - (at & 0xFFF);
         ZydisDecodedInstruction in;
         ZydisDecodedOperand ops[ZYDIS_MAX_OPERAND_COUNT];
-        if (!ZYAN_SUCCESS(ZydisDecoderDecodeFull(&cpu->dec, (const void *)(uintptr_t)at, avail, &in, ops))) {
+        uint8_t ibuf[ZYDIS_MAX_INSTRUCTION_LENGTH];
+        memcpy(ibuf, (const void *)(uintptr_t)at, avail);
+        mmx_ignore_66(ibuf, avail);
+        if (!ZYAN_SUCCESS(ZydisDecoderDecodeFull(&cpu->dec, ibuf, avail, &in, ops))) {
             t.sysop(at, NC_SYSOP_UD2, 0);
             break;
         }

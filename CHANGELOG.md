@@ -1,5 +1,13 @@
 # xbased changelog
 
+## 1.0.76.5 (Modern GUI fork)
+
+- Dr. Muto no longer crashes after its intro movies. Its code has MMX instructions with a 0x66 prefix
+  ("66 0F DC 02", a saturating add); the Xbox's Pentium III ignores that prefix and does an 8-byte MMX
+  add, but xbased read it as the SSE2 form, which needs 16-byte aligned memory, and the CPU faulted. A
+  0x66 on an MMX opcode (without F2/F3) is now ignored as on the Xbox. Other games with such code
+  were hitting the same fault.
+
 ## 1.0.76.4 (Modern GUI fork)
 
 - Fixed the game library scan (1.0.76.3) finding nothing: it ran before the kernel's function table was
