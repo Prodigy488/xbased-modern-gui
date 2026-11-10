@@ -1,5 +1,13 @@
 # xbased changelog
 
+## 1.0.76.8 (Modern GUI fork)
+
+- Marvel vs. Capcom 2: its main thread waited for ever in its heap lock, a critical section in the
+  game's data that was all zero (never passed to RtlInitializeCriticalSection; a zero LockCount
+  instead of -1 made the first entry look contended, a wait for an owner that doesn't exist). An
+  all-zero critical section is now taken as free, and the log says so ("never initialized"). Not
+  confirmed on hardware: if the game still stops there, the log shows what comes next.
+
 ## 1.0.76.7 (Modern GUI fork)
 
 - The thread list a hang (or a crash) writes to the log now also holds the game's code: the bytes where

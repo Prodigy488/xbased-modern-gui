@@ -1208,7 +1208,21 @@ static uint64_t RtlEnterCriticalSection(NcKernel *k, NcFrame *f, const uint32_t 
     const uint32_t me = k->current->ethread;
     int32_t lock = (int32_t)nc_vm_rd32(k->vm, cs + CS_LOCK_COUNT) + 1;
     nc_vm_wr32(k->vm, cs + CS_LOCK_COUNT, (uint32_t)lock);
-    if (lock == 0) {
+    if (lock == 1 && !nc_vm_rd32(k->vm, cs) && !nc_vm_rd32(k->vm, cs + 4) && !nc_vm_rd32(k->vm, cs + CS_OWNER) &&
+        !nc_vm_rd32(k->vm, cs + CS_RECURSION)) {
+        /* All zero: never passed to RtlInitializeCriticalSection (an initialized one has its event's
+         * header and, held, an owner), and its LockCount of 0 instead of -1 made this entry look
+         * contended, a wait for an owner that doesn't exist. A zeroed one is taken as a free section. */
+        static unsigned logged;
+        if (logged++ < 8) {
+            nc_log("hakuX-native", "ke: t%u entered critical section %08x that was never initialized (all zero): "
+                   "taken as free", k->current->id, cs);
+        }
+        init_header(k, cs, OBJ_SYNCHRONIZATION_EVENT, 4, 0);
+        nc_vm_wr32(k->vm, cs + CS_LOCK_COUNT, 0);
+        nc_vm_wr32(k->vm, cs + CS_OWNER, me);
+        nc_vm_wr32(k->vm, cs + CS_RECURSION, 1);
+    } else if (lock == 0) {
         nc_vm_wr32(k->vm, cs + CS_OWNER, me);
         nc_vm_wr32(k->vm, cs + CS_RECURSION, 1);
     } else if (nc_vm_rd32(k->vm, cs + CS_OWNER) == me) {
