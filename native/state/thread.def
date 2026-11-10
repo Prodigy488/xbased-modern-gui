@@ -2,13 +2,15 @@
  * and queued APCs (native/kernel/kstate.c). */
 NC_SECTION(THRD)
 
-NC_REC(NcWait, 280)
+NC_REC(NcWait, 288)
 NC_F(NcWait, objects, U32, 64, 1, 0)
 NC_F(NcWait, count, U32, 1, 1, 0)
 NC_F(NcWait, wait_all, BOOL, 1, 1, 0)
 NC_F(NcWait, deadline_ns, U64, 1, 1, 0)
 NC_F(NcWait, cs, U32, 1, 1, 0)
 NC_F(NcWait, alertable, BOOL, 1, 1, 0)
+NC_F(NcWait, hold, BOOL, 1, 6, 0)
+NC_F(NcWait, flip_seq, U32, 1, 6, 0)
 NC_END(NcWait)
 
 NC_REC(NcApc, 20)
@@ -63,7 +65,7 @@ NC_F(NcCpuState, gs_cached, U64, 1, 1, 0)
 NC_F(NcCpuState, fs_cached, U64, 1, 1, 0)
 NC_END(NcCpuState)
 
-NC_REC(NcThread, 4448)
+NC_REC(NcThread, 4464)
 NC_F(NcThread, state, U32, 1, 1, 0)
 NC_F(NcThread, ethread, U32, 1, 1, 0)
 NC_F(NcThread, id, U32, 1, 1, 0)

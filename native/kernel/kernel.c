@@ -1901,6 +1901,7 @@ static bool sysop(void *opaque, NcFrame *f, enum NcSysOp op, unsigned size)
         nc_frame_clear_interrupt(f);
         nc_ke_update_time(k);
         clock_tick(k);
+        nc_ke_frame_take(k);    /* a frame latency hold asked for (hle_host_frame_wait) */
         break;
     case NC_SYSOP_HOOK:
         if (nc_x86mmio_hook(k, f, eip)) {

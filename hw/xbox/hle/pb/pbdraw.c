@@ -1768,6 +1768,7 @@ static bool present_flipped(void)
     } while (!__atomic_compare_exchange_n(&g_pd.pend_tail, &tail, take + 1, false, __ATOMIC_ACQ_REL,
                                           __ATOMIC_ACQUIRE));
     __atomic_store_n(&g_pd.shown_ns, hle_now_ns(), __ATOMIC_RELAXED);
+    hle_pb_frame_flipped();
     hle_hitch_frame(id, HLE_FR_FLIP);
     hle_disp_present_at(id, hle_host_vblank_ns());  /* this vblank's scanout shows it: due then, as a flip's */
     fps_log();
@@ -1776,6 +1777,16 @@ static bool present_flipped(void)
                 "(first 4 logged)", id);
     }
     return true;
+}
+
+uint32_t hle_pbd_frames_taken(void)
+{
+    return __atomic_load_n(&g_pd.pend_tail, __ATOMIC_ACQUIRE);
+}
+
+uint32_t hle_pbd_frames_swapped(void)
+{
+    return __atomic_load_n(&g_pd.pend_head, __ATOMIC_ACQUIRE);
 }
 
 bool hle_pbd_scan_due(void)
@@ -1985,6 +1996,7 @@ void hle_pb_flipped(uint32_t start)
     } while (!__atomic_compare_exchange_n(&g_pd.pend_tail, &tail, tail + 1, false, __ATOMIC_ACQ_REL,
                                           __ATOMIC_ACQUIRE));
     __atomic_store_n(&g_pd.flipped_ns, hle_now_ns(), __ATOMIC_RELAXED);     /* once a frame */
+    hle_pb_frame_flipped();
     hle_hitch_frame(id, HLE_FR_FLIP);
     /* due at the vblank this flip came in: the console's display changes
      * there, whenever the handler got to run */

@@ -73,3 +73,8 @@ One entry per section version (tools/native/statelock.py).
 
 - NcThread.saturation: KeSetBasePriorityThread's +-16 (+1, -1), for KeQueryBasePriorityThread, which returns it as +-16 as on NT; base priorities stay in 1..15 (v4 states: 0, not saturated)
 - upgraded: v1..v4 states load
+
+## THRD v6 (2026-11-10, after f535a59a7e)
+
+- a thread's wait may be a frame latency hold (NcWait.hold, flip_seq): it ends without a status in EAX
+- upgraded: v1..v5 states load

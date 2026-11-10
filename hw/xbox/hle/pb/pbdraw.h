@@ -62,6 +62,11 @@ void hle_pb_flipped(uint32_t start);
  * target, if drawn since the last swap, is a frame whose flip can come
  * before its FLIP_INCREMENT_WRITE. */
 void hle_pbd_trap(void);
+/* Frames swapped that have left the queue for the display (shown at their
+ * flip, or let go): a count that only grows. Any thread. */
+uint32_t hle_pbd_frames_taken(void);
+/* ... and frames swapped (each FLIP_INCREMENT_WRITE decoded), the same count's start. */
+uint32_t hle_pbd_frames_swapped(void);
 /* Counters for the decoder's log line (swaps: FLIP_INCREMENT_WRITE's and
  * PCRTC_START's presents; rt_uploads: render targets the CPU wrote). */
 void hle_pbd_counts(uint64_t *clears, uint64_t *swaps, unsigned *objects,

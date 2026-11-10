@@ -1,5 +1,18 @@
 # xbased changelog
 
+## 1.0.98 (2026-11)
+
+### Fixes
+- Stutter in games whose world moved unevenly from one frame to the next
+  even with every frame on screen on time: the emulated CPU, much faster
+  than the console's, got so far ahead of the display that the game had to
+  wait for room partway through a frame, and its frames then began at
+  uneven times. GTA Vice City turning the camera judders no more, at the
+  original frame rate, at 60 fps and at 120 fps. A game that finishes a
+  frame while another is still waiting to be shown now waits for the next
+  one to go on screen, at the frame's end, as on the console.
+- The "up to 60" frame limit ran at 59 fps: it now gives exactly 60.
+
 ## 1.0.97 (2026-11)
 
 ### Fixes

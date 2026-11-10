@@ -888,7 +888,9 @@ static uint64_t wait_vblank(uint64_t next, uint64_t last)
                 if (paced) {
                     if (stall != s_stall) {
                         s_stall = stall;
-                        s_frame_t = t;
+                        /* on the limit's grid while frames keep up with it (the
+                         * timer wakes a little late), else from now */
+                        s_frame_t = g_cap_ns && t - s_frame_t < 2 * g_cap_ns ? s_frame_t + g_cap_ns : t;
                     }
                     return t;
                 }

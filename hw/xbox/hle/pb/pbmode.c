@@ -20,6 +20,7 @@
 
 #if defined(__ANDROID__) || defined(_WIN32) || defined(NC_DESKTOP)
 #include <sys/system_properties.h>
+#include <time.h>
 #endif
 
 /* The NV2A's channel-0 FIFO registers and its instance memory. */
@@ -1423,17 +1424,149 @@ static bool decoder_held(void)
     return g_pb.trap_wait || g_pb.flip_wait || !fifo_open();
 }
 
+/* Frame latency. A title's CPU finishes frames ahead of the display
+ * while its GPU waits for the flip (FLIP_STALL), each in a push buffer
+ * that holds only so much: here the guest's CPU runs several times a
+ * console's, and finishes frames much sooner than its own console could.
+ * Ahead by more than the push buffer holds, D3D's next write waited for the
+ * GPU to free room, and the GPU frees it only after a flip, a whole frame
+ * at once: the CPU then went on wherever in its frame the room ran out.
+ * GTA Vice City writes some 390 KB a frame into its 512 KB push buffer:
+ * now and then a frame began 33 ms after the one before and the next 1.4 ms
+ * after it (at 30 fps, 67 and 1.3), the game's clock read as it began, so
+ * its world moved two steps in one picture and almost none in the next
+ * (turning the camera, a judder at any frame rate). A console's slower CPU
+ * never gets that far ahead.
+ *
+ * So the guest's thread that pushed a frame's end (FLIP_INCREMENT_WRITE,
+ * counted in what it pushed: its DMA_PUT) while another frame it finished
+ * still waits for the display waits for the next flip (the kernel's, from
+ * its next instruction: hle_host_frame_wait), as a slower CPU would have
+ * still been drawing: at a frame's end, not partway through one, and each
+ * frame then begins at a flip. Its vCPU goes on meanwhile (the vblank's
+ * ISR and DPC, and D3D's traps, which the flip comes by: holding the vCPU
+ * itself delayed them, and the flips, a frame or more). At most one hold a
+ * frame, of at most 50 ms. Counts that don't add up (a title that swaps
+ * another way, or a run started mid-stream) start over, and hold nothing. */
+
+static struct {
+    bool synced;
+    uint32_t pos;                       /* where the scan of the pushed words goes on (DMA offset) */
+    uint32_t ends;                      /* frames finished in what was pushed */
+    bool hold;                          /* the push holds its CPU (hle_pb_put) */
+    uint64_t holds;
+} g_fl;
+
+void hle_pb_frame_flipped(void)
+{
+    hle_host_frame_flipped();
+}
+
+/* The frame ends in the words from pos to put; pos where the next scan goes
+ * on. False: the words don't read as a push buffer. */
+static bool fl_count(uint32_t base, uint32_t limit, uint32_t *at, uint32_t put, uint32_t *ends)
+{
+    uint32_t pos = *at;
+    for (unsigned guard = 0; pos != put; guard++) {
+        const uint32_t *wp = guard < 262144 && pos <= limit ? (const uint32_t *)hle_pa_ptr(base + pos, 4) : NULL;
+        if (!wp) {
+            return false;
+        }
+        const uint32_t w = *wp;
+        if ((w & 0xE0000003u) == 0x20000000u) {            /* old jump */
+            pos = w & 0x1FFFFFFCu;
+            continue;
+        }
+        if ((w & 3) == 1) {                                 /* jump (the ring's wrap) */
+            pos = w & ~3u;
+            continue;
+        }
+        if ((w & 3) == 2 || w == 0x00020000u) {             /* call (a recorded buffer), return */
+            pos += 4;
+            continue;
+        }
+        const uint32_t kind = w & 0xE0030003u;
+        if (kind != 0 && kind != 0x40000000u) {
+            return false;
+        }
+        const uint32_t m = w & 0x1FFCu, n = (w >> 18) & 0x7FFu;
+        if (n && m <= NV097_FLIP_INCREMENT_WRITE && (kind ? m == NV097_FLIP_INCREMENT_WRITE
+                                                          : NV097_FLIP_INCREMENT_WRITE < m + 4 * n) &&
+            g_pb.obj_class[(w >> 13) & 7] == 0x97) {
+            *ends += kind ? n : 1;
+        }
+        const uint32_t next = pos + 4 * (n + 1);
+        if (pos < put && next > put) {
+            pos = next;                         /* its data comes in a later push */
+            break;
+        }
+        pos = next;
+    }
+    *at = pos;
+    return true;
+}
+
+/* Synced while the decoder waits at a FLIP_STALL (its GET published there,
+ * past its frame's end): the frames swapped, and those between GET and the
+ * push. */
+static void fl_scan(uint32_t put)
+{
+    uint32_t base, limit, inst;
+    if (!dma_object(&base, &limit, &inst)) {
+        g_fl.synced = false;
+        return;
+    }
+    if (!g_fl.synced) {
+        if (!hle_pb_flip_waiting()) {
+            return;
+        }
+        uint32_t pos = hle_host_gpu_reg(NV_PFIFO_CACHE1_DMA_GET), ends = hle_pbd_frames_swapped();
+        if (!hle_pb_flip_waiting() || !fl_count(base, limit, &pos, put, &ends)) {
+            return;
+        }
+        g_fl.pos = pos;
+        g_fl.ends = ends;
+        g_fl.synced = true;
+        return;
+    }
+    if (!fl_count(base, limit, &g_fl.pos, put, &g_fl.ends)) {
+        g_fl.synced = false;                    /* lost: again at a later stall */
+    }
+}
+
 void hle_pb_pushed(uint32_t put)
 {
     /* armed by the decoder (GET_REPORT): the scout syncs at this PUT */
     if (__atomic_load_n(&g_sc_on, __ATOMIC_ACQUIRE)) {
         scout_to(put);
     }
+    if (!g_pb.on) {
+        return;
+    }
+    const uint32_t ends0 = g_fl.ends;
+    fl_scan(put);
+    const bool ended = g_fl.synced && g_fl.ends != ends0;   /* a frame's end in this push */
+    const uint32_t taken = hle_pbd_frames_taken();
+    const int32_t waiting = (int32_t)(g_fl.ends - taken);
+    if (g_fl.synced && (waiting < 0 || waiting > 6)) {
+        g_fl.synced = false;                    /* counts that don't add up: again at a stall */
+    }
+    g_fl.hold = ended && g_fl.synced && waiting >= 2 && waiting <= 6;
+}
+
+static void fl_hold(void)
+{
+    if (g_fl.hold) {
+        g_fl.hold = false;
+        g_fl.holds++;
+        hle_host_frame_wait();
+    }
 }
 
 void hle_pb_get(void)
 {
     g_sc.synced = false;
+    g_fl.synced = false;
 }
 
 /* After a pass: up to ~200 us waiting for the next kick in WFE on the kick
@@ -1654,6 +1787,7 @@ void hle_pb_put(void)
         hle_hitch_thread(HLE_HT_VCPU);  /* the vCPU's CPU time for the monitor */
     }
     hle_pb_kick();
+    fl_hold();                          /* the decoder kicked first: it works meanwhile */
 }
 
 void hle_pb_start(void)

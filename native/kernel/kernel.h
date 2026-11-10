@@ -99,6 +99,10 @@ typedef struct NcWait {
     uint64_t deadline_ns;    /* host monotonic; 0: no timeout */
     uint32_t cs;             /* RTL_CRITICAL_SECTION the thread takes when woken, or 0 */
     bool alertable;          /* an APC ends it (STATUS_USER_APC) */
+    /* a frame latency hold (nc_ke_frame_take): not a kernel call's wait, so
+     * it ends without a status in EAX; a flip past flip_seq ends it */
+    bool hold;
+    uint32_t flip_seq;
 } NcWait;
 
 /* A queued APC (apc.c): a KAPC, or a bare normal routine with its arguments. */
@@ -365,6 +369,14 @@ void nc_ob_name(NcKernel *k, uint32_t object, enum NcObType type, const char *na
 void nc_ob_unname(NcKernel *k, uint32_t object);
 bool nc_ob_create_named(NcKernel *k, uint32_t attrs, const char *name, enum NcObType type, uint32_t handle_out,
                         uint32_t *status);
+
+/* Frame latency (hle_host_frame_wait): the vCPU thread asks for the
+ * running thread to wait until the next flip, taken at the next interrupt
+ * system op (nc_ke_frame_take); a flip (nc_ke_frame_flipped, any thread)
+ * ends the wait at the next look at the waits. */
+void nc_ke_frame_wait_request(NcKernel *k);
+void nc_ke_frame_take(NcKernel *k);
+void nc_ke_frame_flipped(void);
 
 void nc_ps_register(NcKernel *k);
 NcThread *nc_ps_thread_of(NcKernel *k, uint32_t ethread);
