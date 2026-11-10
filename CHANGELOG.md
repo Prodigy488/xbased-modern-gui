@@ -1,5 +1,13 @@
 # xbased changelog
 
+## 1.0.76.7 (Modern GUI fork)
+
+- The thread list a hang (or a crash) writes to the log now also holds the game's code: the bytes where
+  each thread is and at the calls up its stack, the bytes of a critical section a thread waits on, and
+  the code that made the kernel's latest calls. Enough to read from the log what a stuck game waits for
+  (Marvel vs. Capcom 2: its main thread waits on a critical section while the game's own scheduler
+  thread keeps resuming and suspending the other two).
+
 ## 1.0.76.6 (Modern GUI fork)
 
 - When a game hangs (the "HANG started" lines in the log), the log now also lists every guest thread:

@@ -935,6 +935,24 @@ static unsigned recent_add(const NcThread *t, unsigned ordinal, uint32_t ret, co
     return i;
 }
 
+/* The distinct return addresses of the recent calls, newest first: the title's code that made them. */
+unsigned nc_kernel_recent_rets(uint32_t *out, unsigned max)
+{
+    const unsigned end = __atomic_load_n(&g_nrecent, __ATOMIC_RELAXED);
+    unsigned n = 0;
+    for (unsigned k = end; k > (end > RECENT ? end - RECENT : 0) && n < max; k--) {
+        const uint32_t ret = g_recent[(k - 1) % RECENT].ret;
+        bool dup = false;
+        for (unsigned j = 0; j < n && !dup; j++) {
+            dup = out[j] == ret;
+        }
+        if (!dup && ret) {
+            out[n++] = ret;
+        }
+    }
+    return n;
+}
+
 void nc_kernel_dump_recent(int fd)
 {
     char line[256];

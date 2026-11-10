@@ -717,8 +717,28 @@ void nc_ps_register(NcKernel *k)
     nc_kernel_impl(k, "KeResumeThread", KeResumeThread);
 }
 
+/* The guest's bytes from va - before for len, as a log line (a call site, a critical section):
+ * with them the code that makes a game wait can be read from the log alone. */
+static void dump_bytes(NcKernel *k, int fd, const char *what, uint32_t va, unsigned before, unsigned len)
+{
+    char line[400];
+    int n = snprintf(line, sizeof(line), "hakuX-native-frontier:   bytes %s %08x:", what, va - before);
+    for (unsigned i = 0; i < len && n < (int)sizeof(line) - 6; i++) {
+        const uint32_t a = va - before + i;
+        if (nc_vm_phys(k->vm, a) == UINT32_MAX) {
+            break;
+        }
+        n += snprintf(line + n, sizeof(line) - (size_t)n, " %02x", *(const uint8_t *)nc_vm_host(k->vm, a));
+    }
+    line[n++] = '\n';
+    nc_dump_line(fd, line, (size_t)n);
+}
+
 /* Every thread for a fault or timeout report: what it is doing or waiting
- * for (dispatcher type, signal state), and the top of its stack. */
+ * for (dispatcher type, signal state), and the top of its stack. After them
+ * the code of the places that matter: where each thread is, the calls up its
+ * stack, a critical section it waits on and the code that made the kernel's
+ * latest calls. */
 void nc_kernel_dump_threads(NcKernel *k, int fd)
 {
     static const char *const k_state[] = {"free", "ready", "running", "waiting", "suspended", "terminated"};
@@ -769,5 +789,26 @@ void nc_kernel_dump_threads(NcKernel *k, int fd)
         }
         line[n++] = '\n';
         nc_dump_line(fd, line, (size_t)n);
+        if (t->state == NC_T_WAITING && t->wait.cs) {
+            dump_bytes(k, fd, "cs", t->wait.cs, 0, 24); /* LockCount, RecursionCount, OwningThread ... */
+        }
+        if (t->state != NC_T_WAITING || !t->wait.cs || t->wait.count) {
+            dump_bytes(k, fd, "at eip", eip, 16, 40);
+        }
+        if (nc_vm_phys(k->vm, esp) != UINT32_MAX && t->state != NC_T_TERMINATED) {
+            unsigned shown = 0;
+            for (unsigned w = 0; w < 512 && shown < 4 && nc_vm_phys(k->vm, esp + 4 * w) != UINT32_MAX; w++) {
+                const uint32_t v = nc_vm_rd32(k->vm, esp + 4 * w);
+                if (v >= k->xbe_base && v < k->xbe_base + k->xbe_size) {
+                    dump_bytes(k, fd, "caller", v, 24, 32);
+                    shown++;
+                }
+            }
+        }
+    }
+    uint32_t rets[16];
+    const unsigned nr = nc_kernel_recent_rets(rets, 16);
+    for (unsigned i = 0; i < nr; i++) {
+        dump_bytes(k, fd, "recent call from", rets[i], 24, 32);
     }
 }

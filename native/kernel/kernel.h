@@ -694,6 +694,7 @@ void nc_intr_return(NcKernel *k);
 
 /* Writes the last kernel calls to fd (fault reports; async-signal tolerant). */
 void nc_kernel_dump_recent(int fd);
+unsigned nc_kernel_recent_rets(uint32_t *out, unsigned max);
 /* Every guest thread: state, wait objects, top of stack (ps.c). */
 void nc_kernel_dump_threads(NcKernel *k, int fd);
 
