@@ -2482,6 +2482,31 @@ static void remote_end(VkCommandBuffer cb, PsFrame *f, VkImage dst, bool shot, u
         shot_write(iw, ih);
         g_ps.shot_want = false;
     }
+    /* when it is due: a frame's first picture (one drawn again for the
+     * overlay over it comes as it is) */
+    {
+        static uint32_t s_due_serial;
+        static LONGLONG s_qpf;
+        const bool first = g_ps.have && g_ps.serial != s_due_serial;
+        s_due_serial = g_ps.serial;
+        LONG64 due = 0;
+        if (first && g_ps.f.due_ns) {
+            /* this process's clock to the counter's, both read now */
+            struct timespec ts;
+            LARGE_INTEGER c;
+            if (!s_qpf) {
+                LARGE_INTEGER q;
+                QueryPerformanceFrequency(&q);
+                s_qpf = q.QuadPart;
+            }
+            clock_gettime(CLOCK_MONOTONIC, &ts);
+            QueryPerformanceCounter(&c);
+            const LONG64 mono = (LONG64)ts.tv_sec * 1000000000 + ts.tv_nsec;
+            const LONG64 qpc = (LONG64)(c.QuadPart / s_qpf) * 1000000000 + (c.QuadPart % s_qpf) * 1000000000 / s_qpf;
+            due = (LONG64)g_ps.f.due_ns + (qpc - mono);
+        }
+        InterlockedExchange64((volatile LONG64 *)&g_rm.sh->src[g_rm.slot].due[g_ps.idx], due);
+    }
     /* the newest picture, then the frame woken (it takes the newest it finds) */
     InterlockedExchange64((volatile LONG64 *)&g_rm.sh->src[g_rm.slot].latest, (LONG64)((v << 2) | g_ps.idx));
     SetEvent(g_rm.ev);

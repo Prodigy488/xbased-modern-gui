@@ -98,6 +98,9 @@ void hle_host_mem_noaccess(uint32_t pa, uint32_t len, bool on);
 
 uint64_t hle_host_vblank_count(void);
 int64_t hle_host_vblank_period_ns(void);
+/* The time the last vblank was due (CLOCK_MONOTONIC, ns): the timer's own
+ * instant, a period after the one before, not when its interrupt was taken. */
+uint64_t hle_host_vblank_ns(void);
 
 /* ---- the GPU's registers (push-buffer mode) ------------------------------- */
 

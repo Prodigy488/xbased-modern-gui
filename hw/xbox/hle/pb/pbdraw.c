@@ -1769,7 +1769,7 @@ static bool present_flipped(void)
                                           __ATOMIC_ACQUIRE));
     __atomic_store_n(&g_pd.shown_ns, hle_now_ns(), __ATOMIC_RELAXED);
     hle_hitch_frame(id, HLE_FR_FLIP);
-    hle_disp_present(id);
+    hle_disp_present_at(id, hle_host_vblank_ns());  /* this vblank's scanout shows it: due then, as a flip's */
     fps_log();
     if (g_pd.flipped_presents++ < 4) {
         hle_log("hakuX-hle-pb", "scanout: swap %u, flipped before it came, had no flip since: shown "
@@ -1986,7 +1986,9 @@ void hle_pb_flipped(uint32_t start)
                                           __ATOMIC_ACQUIRE));
     __atomic_store_n(&g_pd.flipped_ns, hle_now_ns(), __ATOMIC_RELAXED);     /* once a frame */
     hle_hitch_frame(id, HLE_FR_FLIP);
-    hle_disp_present(id);
+    /* due at the vblank this flip came in: the console's display changes
+     * there, whenever the handler got to run */
+    hle_disp_present_at(id, hle_host_vblank_ns());
     fps_log();
     g_pd.shown++;
 }

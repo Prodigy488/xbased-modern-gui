@@ -966,6 +966,11 @@ uint64_t hle_host_vblank_count(void)
     return __atomic_load_n(&g_vblanks, __ATOMIC_RELAXED);
 }
 
+uint64_t hle_host_vblank_ns(void)
+{
+    return __atomic_load_n(&g_last_vblank_ns, __ATOMIC_ACQUIRE);
+}
+
 int64_t hle_host_vblank_period_ns(void)
 {
     return (int64_t)__atomic_load_n(&g_frame_ns, __ATOMIC_RELAXED);

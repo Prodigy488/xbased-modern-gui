@@ -1,5 +1,17 @@
 # xbased changelog
 
+## 1.0.96 (2026-11)
+
+### Fixes
+- Frame pacing on Windows: each frame is shown at its own time, a fixed
+  moment after the console's display would have changed to it, instead of
+  whenever it reached the window. A game's frames went on screen unevenly
+  spaced (a 60 fps game's 13 to 20 ms apart where every one should be
+  16.7), which a variable refresh rate display shows as it comes: a
+  constant fine stutter. They are now evenly spaced to within a few
+  hundredths of a millisecond at 60 fps, and within a millisecond at 30 fps
+  and at unlocked frame rates.
+
 ## 1.0.95 (2026-11)
 
 The graphics chip is now checked against the chip's own test program

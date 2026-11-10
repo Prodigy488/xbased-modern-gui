@@ -7,6 +7,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>
 
 #ifdef _WIN32
 #define COBJMACROS
@@ -206,6 +207,8 @@ typedef struct FpSrc {
     HANDLE ready_h;
     HANDLE freed_ev;                    /* its freed moved (vk/share.h) */
     uint64_t taken;                     /* the newest picture taken (presented, or let go) */
+    int64_t lead_ns, peak_ns;           /* pacing (fp_pace): the lead kept, how long pictures take */
+    int64_t paced_due;                  /* ... the picture before's time */
 } FpSrc;
 
 static struct {
@@ -454,6 +457,93 @@ static void fp_let_go(int k, uint64_t v)
     fp_freed(k, v);
 }
 
+/* QueryPerformanceCounter in nanoseconds: the clock the runs' due times
+ * are in (vk/share.h) */
+static int64_t fp_now_ns(void)
+{
+    static LONGLONG qpf;
+    LARGE_INTEGER c;
+    if (!qpf) {
+        LARGE_INTEGER q;
+        QueryPerformanceFrequency(&q);
+        qpf = q.QuadPart;
+    }
+    QueryPerformanceCounter(&c);
+    return (int64_t)(c.QuadPart / qpf) * 1000000000 + (c.QuadPart % qpf) * 1000000000 / qpf;
+}
+
+/* Pacing: a picture of a frame the guest flipped at the vblank due (the
+ * timer's own instant) is presented a lead after it, not as it arrives. On
+ * its way here it waited for the guest's handler to take the interrupt, for
+ * the run to compose it and for two threads to wake, a different time for
+ * each picture: shown as they came, a 60 fps game's frames were 13 to 20 ms
+ * apart on screen (PresentMon: the Present calls 1 ms off their period for
+ * one in ten, 2.7 ms for one in a hundred), which a variable refresh rate
+ * display follows faithfully.
+ *
+ * The lead is how long the slowest of the last pictures took, and a margin:
+ * a peak that a slower picture raises at once and that falls back towards
+ * the pictures after it over twenty seconds or so (a slow picture comes
+ * every few seconds: over four, a 30 fps game's lead had fallen below the
+ * next one each time, one frame in twenty late), and the lead after the peak in
+ * steps too small to see, 1.5 ms a second up and 0.6 down (a picture later
+ * than its time is shown at once, late). A picture can be
+ * ready before its vblank's instant: the vblank's thread woke a little
+ * early. Called with the picture copied and ready to present; returns when
+ * it is time. */
+#define FP_LEAD_FIRST   3000000     /* until pictures have been timed */
+#define FP_LEAD_MARGIN   500000
+#define FP_LEAD_MIN      500000
+#define FP_LEAD_MAX    12000000     /* (a 60 fps frame's period, less a few ms) */
+#define FP_PEAK_FALL_MS    20000     /* the peak falls back over this long */
+#define FP_LEAD_UP_PER_MS   1500    /* ns of lead a millisecond between pictures: up, down */
+#define FP_LEAD_DOWN_PER_MS  600
+
+static void fp_pace(int k, int64_t due)
+{
+    FpSrc *s = &P.s[k];
+    HleShareSrc *src = &g_sh->src[k];
+    if (!s->lead_ns) {
+        s->lead_ns = FP_LEAD_FIRST;
+        s->peak_ns = FP_LEAD_FIRST - FP_LEAD_MARGIN;
+    }
+    const int64_t now = fp_now_ns(), took = now - due;
+    if (took < -50000000 || took > 100000000) {
+        return;                         /* not a time to keep (a stale picture's) */
+    }
+    /* (by the time between pictures, 4 to 100 ms: a 30 fps game's lead
+     * settles as fast as a 60 fps one's) */
+    int64_t dt_ms = (due - s->paced_due) / 1000000;
+    dt_ms = dt_ms < 4 ? 4 : dt_ms > 100 ? 100 : dt_ms;
+    s->paced_due = due;
+    s->peak_ns = took > s->peak_ns ? took : s->peak_ns - (s->peak_ns - took) * dt_ms / FP_PEAK_FALL_MS;
+    int64_t want = s->peak_ns + FP_LEAD_MARGIN;
+    want = want < FP_LEAD_MIN ? FP_LEAD_MIN : want > FP_LEAD_MAX ? FP_LEAD_MAX : want;
+    const int64_t at = due + s->lead_ns;
+    const int64_t up = FP_LEAD_UP_PER_MS * dt_ms, down = FP_LEAD_DOWN_PER_MS * dt_ms;
+    if (want > s->lead_ns) {
+        s->lead_ns += want - s->lead_ns < up ? want - s->lead_ns : up;
+    } else {
+        s->lead_ns -= s->lead_ns - want < down ? s->lead_ns - want : down;
+    }
+    src->pace_lead_us = (int32_t)(s->lead_ns / 1000);
+    src->pace_n++;
+    if (at <= now) {
+        src->pace_late++;
+        return;
+    }
+    /* the timer to a millisecond short of it (it wakes up to half a
+     * millisecond after its time, 0.84 ms at the worst seen), the rest spun */
+    if (at - now > 1050000) {
+        const int64_t rel = at - now - 1000000;
+        const struct timespec ts = {(time_t)(rel / 1000000000), (long)(rel % 1000000000)};
+        nanosleep(&ts, NULL);
+    }
+    while (fp_now_ns() < at) {
+        YieldProcessor();
+    }
+}
+
 /* the run's drawing of picture v done (its fence, waited on the CPU: the
  * frame's queue never waits on another process's) */
 static bool fp_drawn(FpSrc *s, uint64_t v, DWORD ms)
@@ -504,6 +594,7 @@ static int fp_present(int k, uint64_t v, unsigned i)
         return -1;
     }
     const bool vsync = g_sh->src[k].vsync != 0;
+    const int64_t due = g_sh->src[k].due[i];
     if ((vsync || !P.tearing) && P.latency) {
         WaitForSingleObject(P.latency, 100);    /* a frame queued at most */
     }
@@ -540,9 +631,19 @@ static int fp_present(int k, uint64_t v, unsigned i)
     ID3D12CommandQueue_Signal(P.q, P.fence, ++P.fence_v);
     P.used[b] = P.fence_v;
     s->taken = v;
-    hr = IDXGISwapChain3_Present(P.sc, vsync ? 1 : 0, !vsync && P.tearing ? DXGI_PRESENT_ALLOW_TEARING : 0);
-    fp_wait(P.used[b]);     /* the copy done (a moment): the run's image free again */
-    fp_freed(k, v);
+    if (due > 0) {
+        /* a frame the guest flipped: the copy done first (the flip then
+         * waits for nothing of ours on the GPU) and the run's image free
+         * again, then presented at its time */
+        fp_wait(P.used[b]);
+        fp_freed(k, v);
+        fp_pace(k, due);
+        hr = IDXGISwapChain3_Present(P.sc, vsync ? 1 : 0, !vsync && P.tearing ? DXGI_PRESENT_ALLOW_TEARING : 0);
+    } else {
+        hr = IDXGISwapChain3_Present(P.sc, vsync ? 1 : 0, !vsync && P.tearing ? DXGI_PRESENT_ALLOW_TEARING : 0);
+        fp_wait(P.used[b]);     /* the copy done (a moment): the run's image free again */
+        fp_freed(k, v);
+    }
     if (FAILED(hr)) {
         snprintf(g_sh->why, sizeof(g_sh->why), "present (%08lx)", (unsigned long)hr);
         return -1;
