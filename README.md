@@ -52,13 +52,14 @@ No BIOS, MCPX ROM or hard-disk image is needed.
 
 | Platform | File | |
 |---|---|---|
-| **Windows** 10/11 (x64) | `xbased-modern-gui-1.0.76.2-windows-x64.zip` | Unzip anywhere and run `xbased.exe`. Portable: everything stays in its folder. |
+| **Windows** 10/11 (x64) | `xbased-modern-gui-1.0.76.10-windows-x64.zip` | Unzip anywhere and run `xbased.exe`. Portable: everything stays in its folder. |
+| **Linux** (x86-64) | `xbased-1.0.76.10-x86_64.AppImage` | `chmod +x` it and run it. Needs a Vulkan driver and glibc 2.38 or newer (Ubuntu 24.04, Fedora 39, Debian 13). |
 
 Get it from **[Releases](https://github.com/Prodigy488/xbased-modern-gui/releases/latest)**.
-This fork only publishes a Windows build. For Linux, use the AppImage from
-[upstream xbased](https://github.com/crazyriddler/xbased/releases/latest), or build this
-source yourself (see [Building from source](#building-from-source)); the Linux build of
-the fork has not been tested.
+The Linux AppImage starts, but it has not been run with a GPU or sound on Linux (it was
+built without one). On an older distribution use the AppImage from
+[upstream xbased](https://github.com/crazyriddler/xbased/releases/latest) or build this
+source yourself (see [Building from source](#building-from-source)). There is no macOS build.
 
 New builds are offered inside the app as it starts (Settings › Interface turns the check
 off). People on upstream xbased or on an older build need to download this zip once by

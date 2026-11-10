@@ -1,4 +1,4 @@
-# xbased Modern GUI 1.0.76.10
+# xbased Modern GUI 1.0.76.10: game compatibility fixes, kernel scan, Linux AppImage
 
 ```
 Changes since 1.0.76.2
@@ -15,7 +15,7 @@ New
 - Settings > System > "Scan games for missing kernel functions": reads every game's default.xbe
   and writes compat_report.txt (the games with the most gaps first, and each missing function with
   how many games need it). "Open the scan report" opens it.
-- Linux: an AppImage (xbased-1.0.76.10-x86_64.AppImage). Needs a Vulkan driver and glibc 2.35+.
+- Linux: an AppImage (xbased-1.0.76.10-x86_64.AppImage). Needs a Vulkan driver and glibc 2.38 or newer (Ubuntu 24.04, Fedora 39, Debian 13); not run with a GPU or sound yet.
   Settings, saves and states are in ~/.local/share/xbased.
 
 Logs (to find out why a game stops or is silent)
