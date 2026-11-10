@@ -83,8 +83,23 @@ void nc_kernel_pool_for(uint32_t kprocess)
     g_pool_at = kprocess >= NC_CONTIG_WINDOW ? (kprocess - NC_CONTIG_WINDOW) & ~(POOL_SIZE - 1) : 0;
 }
 
+/* The ordinal-indexed view of k_exports. Filled when a kernel is made, and on the first lookup
+ * without one (the library scan asks before any game has run). Every writer stores the same
+ * pointers, so a race between two of them is harmless. */
+static void by_ordinal_fill(void)
+{
+    for (size_t i = 0; i < sizeof(k_exports) / sizeof(k_exports[0]); i++) {
+        k_by_ordinal[k_exports[i].ordinal] = &k_exports[i];
+    }
+}
+
 const NcKExport *nc_kernel_export(unsigned ordinal)
 {
+    static bool filled;
+    if (!filled) {
+        by_ordinal_fill();
+        filled = true;
+    }
     return ordinal < NC_KORDINAL_MAX ? k_by_ordinal[ordinal] : NULL;
 }
 

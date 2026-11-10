@@ -341,6 +341,22 @@ static bool fault_report(NcCore *c, uintptr_t pc, uint64_t va, const char *what)
     }
     nc_log("hakuX-native-frontier", "host fault: %s at guest %08llx, eip %08x (host pc %p)", what,
            (unsigned long long)va, eip, (void *)pc);
+    {   /* the title's code around the fault: with it the instruction can be read from the log alone */
+        char hex[200];
+        int n = 0;
+        const uint32_t from = (eip - 24) & ~3u;
+        for (uint32_t a = from; a < from + 56 && n < (int)sizeof(hex) - 10; a += 4) {
+            if (nc_vm_phys(&c->vm, a) == UINT32_MAX) {
+                break;
+            }
+            const uint32_t w = nc_vm_rd32(&c->vm, a);
+            for (int b = 0; b < 4 && n < (int)sizeof(hex) - 4; b++) {
+                n += snprintf(hex + n, sizeof(hex) - (size_t)n, "%s%02x", a + (uint32_t)b == eip ? " |" : " ",
+                              (w >> (8 * b)) & 0xFF);
+            }
+        }
+        nc_log("hakuX-native-frontier", "code from %08x (| marks eip):%s", from, hex);
+    }
     nc_kernel_dump_recent(-1);
     nc_kernel_dump_threads(&c->kernel, -1);
     return false;

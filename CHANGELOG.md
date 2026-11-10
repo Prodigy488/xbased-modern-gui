@@ -1,5 +1,12 @@
 # xbased changelog
 
+## 1.0.76.4 (Modern GUI fork)
+
+- Fixed the game library scan (1.0.76.3) finding nothing: it ran before the kernel's function table was
+  loaded, so it saw no functions at all and reported "0 of 0". It now lists the missing ones.
+- When a game crashes on a bad memory access, the log now also holds the bytes of the game's code
+  around it (a "code from ..." line), so the instruction that failed can be read from the log alone.
+
 ## 1.0.76.3 (Modern GUI fork)
 
 - New: Settings > System > "Scan games for missing kernel functions". It reads every game in your
