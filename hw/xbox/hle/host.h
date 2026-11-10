@@ -101,6 +101,14 @@ int64_t hle_host_vblank_period_ns(void);
 /* The time the last vblank was due (CLOCK_MONOTONIC, ns): the timer's own
  * instant, a period after the one before, not when its interrupt was taken. */
 uint64_t hle_host_vblank_ns(void);
+/* The display's vsyncs as the window's presenter has them from the driver
+ * (the last one's instant, CLOCK_MONOTONIC ns, and the refresh period), and
+ * the lead its presents keep after a frame's vblank (0: they are not timed).
+ * With a display whose refreshes a frame is a whole number of, the vblank
+ * keeps to them, placed so a frame's present falls midway between two. */
+void hle_host_display_sync(uint64_t vsync_ns, uint64_t period_ns, uint64_t lead_ns);
+/* True while the vblank keeps to them so. */
+bool hle_host_vblank_timed(void);
 
 /* ---- the GPU's registers (push-buffer mode) ------------------------------- */
 

@@ -34,7 +34,7 @@
 #include <stdint.h>
 
 #define HLE_SHARE_MAGIC   0x58424652u  /* "XBFR" */
-#define HLE_SHARE_VERSION 3u
+#define HLE_SHARE_VERSION 4u
 #define HLE_SHARE_IMAGES  3u
 #define HLE_SHARE_MICE    64           /* the mouse's events from the frame, a ring */
 #define HLE_SHARE_FORMAT  87u          /* DXGI_FORMAT_B8G8R8A8_UNORM, VK_FORMAT_B8G8R8A8_UNORM's */
@@ -69,6 +69,19 @@ typedef struct HleShareSrc {
     volatile int64_t due[HLE_SHARE_IMAGES];
     volatile uint32_t pace_n, pace_late;
     volatile int32_t pace_lead_us;
+    /* The display's own vsyncs, as the frame's swapchain has them from the
+     * driver after each present (DXGI's frame statistics): the last one's
+     * instant (QueryPerformanceCounter ns; 0: not known), the refresh period
+     * measured between them, and a count that moves when the pair is new. The
+     * run's vblank keeps its place against them (host.h
+     * hle_host_display_sync). */
+    volatile int64_t sync_ns, sync_period_ns;
+    volatile uint32_t sync_seq;
+    /* The run's, written with each picture: its vblank keeps to those vsyncs,
+     * placed for the frame's timed presents. The frame then gives the display
+     * a timed picture in place of one still waiting for its vsync, not behind
+     * it (its fp_present). */
+    volatile int32_t locked;
 } HleShareSrc;
 
 typedef struct HleShareMouse {

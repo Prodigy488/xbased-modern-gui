@@ -1,5 +1,19 @@
 # xbased changelog
 
+## 1.0.97 (2026-11)
+
+### Fixes
+- Frame pacing on displays with a fixed refresh rate and V-Sync (60 Hz and
+  its multiples, no variable refresh rate): every frame of a 60 fps game is
+  now on screen for exactly one refresh. The console's display keeps time
+  with the monitor's own refreshes, as the graphics driver reports them,
+  and each frame is handed over midway between two of them. Before, a frame
+  was now and then shown twice and the next one never (Burnout 3: once
+  every 45 seconds), and from a game's first second every frame could reach
+  the screen one refresh later than it should.
+- Less delay with V-Sync at 60 Hz: a frame is on screen 8 ms after it is
+  handed over, where it took 15.
+
 ## 1.0.96 (2026-11)
 
 ### Fixes
