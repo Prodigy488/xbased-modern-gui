@@ -8,6 +8,7 @@
 #include "hw/xbox/hle/tex/xdk.h"
 #include "hw/xbox/hle/vk/back_int.h"
 #include "hw/xbox/hle/vk/idhint.h"
+#include "hw/xbox/hle/vk/retire.h"
 
 #define T (g_hvk.t)
 #define HLE_MAX_VK_SURF 256
@@ -468,6 +469,9 @@ void hle_surf_destroy_after(uint32_t id, uint64_t value)
     }
 }
 
+static HleRetireTab g_down_retire;      /* the scratch images let go (down_image) */
+static void down_gone(const HleRetired *e, void *ctx);
+
 void hle_surf_stamp_parked(uint64_t value)
 {
     for (unsigned i = 0; i < HLE_MAX_VK_SURF; i++) {
@@ -480,6 +484,7 @@ void hle_surf_stamp_parked(uint64_t value)
             g_vretire[i].after = value;
         }
     }
+    hle_retire_stamp(&g_down_retire, value);
 }
 
 void hle_surf_reap(uint64_t completed)
@@ -498,28 +503,64 @@ void hle_surf_reap(uint64_t completed)
             g_vretire[i].v = VK_NULL_HANDLE;
         }
     }
+    hle_retire_reap(&g_down_retire, completed, down_gone, NULL);
 }
 
 /* Guest-size scratch images that readbacks of scaled surfaces are blitted
- * down into: one per format and size, kept until the surfaces go. */
+ * down into, and uploads into a surface go through: one per format and
+ * size, the eight used last. A ninth takes the place of the one used
+ * longest ago, which goes once the timeline passes the work recorded with it
+ * (vk/retire.h). The first eight were kept until the surfaces went and a
+ * ninth format or size got none: every upload and scaled readback of that
+ * size was skipped from then on. A game uses a few; a program that walks
+ * through sizes and formats runs out (nxdk_pgraph_tests: its blend tests'
+ * targets never got the memory behind them). */
 #define HLE_MAX_DOWN 8
 static struct {
     VkImage img;
     VkDeviceMemory mem;
     VkFormat fmt;
     uint32_t w, h;
+    uint32_t used;                      /* g_down_tick when last asked for */
 } g_down[HLE_MAX_DOWN];
+static uint32_t g_down_tick;
+static HleRetireTab g_down_retire = { .max = 64 };
+
+static void down_gone(const HleRetired *e, void *ctx)
+{
+    (void)ctx;
+    T.vkDestroyImage(g_hvk.dev, (VkImage)(uintptr_t)e->h[0], NULL);
+    T.vkFreeMemory(g_hvk.dev, (VkDeviceMemory)(uintptr_t)e->h[1], NULL);
+}
+
+static void down_retire_full(HleRetireTab *t, void *ctx)
+{
+    (void)ctx;
+    hle_tl_wait(hle_tl_submitted());
+    hle_retire_reap(t, hle_tl_completed(), down_gone, NULL);
+}
 
 static VkImage down_image(VkFormat fmt, uint32_t w, uint32_t h)
 {
-    unsigned i = 0;
+    unsigned i = 0, old = 0;
     for (; i < HLE_MAX_DOWN && g_down[i].img; i++) {
         if (g_down[i].fmt == fmt && g_down[i].w == w && g_down[i].h == h) {
+            g_down[i].used = ++g_down_tick;
             return g_down[i].img;
+        }
+        if ((int32_t)(g_down[i].used - g_down[old].used) < 0) {
+            old = i;
         }
     }
     if (i == HLE_MAX_DOWN) {
-        return VK_NULL_HANDLE;
+        const HleRetired r = { .h = { (uint64_t)(uintptr_t)g_down[old].img,
+                                      (uint64_t)(uintptr_t)g_down[old].mem },
+                               .after = HLE_RETIRE_PARKED };
+        if (!hle_retire_put(&g_down_retire, &r, down_retire_full, NULL)) {
+            return VK_NULL_HANDLE;      /* (no memory for its entry: the eight stay) */
+        }
+        memset(&g_down[old], 0, sizeof(g_down[old]));
+        i = old;
     }
     VkImageCreateInfo ici = {
         .sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO, .imageType = VK_IMAGE_TYPE_2D,
@@ -548,6 +589,7 @@ static VkImage down_image(VkFormat fmt, uint32_t w, uint32_t h)
     g_down[i].fmt = fmt;
     g_down[i].w = w;
     g_down[i].h = h;
+    g_down[i].used = ++g_down_tick;
     return img;
 }
 
@@ -604,6 +646,8 @@ void hle_surf_destroy_all(void)
         }
     }
     memset(g_down, 0, sizeof(g_down));
+    hle_retire_stamp(&g_down_retire, 0);            /* (the device is idle: all of them) */
+    hle_retire_reap(&g_down_retire, HLE_RETIRE_PARKED - 1, down_gone, NULL);
     for (unsigned i = 0; i < HLE_MAX_VK_SURF; i++) {
         if (g_surf[i].alive) {
             destroy_now(&g_surf[i]);

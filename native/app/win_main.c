@@ -1315,7 +1315,7 @@ static const char *pick_disc(void)
 }
 
 #ifndef XBASED_VERSION
-#define XBASED_VERSION "1.0.94"
+#define XBASED_VERSION "1.0.95"
 #endif
 
 static void rm_tree(const char *path)

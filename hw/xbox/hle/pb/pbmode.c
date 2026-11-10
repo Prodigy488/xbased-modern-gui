@@ -8,6 +8,7 @@
 #include "hw/xbox/hle/mem/barrier.h"
 #include "hw/xbox/hle/mem/guestmem.h"
 #include "hw/xbox/hle/pb/kelvin.h"
+#include "hw/xbox/hle/pb/kvdma.h"
 #include "hw/xbox/hle/pb/kvfmt.h"
 #include "hw/xbox/hle/pb/pbdraw.h"
 #include "hw/xbox/hle/pb/pbmode.h"
@@ -90,6 +91,8 @@ static struct {
     /* the subchannels' objects: instance (PRAMIN offset) and class */
     uint32_t obj_inst[8];
     uint8_t obj_class[8];
+    HleKvDma kvdma;                     /* Kelvin's DMA contexts: its offsets as addresses */
+    bool kvdma_stale;                   /* ... to be taken from the shadows (a savestate's) */
     uint32_t sem_inst, sem_offset;      /* Kelvin's semaphore DMA object, offset */
     uint32_t report_inst;               /* its report DMA object (visibility tests) */
     uint64_t reports;
@@ -773,6 +776,29 @@ static void trap_past(uint32_t pa)
     __atomic_store_n(&g_trel.n, n + 1, __ATOMIC_RELEASE);
 }
 
+/* The Kelvin methods that name a DMA object or carry an offset inside one
+ * (hle_kvdma_acts, by method / 4). */
+static const bool k_kvdma_acts[2048] = {
+    [0x0184 / 4] = true, [0x0188 / 4] = true,
+    [0x0194 / 4 ... 0x01A0 / 4] = true,
+    [0x0210 / 4] = true, [0x0214 / 4] = true,
+    [0x1720 / 4 ... 0x175C / 4] = true,
+    [0x1B00 / 4] = true, [0x1B04 / 4] = true, [0x1B40 / 4] = true, [0x1B44 / 4] = true,
+    [0x1B80 / 4] = true, [0x1B84 / 4] = true, [0x1BC0 / 4] = true, [0x1BC4 / 4] = true,
+};
+
+/* Kelvin's DMA contexts after a load: from the objects its shadow names. */
+static void kvdma_restore(void)
+{
+    static const uint16_t k_ctx[HLE_KVDMA_N] = { 0x0184, 0x0188, 0x0194, 0x0198, 0x019C, 0x01A0 };
+    uint32_t base[HLE_KVDMA_N];
+    for (unsigned i = 0; i < HLE_KVDMA_N; i++) {
+        base[i] = ctx_base(hle_kelvin_reg(k_ctx[i]));
+    }
+    hle_kvdma_restore(&g_pb.kvdma, base, hle_kelvin_reg);
+    g_pb.kvdma_stale = false;
+}
+
 /* Per packet, not per method: PGRAPH's FIFO access (only D3D's trap
  * handler turns it off, with the decoder stalled at the trap; consume
  * checks it to go on) and GET, published at a packet's start and every 64
@@ -868,6 +894,31 @@ static int count_method(void *opaque, unsigned subch, uint32_t m, uint32_t v)
     if (g_pb.obj_class[subch] == 0x97) {
         if (!hle_kv_takes(m, v)) {
             return HLE_PB_GO;                   /* a value the method doesn't take: its state stays */
+        }
+        uint32_t wc;
+        const unsigned nwc = hle_kv_window_clip_spread(m, &wc);
+        if (nwc) {
+            /* a window clip rectangle's word: its slot's and every later one's */
+            for (unsigned i = 0; i < nwc; i++) {
+                hle_kelvin_method(wc + 4 * i, v);
+                hle_pbd_method(wc + 4 * i, v);
+            }
+            return HLE_PB_GO;
+        }
+        if (k_kvdma_acts[(m >> 2) & 0x7FF]) {
+            /* an offset inside a DMA object, or the object: the shadows
+             * take addresses (kvdma.h) */
+            if (g_pb.kvdma_stale) {
+                kvdma_restore();
+            }
+            HleKvDmaOut o[HLE_KVDMA_OUT];
+            const unsigned n = hle_kvdma_method(&g_pb.kvdma, m, v,
+                                                hle_kvdma_context(m) >= 0 ? ctx_base(v) : 0, o);
+            for (unsigned i = 0; i < n; i++) {
+                hle_kelvin_method(o[i].m, o[i].v);
+                hle_pbd_method(o[i].m, o[i].v);
+            }
+            return HLE_PB_GO;
         }
         int r = kelvin(m, v);
         hle_kelvin_method(m, v);                /* its register shadow: the draw state */
@@ -1551,6 +1602,7 @@ void hle_pb_state_set(const HlePbState *s)
     memcpy(g_pb.gamma, s->gamma, sizeof(s->gamma));
     g_pb.gamma_set = s->gamma_set;
     g_pb.gamma_req = s->gamma_req || s->gamma_set;      /* the ramp applied again */
+    g_pb.kvdma_stale = true;                /* (the shadows and the instance memory may come after) */
 }
 
 static void *decode_thread(void *opaque)

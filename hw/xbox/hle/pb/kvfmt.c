@@ -52,3 +52,33 @@ bool hle_kv_takes_listed(uint32_t m, uint32_t v)
         return true;
     }
 }
+
+bool hle_kv_window_clip(const uint32_t hr[8], const uint32_t vr[8], bool exclusive, uint32_t w,
+                        uint32_t h, int32_t r[4])
+{
+    int32_t b[4] = { INT32_MAX, INT32_MAX, INT32_MIN, INT32_MIN };
+    if (exclusive) {
+        return false;
+    }
+    for (unsigned i = 0; i < 8; i++) {
+        const uint32_t x = hr[i], y = vr[i];
+        const int32_t x1 = x & 0xFFF, x2 = ((x >> 16) & 0xFFF) + 1, y1 = y & 0xFFF, y2 = ((y >> 16) & 0xFFF) + 1;
+        if (!x && !y) {
+            continue;
+        }
+        if (x1 == 0 && y1 == 0 && x2 >= (int32_t)w && y2 >= (int32_t)h) {
+            return false;
+        }
+        b[0] = x1 < b[0] ? x1 : b[0];
+        b[1] = y1 < b[1] ? y1 : b[1];
+        b[2] = x2 > b[2] ? x2 : b[2];
+        b[3] = y2 > b[3] ? y2 : b[3];
+    }
+    if (b[0] == INT32_MAX) {
+        return false;
+    }
+    for (unsigned i = 0; i < 4; i++) {
+        r[i] = b[i];
+    }
+    return true;
+}

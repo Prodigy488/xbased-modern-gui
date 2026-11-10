@@ -1,5 +1,31 @@
 # xbased changelog
 
+## 1.0.95 (2026-11)
+
+The graphics chip is now checked against the chip's own test program
+(nxdk_pgraph_tests), whose pictures are compared with the ones a console
+makes. This update is what it took to run it, and the first rules it
+corrected.
+
+### New
+- Homebrew that drives the graphics chip itself, without the console's
+  graphics library, now runs: programs made with nxdk's pbkit start, draw
+  and are shown, and can read back what they drew, the depth buffer
+  included.
+
+### Fixes
+- Scissor rectangles follow the console's rule: one set in the first slot
+  applies to all eight, and one that covers the whole picture means nothing
+  is cut. A rectangle left over in another slot could cut away everything
+  drawn afterwards.
+- A vertex whose w is 0 is placed as the console places it, far off along
+  its own direction, instead of where it stood.
+- A picture a game writes into a render target reaches it after many
+  different target sizes were used in a session (only the first eight
+  sizes worked, the rest were skipped).
+- A session that goes through more than 8192 different drawing states
+  keeps drawing: the draws of any new one were dropped from there on.
+
 ## 1.0.94 (2026-11)
 
 This update comes out of a review of the whole core: the processor's

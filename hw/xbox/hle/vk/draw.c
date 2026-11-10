@@ -913,14 +913,25 @@ static void retired_gone(const HleRetired *e, void *ctx)
     g_tex_retired++;
 }
 
+/* Retired pipelines (pipe_flush): destroyed the same way. h[0]: the pipeline. */
+static HleRetireTab g_pipe_retire = { .max = HLE_MAX_PIPES };
+
+static void pipe_gone(const HleRetired *e, void *ctx)
+{
+    (void)ctx;
+    T.vkDestroyPipeline(g_hvk.dev, (VkPipeline)(uintptr_t)e->h[0], NULL);
+}
+
 void hle_draw_tex_reap(uint64_t completed)
 {
     hle_retire_reap(&g_retire, completed, retired_gone, NULL);
+    hle_retire_reap(&g_pipe_retire, completed, pipe_gone, NULL);
 }
 
 void hle_draw_tex_stamp(uint64_t value)
 {
     hle_retire_stamp(&g_retire, value);
+    hle_retire_stamp(&g_pipe_retire, value);
 }
 
 static void retire_full(HleRetireTab *t, void *ctx)
@@ -1909,6 +1920,53 @@ static void pipe_add(uint64_t h, VkPipeline p, uint8_t state)
 static HlePbResult pipeline_build(const void *key, const uint32_t *tok, uint32_t nslots,
                                   bool cache_only, VkPipeline *out);
 
+static bool g_pipe_last_ok;             /* pipeline(): the draw before's key and pipeline hold */
+
+static void pipe_retire_full(HleRetireTab *t, void *ctx)
+{
+    (void)t;
+    (void)ctx;
+    hle_tl_wait(hle_tl_submitted());
+    hle_retire_reap(&g_pipe_retire, hle_tl_completed(), pipe_gone, NULL);
+}
+
+/* The table full: every pipeline in it is let go (destroyed once the GPU is
+ * past the work recorded with it), the ones the workers still build kept,
+ * and the draws from here on have theirs made again as they come, out of the
+ * driver's cache. A session kept every pipeline it made and dropped the
+ * draws of the ones past the 8192nd for good: no game makes that many, but
+ * a program that walks through the chip's states does (nxdk_pgraph_tests,
+ * three quarters of the way through: every primitive after that missing). */
+static void pipe_flush(void)
+{
+    unsigned keep = 0, let_go = 0;
+    for (unsigned i = 0; i < g_dr.npipes; i++) {
+        const HlePipe e = g_dr.pipes[i];
+        if (e.state == PIPE_PENDING) {
+            g_dr.pipes[keep++] = e;
+            continue;
+        }
+        if (e.pipe) {
+            const HleRetired r = { .h = { H64(e.pipe) }, .after = HLE_RETIRE_PARKED };
+            if (hle_retire_put(&g_pipe_retire, &r, pipe_retire_full, NULL)) {
+                let_go++;
+            }                           /* (no memory for its entry: kept, not destroyed) */
+        }
+    }
+    memset(g_pipe_idx, 0, sizeof(g_pipe_idx));
+    g_dr.npipes = 0;
+    for (unsigned i = 0; i < keep; i++) {
+        const HlePipe e = g_dr.pipes[i];
+        pipe_add(e.hash, e.pipe, e.state);
+    }
+    g_pipe_last_ok = false;
+    static unsigned s_flushes;
+    if (s_flushes++ < 8) {
+        hle_log("hakuX-hle-pipe", "pipeline table full (%u): %u pipelines let go, %u being built "
+                "kept (#%u; first 8 logged)", HLE_MAX_PIPES, let_go, keep, s_flushes);
+    }
+}
+
 /* The workers' finished builds into their pending entries */
 static void pipe_collect(void)
 {
@@ -1962,11 +2020,14 @@ static VkPipeline pipeline_new(const PipeKey *k, uint64_t h, const HleVkSurf *ta
                                bool *pending)
 {
     if (g_dr.npipes >= HLE_MAX_PIPES) {
+        pipe_flush();
+    }
+    if (g_dr.npipes >= HLE_MAX_PIPES) {
         static bool s_full;
         if (!s_full) {
             s_full = true;
-            hle_log("hakuX-hle-pipe", "pipeline table full (%u): new pipelines' draws are "
-                    "dropped", HLE_MAX_PIPES);
+            hle_log("hakuX-hle-pipe", "pipeline table full (%u) of pipelines being built: new "
+                    "pipelines' draws are dropped", HLE_MAX_PIPES);
         }
         return VK_NULL_HANDLE;
     }
@@ -2011,13 +2072,12 @@ static VkPipeline pipeline(const PipeKey *k, HleVkSurf *target, bool *pending)
 {
     static PipeKey last;
     static VkPipeline last_p;
-    static bool last_ok;
     *pending = false;
     if (hle_pipe_async()) {
         pipe_collect();
         target_note(target);
     }
-    if (last_ok && memcmp(k, &last, g_key_bytes) == 0) {
+    if (g_pipe_last_ok && memcmp(k, &last, g_key_bytes) == 0) {
         return last_p;
     }
     uint64_t h = key_hash(k, g_key_bytes);
@@ -2027,7 +2087,7 @@ static VkPipeline pipeline(const PipeKey *k, HleVkSurf *target, bool *pending)
         HlePipe *e = &g_dr.pipes[i];
         if (e->state == PIPE_PENDING) {
             *pending = true;
-            last_ok = false;
+            g_pipe_last_ok = false;
             return VK_NULL_HANDLE;
         }
         if (e->state == PIPE_PREBUILT) {
@@ -2039,13 +2099,13 @@ static VkPipeline pipeline(const PipeKey *k, HleVkSurf *target, bool *pending)
     } else {
         p = pipeline_new(k, h, target, pending);
         if (*pending) {
-            last_ok = false;
+            g_pipe_last_ok = false;
             return VK_NULL_HANDLE;
         }
     }
     last = *k;
     last_p = p;
-    last_ok = i >= 0 || g_dr.npipes >= HLE_MAX_PIPES || pipe_lookup(h) >= 0;
+    g_pipe_last_ok = i >= 0 || g_dr.npipes >= HLE_MAX_PIPES || pipe_lookup(h) >= 0;
     return p;
 }
 

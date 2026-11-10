@@ -137,6 +137,11 @@ void hle_kelvin_method(uint32_t m, uint32_t v)
     g_kv.w[i >> 5] |= 1u << (i & 31);
 }
 
+uint32_t hle_kelvin_reg(uint32_t m)
+{
+    return m < 4 * KV_REGS ? g_kv.r[m >> 2] : 0;
+}
+
 uint32_t hle_kelvin_state_gen(void)
 {
     return g_kv.sgen;

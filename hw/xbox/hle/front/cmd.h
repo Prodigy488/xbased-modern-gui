@@ -231,6 +231,11 @@ typedef struct HleCmdReadback {
  * arena without one) at fb - 1, swizzled into guest memory at the value
  * (hle_tl_land_swz) */
 #define HLE_RB_PACKED 0xFFFFFFFEu
+/* arena_off: a depth target's image, w x h texels, an aspect at a time into
+ * the landing buffer at fb - 1 (fb_len bytes of room: its depth, then its
+ * stencil), put into guest memory as the NV2A's words at the value
+ * (hle_tl_land_depth); only an image at the guest's size */
+#define HLE_RB_DEPTH 0xFFFFFFFDu
 
 /* ---- P3 draws ------------------------------------------------------------- */
 

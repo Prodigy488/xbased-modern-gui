@@ -12,6 +12,7 @@
 #include "hw/xbox/hle/prop.h"
 #include "hw/xbox/hle/tex/xdk.h"
 #include "hw/xbox/hle/tex/xdk_res.h"
+#include "hw/xbox/hle/tex/zpack.h"
 #include "hw/xbox/hle/front/fe.h"
 #include "hw/xbox/hle/mem/barrier.h"
 #include "hw/xbox/hle/mem/guestmem.h"
@@ -2181,9 +2182,66 @@ static bool readback_packed(const HleCmdReadback *c, VkBuffer buf, VkDeviceSize 
     return true;
 }
 
+/* HLE_RB_DEPTH: a depth target's depth, then its stencil, into the landing
+ * buffer at `at`. Recorded: what the depth copied as and where the stencil's
+ * bytes went (hle_tl_land_depth_copied); false, nothing. An image the GPU
+ * never wrote holds nothing newer than memory; one at another size than the
+ * guest's (a resolution scale) has no texel of the guest's to give. */
+static bool readback_depth(const HleCmdReadback *c, VkBuffer buf, VkDeviceSize at)
+{
+    HleVkSurf *s = hle_surf_get(c->surf);
+    if (!s || s->d.parent || !hle_surf_ensure(s) || !s->img ||
+        !(s->aspect & VK_IMAGE_ASPECT_DEPTH_BIT) || s->layout == VK_IMAGE_LAYOUT_UNDEFINED ||
+        s->scale > 1 || s->w != c->w || s->h != c->h) {
+        return false;
+    }
+    const int zsrc = s->fmt == VK_FORMAT_D16_UNORM ? HLE_ZSRC_D16 :
+                     s->fmt == VK_FORMAT_D24_UNORM_S8_UINT || s->fmt == VK_FORMAT_X8_D24_UNORM_PACK32 ?
+                     HLE_ZSRC_D24 :
+                     s->fmt == VK_FORMAT_D32_SFLOAT || s->fmt == VK_FORMAT_D32_SFLOAT_S8_UINT ?
+                     HLE_ZSRC_F32 : HLE_ZSRC_NONE;
+    const bool stencil = s->aspect & VK_IMAGE_ASPECT_STENCIL_BIT;
+    const uint64_t n = (uint64_t)c->w * c->h;
+    const uint64_t dlen = (n * hle_zsrc_bytes(zsrc) + 3) & ~3ull;   /* (an aspect starts on a word) */
+    if (!zsrc || dlen + (stencil ? n : 0) > c->fb_len) {
+        return false;
+    }
+    VkCommandBuffer cb = cb_get();
+    hle_surf_transition(cb, s, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL);
+    const VkBufferImageCopy r[2] = {
+        { .bufferOffset = at, .imageSubresource = { VK_IMAGE_ASPECT_DEPTH_BIT, 0, 0, 1 },
+          .imageExtent = { c->w, c->h, 1 } },
+        { .bufferOffset = at + dlen, .imageSubresource = { VK_IMAGE_ASPECT_STENCIL_BIT, 0, 0, 1 },
+          .imageExtent = { c->w, c->h, 1 } },
+    };
+    T.vkCmdCopyImageToBuffer(cb, s->img, s->general ? VK_IMAGE_LAYOUT_GENERAL : s->layout, buf,
+                             stencil ? 2 : 1, r);
+    VkMemoryBarrier2 mb = {
+        .sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER_2,
+        .srcStageMask = VK_PIPELINE_STAGE_2_COPY_BIT,
+        .srcAccessMask = VK_ACCESS_2_TRANSFER_WRITE_BIT,
+        .dstStageMask = VK_PIPELINE_STAGE_2_HOST_BIT,
+        .dstAccessMask = VK_ACCESS_2_HOST_READ_BIT };
+    VkDependencyInfo di = {
+        .sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO,
+        .memoryBarrierCount = 1, .pMemoryBarriers = &mb };
+    T.vkCmdPipelineBarrier2(cb, &di);
+    hle_tl_land_depth_copied((uint32_t)at, zsrc, stencil ? (uint32_t)(at + dlen) + 1 : 0);
+    return true;
+}
+
 static void cmd_readback(const HleCmdReadback *c)
 {
     close_pass();
+    if (c->arena_off == HLE_RB_DEPTH) {
+        if (c->fb && readback_depth(c, g_hland.buf ? g_hland.buf : g_harena.buf, c->fb - 1)) {
+            g_back.st.readbacks++;
+        } else {
+            g_back.st.readback_skips++;
+        }
+        submit(c->value);
+        return;
+    }
     if (c->arena_off == HLE_RB_PACKED) {
         /* into the landing buffer at fb - 1, swizzled into guest memory when
          * the GPU reaches the value (hle_tl_land_swz): recorded or dropped */

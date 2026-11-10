@@ -76,12 +76,15 @@
 #define NV_PTIMER_TIME_0    0x009400u
 #define NV_PTIMER_TIME_1    0x009410u
 #define NV_PTIMER_ALARM_0   0x009420u
+#define NV_PFB_CFG0         0x100200u
 #define NV_PFB_CSTATUS      0x10020Cu
 #define NV_PFB_WBC          0x100410u
 #define NV_PCRTC_INTR_0     0x600100u
 #define NV_PCRTC_INTR_EN_0  0x600140u
 #define NV_PCRTC_START      0x600800u
 #define NV_PCRTC_RASTER     0x600808u
+#define NV_PRAMDAC_NVPLL_COEFF 0x680500u
+#define NV_PRAMDAC_VPLL_COEFF  0x680508u
 
 #define PMC_INTR_PCRTC   (1u << 24)
 #define PMC_INTR_PTIMER  (1u << 20)
@@ -909,6 +912,13 @@ void nc_dev_nv2a_init(void)
     g_regs = calloc(1, NV2A_SIZE + 16); /* pages are touched only where the guest writes (a word of slack past the end) */
     nc_wr32(g_regs + NV_PMC_BOOT_0, 0x02A000A1u);
     nc_wr32(g_regs + NV_PFB_CSTATUS, 64u << 20);
+    /* What the console's own start-up leaves in them, for code that programs
+     * the chip itself rather than through D3D (pbkit checks both before it
+     * sets its channel up, and gives up on a core clock that isn't the
+     * console's 233.33 MHz: 16.67 MHz * 28 / 2). */
+    nc_wr32(g_regs + NV_PFB_CFG0, 3);                       /* memory partitions */
+    nc_wr32(g_regs + NV_PRAMDAC_NVPLL_COEFF, 0x00011C01u);  /* P 1, N 28, M 1 */
+    nc_wr32(g_regs + NV_PRAMDAC_VPLL_COEFF, 0x0003C20Du);
     char v[PROP_VALUE_MAX] = "";
     hle_prop_get("debug.hakux.nvcensus", v);
     const char *e = getenv("NC_NV2A_CENSUS");

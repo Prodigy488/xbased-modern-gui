@@ -98,8 +98,96 @@ static void test_takes(void)
     }
 }
 
+#define WC(lo, hi) ((uint32_t)(hi) << 16 | (lo))
+
+/* The window clip: an inclusive set draws inside any of its rectangles. */
+static void test_window_clip(void)
+{
+    int32_t r[4] = { -1, -1, -1, -1 };
+    uint32_t hr[8] = { 0 }, vr[8] = { 0 };
+    HT_CHECK(!hle_kv_window_clip(hr, vr, false, 640, 480, r));     /* none in use */
+    hr[0] = WC(0, 639);
+    vr[0] = WC(0, 479);
+    HT_CHECK(!hle_kv_window_clip(hr, vr, false, 640, 480, r));     /* D3D's "no clip" */
+    /* a portrait's frame */
+    hr[0] = WC(100, 199);
+    vr[0] = WC(50, 149);
+    HT_CHECK(hle_kv_window_clip(hr, vr, false, 640, 480, r));
+    HT_EQ_INT(r[0], 100);
+    HT_EQ_INT(r[1], 50);
+    HT_EQ_INT(r[2], 200);
+    HT_EQ_INT(r[3], 150);
+    /* two apart: their box */
+    hr[3] = WC(300, 319);
+    vr[3] = WC(10, 19);
+    HT_CHECK(hle_kv_window_clip(hr, vr, false, 640, 480, r));
+    HT_EQ_INT(r[0], 100);
+    HT_EQ_INT(r[1], 10);
+    HT_EQ_INT(r[2], 320);
+    HT_EQ_INT(r[3], 150);
+    /* the first set back over the whole surface, another left in its slot
+     * (nxdk_pgraph_tests' window clip suite ends so): nothing is clipped.
+     * It clipped to the one left, and every draw of the suites after it
+     * outside that rectangle was gone. */
+    hr[0] = WC(0, 640);
+    vr[0] = WC(0, 480);
+    r[0] = -7;
+    HT_CHECK(!hle_kv_window_clip(hr, vr, false, 640, 480, r));
+    HT_EQ_INT(r[0], -7);
+    /* ... wherever in the eight the whole-surface one is */
+    hr[0] = WC(100, 199);
+    vr[0] = WC(50, 149);
+    hr[7] = WC(0, 639);
+    vr[7] = WC(0, 479);
+    HT_CHECK(!hle_kv_window_clip(hr, vr, false, 640, 480, r));
+    /* over a smaller surface the same rectangle is the whole of it */
+    hr[7] = vr[7] = 0;
+    hr[3] = vr[3] = 0;
+    hr[0] = WC(0, 255);
+    vr[0] = WC(0, 255);
+    HT_CHECK(hle_kv_window_clip(hr, vr, false, 640, 480, r));
+    HT_CHECK(!hle_kv_window_clip(hr, vr, false, 256, 256, r));
+    /* an exclusive set: not a box */
+    hr[0] = WC(100, 199);
+    vr[0] = WC(50, 149);
+    HT_CHECK(!hle_kv_window_clip(hr, vr, true, 640, 480, r));
+}
+
+/* A rectangle's word is its slot's and every later slot's. */
+static void test_window_clip_spread(void)
+{
+    uint32_t first = 0;
+    HT_EQ_U32(hle_kv_window_clip_spread(0x02C0, &first), 8);       /* horizontal, slot 0: all eight */
+    HT_EQ_U32(first, 0x02C0);
+    HT_EQ_U32(hle_kv_window_clip_spread(0x02C4, &first), 7);
+    HT_EQ_U32(first, 0x02C4);
+    HT_EQ_U32(hle_kv_window_clip_spread(0x02DC, &first), 1);       /* slot 7: itself */
+    HT_EQ_U32(hle_kv_window_clip_spread(0x02E0, &first), 8);       /* vertical, slot 0 */
+    HT_EQ_U32(first, 0x02E0);
+    HT_EQ_U32(hle_kv_window_clip_spread(0x02F4, &first), 3);
+    HT_EQ_U32(first, 0x02F4);
+    HT_EQ_U32(hle_kv_window_clip_spread(0x02BC, &first), 0);       /* the type, the method after: not one */
+    HT_EQ_U32(hle_kv_window_clip_spread(0x0300, &first), 0);
+    /* the console's two cases: slot 1 then slot 0 leaves slot 0's everywhere; slot 0 then slot 1,
+     * slot 0's in the first and slot 1's in the rest, and the box is both */
+    uint32_t hr[8] = { 0 }, vr[8] = { 0 };
+    int32_t r[4];
+    const uint32_t r0h = WC(60, 123), r0v = WC(60, 123), r1h = WC(0, 63), r1v = WC(0, 63);
+    for (unsigned i = 1; i < 8; i++) { hr[i] = r1h; vr[i] = r1v; }
+    for (unsigned i = 0; i < 8; i++) { hr[i] = r0h; vr[i] = r0v; }
+    HT_CHECK(hle_kv_window_clip(hr, vr, false, 640, 480, r));
+    HT_EQ_INT(r[0], 60);
+    HT_EQ_INT(r[2], 124);
+    for (unsigned i = 1; i < 8; i++) { hr[i] = r1h; vr[i] = r1v; }
+    HT_CHECK(hle_kv_window_clip(hr, vr, false, 640, 480, r));
+    HT_EQ_INT(r[0], 0);
+    HT_EQ_INT(r[2], 124);
+}
+
 int main(void)
 {
+    HT_RUN(test_window_clip_spread);
+    HT_RUN(test_window_clip);
     HT_RUN(test_clear_color);
     HT_RUN(test_takes);
     HT_DONE();

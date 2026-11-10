@@ -357,11 +357,19 @@ static void tail(Buf *bp, const HleVshKey *k, bool fogw)
     put(&b, /* screen space -> clip space (the NV2A rasterizer's subpixel
              * placement, ff.h) */
             "  float w = oPos.w;\n"
-            "  if (w == 0.0) w = 1.0;\n"
-            /* the NV2A keeps w finite (magnitude at most 2^64): D3D's XYZRHW
-             * pass-through takes RCP of rhw, and rhw 0 (Otogi's title art)
-             * would make w +inf and drop the primitive */
-            "  if (isinf(w)) w = w > 0.0 ? uintBitsToFloat(0x5F800000u) : uintBitsToFloat(0xDF800000u);\n"
+            /* the NV2A keeps w's magnitude within 2^-64 .. 2^64, its sign
+             * kept (+0 is positive, -0 negative): D3D's XYZRHW pass-through
+             * takes RCP of rhw, and rhw 0 (Otogi's title art) would make w
+             * +inf and drop the primitive; a w of 0 is 2^-64, the vertex far
+             * off the screen along its own direction, not the vertex as it
+             * stands (it was taken as 1: nxdk_pgraph_tests' W param suite, a
+             * quad with w 0 drawn small in a corner where the console fills
+             * half the screen with it) */
+            "  if (!isnan(w)) {\n"
+            "    w = w > 0.0 || floatBitsToUint(w) == 0u ?\n"
+            "        clamp(w, uintBitsToFloat(0x1F800000u), uintBitsToFloat(0x5F800000u)) :\n"
+            "        clamp(w, uintBitsToFloat(0xDF800000u), uintBitsToFloat(0x9F800000u));\n"
+            "  }\n"
             "  vec2 scr = oPos.xy;\n"
             HLE_SUBPIXEL_GLSL("scr")
             HLE_TEXEL_EDGE_GLSL("scr")

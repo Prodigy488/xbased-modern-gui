@@ -167,6 +167,7 @@ typedef struct PbTex {
 
 static struct {
     bool on, device;
+    bool bare;                          /* the title has no D3D: it drives the chip itself */
     uint32_t disp_w, disp_h;            /* the device's display (guest pixels) */
     uint32_t r[0x2000 / 4];             /* the methods read here, as last written */
     bool rt_dirty;
@@ -292,6 +293,7 @@ static void coh_wait(uint64_t v);
 static uint64_t coh_land(PbObj *o);
 static void obj_owns(PbObj *o);
 static void coh_serve(void);
+static uint64_t zcoh_serve(uint32_t pa, uint32_t end);
 static void coh_shown(PbObj *o);
 static bool coh_display_over(uint32_t pa, uint32_t len);
 static bool coh_len(const PbObj *o, uint32_t *len);
@@ -395,6 +397,15 @@ bool hle_pbd_start(void)
     hle_disp_present_late(true);
     coh_reset();
     hle_barrier_set_guard_fill(coh_fill);
+    g_pd.bare = !hle_xbe_d3d_lib(&g_hle.title.xbe);
+    {   /* debug: HAKUX_HLE_PB_DRAWS=<n>, the first n draws logged (as debug.hakux.pbdraws) */
+        const char *e = getenv("HAKUX_HLE_PB_DRAWS");
+        g_dlog_left = e ? atoi(e) : 0;
+    }
+    if (g_pd.bare) {
+        hle_log("hakuX-hle-pb", "no D3D in the title: it drives the chip itself (every colour target's "
+                "memory is kept for it to read)");
+    }
     g_pd.on = true;
     return true;
 }
@@ -804,6 +815,8 @@ static uint64_t span_hash(uint32_t pa, uint32_t len);
 
 /* The bound depth target was (or may have been) written: its written, as a
  * colour target's at its draws (zread: the memory's last writer). */
+static void zcoh_drawn(PbObj *o);
+
 static void ds_written(void)
 {
     if (!g_pd.ds) {
@@ -814,6 +827,7 @@ static void ds_written(void)
     }
     if (g_pd.ds_obj) {
         g_pd.ds_obj->written = ++g_pd.wseq;
+        zcoh_drawn(g_pd.ds_obj);
     }
 }
 static bool edge_dirty(uint32_t page);
@@ -1049,6 +1063,9 @@ static void writeback(uint32_t id)
         ((uint64_t)d->pitch * d->h > WRITEBACK_MAX && !(cpu_wb && o && o->cpu_used))) {
         return;
     }
+    if (g_pd.bare) {
+        return;                             /* the coherence keeps it (coh_managed) */
+    }
     if (o && obj_freed(o)) {
         return;
     }
@@ -1119,23 +1136,8 @@ static void zwrite_from_colour(uint32_t ds)
  * scissor can't). False: no clip. */
 static bool window_clip(uint32_t w, uint32_t h, int32_t r[4])
 {
-    int32_t b[4] = { INT32_MAX, INT32_MAX, INT32_MIN, INT32_MIN };
-    for (unsigned i = 0; i < 8; i++) {
-        const uint32_t x = R(NV097_SET_WINDOW_CLIP_HORIZONTAL + 4 * i), y = R(NV097_SET_WINDOW_CLIP_VERTICAL + 4 * i);
-        const int32_t x1 = x & 0xFFF, x2 = ((x >> 16) & 0xFFF) + 1, y1 = y & 0xFFF, y2 = ((y >> 16) & 0xFFF) + 1;
-        if ((!x && !y) || (x1 == 0 && y1 == 0 && x2 >= (int32_t)w && y2 >= (int32_t)h)) {
-            continue;
-        }
-        b[0] = MIN(b[0], x1);
-        b[1] = MIN(b[1], y1);
-        b[2] = MAX(b[2], x2);
-        b[3] = MAX(b[3], y2);
-    }
-    if (b[0] == INT32_MAX || (R(NV097_SET_WINDOW_CLIP_TYPE) & 1)) {
-        return false;
-    }
-    memcpy(r, b, sizeof(b));
-    return true;
+    return hle_kv_window_clip(&R(NV097_SET_WINDOW_CLIP_HORIZONTAL), &R(NV097_SET_WINDOW_CLIP_VERTICAL),
+                              R(NV097_SET_WINDOW_CLIP_TYPE) & 1, w, h, r);
 }
 
 /* A video mode set since the display last followed one: the display is its
@@ -4362,14 +4364,22 @@ static bool coh_len(const PbObj *o, uint32_t *len)
  * linear one but a frame buffer (the front buffer's path), a small one or
  * one the CPU used before it was kept (written back at each unbind, the CPU's
  * writes uploaded by rt_cpu_sync) */
+/* (a title without D3D, g_pd.bare: none is the front buffer's path's alone.
+ * With D3D between the title and the chip, a frame buffer's memory is
+ * reached through a lock of the frame on screen, a small target's after a
+ * fence; a program that drives the chip itself reads any target's memory once
+ * the chip is idle, the back buffer it has yet to show among them: pbkit's
+ * test programs save each frame from there before they flip. Every colour
+ * target is kept then, whatever its size or use.) */
 static bool coh_display(const PbObj *o)
 {
-    return o->display && g_coh_shows - o->shown_seq <= COH_SHOWN_RECENT;
+    return !g_pd.bare && o->display && g_coh_shows - o->shown_seq <= COH_SHOWN_RECENT;
 }
 
 static bool coh_managed(const PbObj *o, uint32_t *len)
 {
-    return coh_len(o, len) && !coh_display(o) && (!o->d.pitch || (*len > WRITEBACK_MAX && !o->cpu_used));
+    return coh_len(o, len) &&
+           (g_pd.bare || (!coh_display(o) && (!o->d.pitch || (*len > WRITEBACK_MAX && !o->cpu_used))));
 }
 
 /* Any thread: [pa, pa + len) as it is now (CohSnap) */
@@ -4893,8 +4903,131 @@ static void coh_serve(void)
         }
         v = coh_land(best);
     }
-    g_fill.v = v;
+    const uint64_t zv = zcoh_serve(pa, end);
+    g_fill.v = MAX(v, zv);
     __atomic_store_n(&g_fill.state, FILL_DONE, __ATOMIC_RELEASE);
+}
+
+/* ---- a depth target's memory, for a title without D3D ----
+ * The NV2A's depth buffer is memory too, and a program that drives the chip
+ * itself reads it: nxdk_pgraph_tests' depth suites print the words they
+ * find there. Kept one way only, the image into memory: guarded once the
+ * GPU wrote its image (ds_written), and at the guest's first access its
+ * depth and stencil are copied out an aspect at a time (HLE_RB_DEPTH) and
+ * put there as the chip's words (hle_tl_land_depth; a swizzled target's
+ * swizzled). The fixed-point formats (a float one's words, F16 and F24S8,
+ * are not made: its memory stays as it was), an image at the guest's size;
+ * what the CPU writes there doesn't reach the image. Its coherence fields
+ * are these alone: synced, land_v / land_w, armed_drops. */
+static bool zcoh_len(const PbObj *o, uint32_t *guard, uint32_t *gbpp)
+{
+    if (!g_pd.bare || !o->id || o->cube || o->d.parent) {
+        return false;
+    }
+    switch (o->d.xfmt) {
+    case HLE_XFMT_D16: case HLE_XFMT_LIN_D16:
+        *gbpp = 2;
+        break;
+    case HLE_XFMT_D24S8: case HLE_XFMT_LIN_D24S8:
+        *gbpp = 4;
+        break;
+    default:
+        return false;
+    }
+    *guard = o->d.pitch ? o->d.pitch * o->d.h : o->d.w * o->d.h * *gbpp;
+    return *guard != 0;
+}
+
+static void zcoh_drawn(PbObj *o)
+{
+    uint32_t len, gbpp;
+    if (!zcoh_len(o, &len, &gbpp)) {
+        return;
+    }
+    if (o->land_v) {
+        o->land_v = 0;
+        o->armed_drops = 0;                 /* armed again: its guard held the landing */
+    }
+    const uint32_t drops = hle_barrier_guard_drops();
+    if (o->armed_drops != drops) {
+        hle_barrier_guard(o->d.pa, len);
+        o->armed_drops = drops;
+    }
+}
+
+static uint64_t zcoh_land(PbObj *o)
+{
+    uint32_t len, gbpp;
+    if (!g_pd.device || !zcoh_len(o, &len, &gbpp) || o->written <= o->synced) {
+        return 0;
+    }
+    if (o->land_v && o->land_w == o->written) {
+        return o->land_v;                   /* asked for already */
+    }
+    if (obj_freed(o)) {
+        return 0;                           /* its memory is the title's no longer */
+    }
+    for (int tries = 0; !hle_tl_land_room(2) && tries < 4; tries++) {
+        const uint64_t ov = tries < 3 ? hle_tl_land_oldest() : 0;
+        coh_wait(ov ? ov : hle_fe_last_value() + 1);
+    }
+    /* its depth as words (four bytes a texel at most), then its stencil */
+    const uint32_t n = o->d.w * o->d.h, room = 4 * n + n;
+    uint32_t fb = hle_res_land_alloc(room);
+    for (int tries = 0; !fb && tries < 2; tries++) {
+        const uint64_t ov = tries ? 0 : hle_tl_land_oldest();
+        coh_wait(ov ? ov : hle_fe_last_value() + 1);
+        fb = hle_res_land_alloc(room);
+    }
+    if (!fb) {
+        static unsigned s_logged;
+        if (s_logged++ < 8) {
+            hle_log("hakuX-hle-pb", "depth target %u (%08x): no room to land its image", o->id, o->d.pa);
+        }
+        return 0;
+    }
+    HleCmdReadback *rb = begin(HLE_OP_READBACK, sizeof(*rb));
+    memset(rb, 0, sizeof(*rb));
+    const uint64_t v = rb->value = hle_fe_next_value();     /* a submission of its own */
+    rb->surf = o->id;
+    rb->arena_off = HLE_RB_DEPTH;
+    rb->fb = fb;
+    rb->fb_len = room;
+    rb->w = o->d.w;
+    rb->h = o->d.h;
+    /* (queued before the back end can record its copy) */
+    const bool queued = hle_tl_land_depth(v, fb - 1, o->d.pa, o->d.w, o->d.h, o->d.pitch, gbpp);
+    hle_barrier_arm_keep(o->d.pa, len, v, false);
+    hle_fe_commit();
+    if (!queued) {
+        return 0;
+    }
+    o->land_v = v;
+    o->land_w = o->written;
+    o->synced = o->written;
+    hle_barrier_guard_landing(o->d.pa, len, v);
+    obj_landing_queued(o);
+    g_coh.lands++;
+    return v;
+}
+
+/* The guest reached [pa, end): the depth target over it written last lands
+ * (0: none has anything newer) */
+static uint64_t zcoh_serve(uint32_t pa, uint32_t end)
+{
+    PbObj *best = NULL;
+    if (!g_pd.bare) {
+        return 0;
+    }
+    for (unsigned i = 0; i < g_pd.nobjs; i++) {
+        PbObj *o = &g_pd.objs[i];
+        uint32_t len, gbpp;
+        if (zcoh_len(o, &len, &gbpp) && o->d.pa < end && o->d.pa + len > pa && o->written > o->synced &&
+            (!best || o->written > best->written)) {
+            best = o;
+        }
+    }
+    return best ? zcoh_land(best) : 0;
 }
 
 static void coh_drawn(PbObj *o)

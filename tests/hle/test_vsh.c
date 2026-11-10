@@ -49,6 +49,10 @@ static void test_program(void)
     HT_CHECK(strstr(buf, "vec4 m = v3.xyzw;\n    vec4 i = rcp4((R1.wwww).x);\n"
                          "    oD0.xyzw = m.xyzw;\n    R1.w = i.w;") != NULL);
     HT_CHECK(strstr(buf, "oPos.z = m.z;") != NULL);
+    /* w kept within 2^-64 .. 2^64 either side of zero; a w of 0 is not 1 */
+    HT_CHECK(strstr(buf, "clamp(w, uintBitsToFloat(0x1F800000u), uintBitsToFloat(0x5F800000u))") != NULL);
+    HT_CHECK(strstr(buf, "clamp(w, uintBitsToFloat(0xDF800000u), uintBitsToFloat(0x9F800000u))") != NULL);
+    HT_CHECK(strstr(buf, "w == 0.0") == NULL);
     HT_CHECK(strstr(buf, "mulz(oPos.xyzz, c[58].xyzz)") != NULL);   /* R12 reads oPos */
     HT_CHECK(strstr(buf, "oFog.x = i.x;") != NULL);     /* the result's first component */
     HT_CHECK(strstr(buf, "vFog = oFog.x;") != NULL);
