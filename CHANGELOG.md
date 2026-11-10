@@ -1,5 +1,13 @@
 # xbased changelog
 
+## 1.0.76.9 (Modern GUI fork)
+
+- The log now has an "audio:" line every 3 seconds while a game's sound is active: how many voices the
+  game started and stopped, how many notifications and interrupts the audio chip raised, the registers
+  that decide the interrupt, and the voices playing (format, position, start). For Marvel vs. Capcom 2,
+  whose title music keeps playing in a fight while the fight sounds never start, it shows whether the
+  game starts the voices and whether they end. No fix for that yet: this is the evidence.
+
 ## 1.0.76.8 (Modern GUI fork)
 
 - Marvel vs. Capcom 2: its main thread waited for ever in its heap lock, a critical section in the

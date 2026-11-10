@@ -30,6 +30,8 @@
 static bool g_apu_stats;
 static int g_apu_fifo_min = INT_MAX, g_apu_fifo_max;
 extern uint32_t g_vp_oob_clamps;
+extern uint32_t g_vp_dbg_on, g_vp_dbg_off, g_vp_dbg_notify;
+static uint32_t g_dbg_irq_raised;
 extern uint32_t g_vp_held_skips, g_vp_held_waits, g_vp_held_wait_max_us, g_vp_held_run_max; /* vp.c voice_take */
 /* NC_APU_TRAP_PARK=1: the frames stop while the FE is trapped (frames_stopped) */
 static bool g_trap_park;
@@ -102,6 +104,7 @@ static void update_irq(MCPXAPUState *d)
         ((d->regs[NV_PAPU_ISTS] & ~NV_PAPU_ISTS_GINTSTS) &
          d->regs[NV_PAPU_IEN])) {
         apu_or(&d->regs[NV_PAPU_ISTS], NV_PAPU_ISTS_GINTSTS);
+        apu_inc(&g_dbg_irq_raised);
         nc_irq_set(MCPX_APU_IRQ, true);
     } else {
         apu_and(&d->regs[NV_PAPU_ISTS], ~NV_PAPU_ISTS_GINTSTS);
@@ -771,6 +774,67 @@ static void *apu_trace_thread(void *arg)
     return NULL;
 }
 
+
+/* The audio line: every 3 s, while the voices or the guest's traffic change
+ * (and at most 120 lines): what the guest has asked of the APU since the
+ * last one (VOICE_ONs, VOICE_OFFs, notifications, interrupts raised), the
+ * registers that decide the interrupt, the voices on each list and up to 8
+ * active ones (format, offset, start, next). A game whose sounds don't play
+ * shows here whether it starts voices at all, and whether they end. */
+static void *apu_diag_thread(void *arg)
+{
+    MCPXAPUState *d = arg;
+    uint32_t last[4] = { 0 };
+    unsigned lines = 0;
+    for (;;) {
+        sleep(3);
+        if (lines >= 120) {
+            continue;
+        }
+        const uint32_t cur[4] = { apu_ld(&g_vp_dbg_on), apu_ld(&g_vp_dbg_off), apu_ld(&g_vp_dbg_notify),
+                                  apu_ld(&g_dbg_irq_raised) };
+        static const uint32_t k_top[3] = { NV_PAPU_TVL2D, NV_PAPU_TVL3D, NV_PAPU_TVLMP };
+        unsigned n[3] = { 0 }, act[3] = { 0 };
+        char vs[600];
+        int vn = 0;
+        unsigned shown = 0;
+        vs[0] = 0;
+        for (unsigned l = 0; l < 3; l++) {
+            uint32_t h = apu_ld(&d->regs[k_top[l]]) & 0xFFFF;
+            while (h != 0xFFFF && n[l] < MCPX_HW_MAX_VOICES) {
+                const uint8_t *vp = apu_ram_ptr(apu_ld(&d->regs[NV_PAPU_VPVADDR]) + h * NV_PAVS_SIZE, NV_PAVS_SIZE);
+                if (!vp) {
+                    break;
+                }
+                n[l]++;
+                if (apu_rd32(vp + NV_PAVS_VOICE_PAR_STATE) & NV_PAVS_VOICE_PAR_STATE_ACTIVE_VOICE) {
+                    act[l]++;
+                    if (shown < 8 && vn < (int)sizeof(vs) - 80) {
+                        vn += snprintf(vs + vn, sizeof(vs) - (size_t)vn, " [%c%02x fmt %08x off %08x st %08x nx %08x]",
+                                       "23m"[l], h, apu_rd32(vp + NV_PAVS_VOICE_CFG_FMT),
+                                       apu_rd32(vp + NV_PAVS_VOICE_PAR_OFFSET),
+                                       apu_rd32(vp + NV_PAVS_VOICE_CUR_PSL_START),
+                                       apu_rd32(vp + NV_PAVS_VOICE_PAR_NEXT));
+                        shown++;
+                    }
+                }
+                h = apu_rd32(vp + NV_PAVS_VOICE_TAR_PITCH_LINK) & NV_PAVS_VOICE_TAR_PITCH_LINK_NEXT_VOICE_HANDLE;
+            }
+        }
+        if (lines >= 6 && !memcmp(cur, last, sizeof(cur)) && !(act[0] + act[1] + act[2])) {
+            continue;
+        }
+        nc_log("hakuX-apu", "audio: +%u on +%u off +%u notify +%u irq | ien %08x ists %08x fectl %08x | "
+               "voices 2d %u/%u 3d %u/%u mp %u/%u active%s",
+               cur[0] - last[0], cur[1] - last[1], cur[2] - last[2], cur[3] - last[3],
+               apu_ld(&d->regs[NV_PAPU_IEN]), apu_ld(&d->regs[NV_PAPU_ISTS]), apu_ld(&d->regs[NV_PAPU_FECTL]),
+               act[0], n[0], act[1], n[1], act[2], n[2], vs);
+        memcpy(last, cur, sizeof(last));
+        lines++;
+    }
+    return NULL;
+}
+
 void nc_dev_apu_init(NcVm *vm)
 {
     MCPXAPUState *d = calloc(1, sizeof(*d));
@@ -798,6 +862,10 @@ void nc_dev_apu_init(NcVm *vm)
     mcpx_apu_reset(d);
 
     apu_thread_start(&d->apu_thread, "apu.frame", mcpx_apu_frame_thread, d, true);
+    {
+        pthread_t t;
+        apu_thread_start(&t, "apu.diag", apu_diag_thread, d, false);
+    }
     if (getenv("NC_TRACE_APU")) {
         pthread_t t;
         apu_thread_start(&t, "apu.trace", apu_trace_thread, d, false);

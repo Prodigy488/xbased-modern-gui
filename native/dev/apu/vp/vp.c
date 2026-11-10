@@ -124,9 +124,13 @@ static const struct {
     { NV_PAPU_TVLMP, NV_PAPU_CVLMP, NV_PAPU_NVLMP }, // MP
 };
 
+/* the guest's voice traffic, for the audio line (apu.c) */
+uint32_t g_vp_dbg_on, g_vp_dbg_off, g_vp_dbg_notify;
+
 static void set_notify_status(MCPXAPUState *d, uint32_t v, int notifier,
                               int status)
 {
+    apu_inc(&g_vp_dbg_notify);
     uint64_t notify_offset = d->regs[NV_PAPU_FENADDR];
     notify_offset += 16 * (MCPX_HW_NOTIFIER_BASE_OFFSET +
                            v * MCPX_HW_NOTIFIER_COUNT + notifier);
@@ -481,6 +485,7 @@ bool mcpx_apu_vp_off_pending(void)
  * that would have counted the 64. */
 static void voice_off(MCPXAPUState *d, uint16_t v)
 {
+    apu_inc(&g_vp_dbg_off);
     voice_set_mask(d, v, NV_PAVS_VOICE_PAR_STATE,
                    NV_PAVS_VOICE_PAR_STATE_ACTIVE_VOICE, 0);
 
@@ -641,6 +646,7 @@ static void fe_method(MCPXAPUState *d, uint32_t method, uint32_t argument)
     case NV1BA0_PIO_VOICE_ON: {
         selected_handle = argument & NV1BA0_PIO_VOICE_ON_HANDLE;
         DPRINTF("VOICE %d ON\n", selected_handle);
+        apu_inc(&g_vp_dbg_on);
         if (!APU_CHECK(selected_handle < MCPX_HW_MAX_VOICES)) {
             break;
         }
