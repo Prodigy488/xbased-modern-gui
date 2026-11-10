@@ -174,8 +174,6 @@ typedef struct NcThread {
     uint64_t ready_seq, run_seq;
     uint64_t slice_used_ns, slice_start_ns;
     bool slice_expired;
-    /* the stats line's: times switched in, and the host time it ran, since the last line */
-    uint64_t dbg_runs, dbg_run_ns, dbg_in_ns;
     /* NT's wait boost (KiUnwaitThread): a thread a signal woke runs at
      * priority + the signal's increment (up to 15) until a quantum of its
      * ends, a step a quantum. no_boost: KeSetDisableBoostThread's. */
@@ -751,6 +749,9 @@ typedef struct NcSchedStats {
     uint32_t isr[16]; /* ISRs delivered per bus level */
 } NcSchedStats;
 extern NcSchedStats g_nc_sched;
+/* each thread slot's turns, CPU time and switch-in time for the stats line: kept outside NcThread,
+ * which is part of the savestate's layout */
+extern uint64_t g_nc_thread_runs[NC_MAX_THREADS], g_nc_thread_run_ns[NC_MAX_THREADS], g_nc_thread_in_ns[NC_MAX_THREADS];
 
 /* An event (an opened path, ...): if it contains NC_TRACE_KCALL_AT, the next
  * NC_TRACE_KCALL (default 2000) kernel calls are traced. */

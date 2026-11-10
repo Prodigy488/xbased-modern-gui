@@ -848,18 +848,18 @@ static void stats_tick(NcKernel *k)
         rs[0] = 0;
         for (unsigned i = 0; i < k->threads_hi && o < (int)sizeof(rs) - 48; i++) {
             NcThread *t = &k->threads[i];
-            if (t->state == NC_T_FREE || (!t->dbg_runs && !t->dbg_run_ns)) {
+            if (t->state == NC_T_FREE || (!g_nc_thread_runs[i] && !g_nc_thread_run_ns[i])) {
                 continue;
             }
-            uint64_t ran = t->dbg_run_ns;
-            if (t->state == NC_T_RUNNING && t->dbg_in_ns) {
-                ran += nc_ke_now_ns() - t->dbg_in_ns;
+            uint64_t ran = g_nc_thread_run_ns[i];
+            if (t->state == NC_T_RUNNING && g_nc_thread_in_ns[i]) {
+                ran += nc_ke_now_ns() - g_nc_thread_in_ns[i];
             }
-            o += snprintf(rs + o, sizeof(rs) - (size_t)o, " t%u:%.0f/s %.0f ms", t->id, t->dbg_runs / s, ran / 1e6);
-            t->dbg_runs = 0;
-            t->dbg_run_ns = 0;
+            o += snprintf(rs + o, sizeof(rs) - (size_t)o, " t%u:%.0f/s %.0f ms", t->id, g_nc_thread_runs[i] / s, ran / 1e6);
+            g_nc_thread_runs[i] = 0;
+            g_nc_thread_run_ns[i] = 0;
             if (t->state == NC_T_RUNNING) {
-                t->dbg_in_ns = nc_ke_now_ns();
+                g_nc_thread_in_ns[i] = nc_ke_now_ns();
             }
         }
         nc_log("hakuX-native-stats", "thread turns per s and CPU ms in the window:%s", rs);

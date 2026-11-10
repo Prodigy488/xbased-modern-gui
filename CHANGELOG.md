@@ -8,6 +8,7 @@
   thread's turns per second and CPU time (to see whether one of the game's helper threads never gets to
   run), and the audio line counts the methods the game writes to the APU, with the buffer changes among
   them, and names its columns (cbo, start, end, state).
+- First release since 1.0.76.2 (the notes of 1.0.76.3 to here are in RELEASE_NOTES.md), with a Linux AppImage.
 
 ## 1.0.76.9 (Modern GUI fork)
 
