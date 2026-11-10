@@ -431,6 +431,10 @@ void nc_ps_schedule(NcKernel *k, NcFrame *f)
      * and its place when it is ready again. */
     const uint64_t now = nc_ke_now_ns();
     if (cur && cur->state == NC_T_RUNNING) {
+        if (cur->dbg_in_ns) {
+            cur->dbg_run_ns += now - cur->dbg_in_ns;
+            cur->dbg_in_ns = 0;
+        }
         if (cur->slice_expired) {
             cur->ready_seq = ++k->ready_clock;
             cur->slice_used_ns = 0;
@@ -545,6 +549,8 @@ void nc_ps_schedule(NcKernel *k, NcFrame *f)
     pcr_enter(k, next);
     k->current = next;
     next->state = NC_T_RUNNING;
+    next->dbg_runs++;
+    next->dbg_in_ns = nc_ke_now_ns();
     next->run_seq = next->ready_seq;    /* its place, kept if it is switched out */
     next->ready_seq = 0;
     if (next != k->isr_thread && next != k->dpc_thread) {

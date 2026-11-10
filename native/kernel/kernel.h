@@ -174,6 +174,8 @@ typedef struct NcThread {
     uint64_t ready_seq, run_seq;
     uint64_t slice_used_ns, slice_start_ns;
     bool slice_expired;
+    /* the stats line's: times switched in, and the host time it ran, since the last line */
+    uint64_t dbg_runs, dbg_run_ns, dbg_in_ns;
     /* NT's wait boost (KiUnwaitThread): a thread a signal woke runs at
      * priority + the signal's increment (up to 15) until a quantum of its
      * ends, a step a quantum. no_boost: KeSetDisableBoostThread's. */

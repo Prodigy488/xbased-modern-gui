@@ -125,7 +125,7 @@ static const struct {
 };
 
 /* the guest's voice traffic, for the audio line (apu.c) */
-uint32_t g_vp_dbg_on, g_vp_dbg_off, g_vp_dbg_notify;
+uint32_t g_vp_dbg_on, g_vp_dbg_off, g_vp_dbg_notify, g_vp_dbg_methods, g_vp_dbg_buf;
 
 static void set_notify_status(MCPXAPUState *d, uint32_t v, int notifier,
                               int status)
@@ -1139,6 +1139,11 @@ void mcpx_apu_vp_write(void *opaque, uint32_t addr, uint64_t val, unsigned int s
     case NV1BA0_PIO_SET_SUBMIX_HEADROOM ...
          NV1BA0_PIO_SET_SUBMIX_HEADROOM+4*(NUM_MIXBINS-1):
         /* TODO: these should instead be queueing up fe commands */
+        apu_inc(&g_vp_dbg_methods);
+        if (addr == NV1BA0_PIO_SET_VOICE_CFG_BUF_BASE || addr == NV1BA0_PIO_SET_VOICE_CFG_BUF_LBO ||
+            addr == NV1BA0_PIO_SET_VOICE_CFG_BUF_EBO || addr == NV1BA0_PIO_SET_VOICE_BUF_CBO) {
+            apu_inc(&g_vp_dbg_buf);
+        }
         apu_spin_lock(&d->vp.fe_spin);     /* against the VP's traps */
         if ((d->regs[NV_PAPU_FECTL] & NV_PAPU_FECTL_FEMETHMODE) ==
             NV_PAPU_FECTL_FEMETHMODE_TRAPPED) {

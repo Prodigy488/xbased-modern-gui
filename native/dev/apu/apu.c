@@ -30,7 +30,7 @@
 static bool g_apu_stats;
 static int g_apu_fifo_min = INT_MAX, g_apu_fifo_max;
 extern uint32_t g_vp_oob_clamps;
-extern uint32_t g_vp_dbg_on, g_vp_dbg_off, g_vp_dbg_notify;
+extern uint32_t g_vp_dbg_on, g_vp_dbg_off, g_vp_dbg_notify, g_vp_dbg_methods, g_vp_dbg_buf;
 static uint32_t g_dbg_irq_raised;
 extern uint32_t g_vp_held_skips, g_vp_held_waits, g_vp_held_wait_max_us, g_vp_held_run_max; /* vp.c voice_take */
 /* NC_APU_TRAP_PARK=1: the frames stop while the FE is trapped (frames_stopped) */
@@ -784,15 +784,15 @@ static void *apu_trace_thread(void *arg)
 static void *apu_diag_thread(void *arg)
 {
     MCPXAPUState *d = arg;
-    uint32_t last[4] = { 0 };
+    uint32_t last[6] = { 0 };
     unsigned lines = 0;
     for (;;) {
         sleep(3);
         if (lines >= 120) {
             continue;
         }
-        const uint32_t cur[4] = { apu_ld(&g_vp_dbg_on), apu_ld(&g_vp_dbg_off), apu_ld(&g_vp_dbg_notify),
-                                  apu_ld(&g_dbg_irq_raised) };
+        const uint32_t cur[6] = { apu_ld(&g_vp_dbg_on), apu_ld(&g_vp_dbg_off), apu_ld(&g_vp_dbg_notify),
+                                  apu_ld(&g_dbg_irq_raised), apu_ld(&g_vp_dbg_methods), apu_ld(&g_vp_dbg_buf) };
         static const uint32_t k_top[3] = { NV_PAPU_TVL2D, NV_PAPU_TVL3D, NV_PAPU_TVLMP };
         unsigned n[3] = { 0 }, act[3] = { 0 };
         char vs[600];
@@ -810,11 +810,11 @@ static void *apu_diag_thread(void *arg)
                 if (apu_rd32(vp + NV_PAVS_VOICE_PAR_STATE) & NV_PAVS_VOICE_PAR_STATE_ACTIVE_VOICE) {
                     act[l]++;
                     if (shown < 8 && vn < (int)sizeof(vs) - 80) {
-                        vn += snprintf(vs + vn, sizeof(vs) - (size_t)vn, " [%c%02x fmt %08x off %08x st %08x nx %08x]",
+                        vn += snprintf(vs + vn, sizeof(vs) - (size_t)vn, " [%c%02x fmt %08x cbo %08x start %08x end %08x state %08x]",
                                        "23m"[l], h, apu_rd32(vp + NV_PAVS_VOICE_CFG_FMT),
                                        apu_rd32(vp + NV_PAVS_VOICE_PAR_OFFSET),
                                        apu_rd32(vp + NV_PAVS_VOICE_CUR_PSL_START),
-                                       apu_rd32(vp + NV_PAVS_VOICE_PAR_NEXT));
+                                       apu_rd32(vp + NV_PAVS_VOICE_PAR_NEXT), apu_rd32(vp + NV_PAVS_VOICE_PAR_STATE));
                         shown++;
                     }
                 }
@@ -824,9 +824,9 @@ static void *apu_diag_thread(void *arg)
         if (lines >= 6 && !memcmp(cur, last, sizeof(cur)) && !(act[0] + act[1] + act[2])) {
             continue;
         }
-        nc_log("hakuX-apu", "audio: +%u on +%u off +%u notify +%u irq | ien %08x ists %08x fectl %08x | "
+        nc_log("hakuX-apu", "audio: +%u on +%u off +%u notify +%u irq +%u methods (%u of them buffer changes) | ien %08x ists %08x fectl %08x | "
                "voices 2d %u/%u 3d %u/%u mp %u/%u active%s",
-               cur[0] - last[0], cur[1] - last[1], cur[2] - last[2], cur[3] - last[3],
+               cur[0] - last[0], cur[1] - last[1], cur[2] - last[2], cur[3] - last[3], cur[4] - last[4], cur[5] - last[5],
                apu_ld(&d->regs[NV_PAPU_IEN]), apu_ld(&d->regs[NV_PAPU_ISTS]), apu_ld(&d->regs[NV_PAPU_FECTL]),
                act[0], n[0], act[1], n[1], act[2], n[2], vs);
         memcpy(last, cur, sizeof(last));

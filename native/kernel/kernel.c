@@ -842,6 +842,29 @@ static void stats_tick(NcKernel *k)
            g_nc_sched.dpc_wait_max_ns / 1e6, g_nc_sched.dpc_run_max_ns / 1e6,
            (unsigned long long)g_nc_sched.dpc_slow, holds, held_max_ns / 1e6, held_out_ns / 1e6, top);
     {
+        /* each thread's turns and CPU time in the window: a thread of the game's that never runs shows here */
+        char rs[480];
+        int o = 0;
+        rs[0] = 0;
+        for (unsigned i = 0; i < k->threads_hi && o < (int)sizeof(rs) - 48; i++) {
+            NcThread *t = &k->threads[i];
+            if (t->state == NC_T_FREE || (!t->dbg_runs && !t->dbg_run_ns)) {
+                continue;
+            }
+            uint64_t ran = t->dbg_run_ns;
+            if (t->state == NC_T_RUNNING && t->dbg_in_ns) {
+                ran += nc_ke_now_ns() - t->dbg_in_ns;
+            }
+            o += snprintf(rs + o, sizeof(rs) - (size_t)o, " t%u:%.0f/s %.0f ms", t->id, t->dbg_runs / s, ran / 1e6);
+            t->dbg_runs = 0;
+            t->dbg_run_ns = 0;
+            if (t->state == NC_T_RUNNING) {
+                t->dbg_in_ns = nc_ke_now_ns();
+            }
+        }
+        nc_log("hakuX-native-stats", "thread turns per s and CPU ms in the window:%s", rs);
+    }
+    {
         static uint64_t cr, di, mm, ua;
         char ms[240];
         uint32_t fe[6], fn[6];

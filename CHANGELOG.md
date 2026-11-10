@@ -1,5 +1,14 @@
 # xbased changelog
 
+## 1.0.76.10 (Modern GUI fork)
+
+- Marvel vs. Capcom 2's audio, from the 1.0.76.9 log: the music plays (one stream voice) and the game
+  never starts a voice for a hit or for speech, in the title or in a fight. The APU is not stuck (not
+  trapped, no missing notification); the game doesn't ask. So the stats now also show each guest
+  thread's turns per second and CPU time (to see whether one of the game's helper threads never gets to
+  run), and the audio line counts the methods the game writes to the APU, with the buffer changes among
+  them, and names its columns (cbo, start, end, state).
+
 ## 1.0.76.9 (Modern GUI fork)
 
 - The log now has an "audio:" line every 3 seconds while a game's sound is active: how many voices the
