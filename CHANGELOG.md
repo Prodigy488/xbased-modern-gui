@@ -1,5 +1,14 @@
 # xbased changelog
 
+## 1.0.100 (2026-11)
+
+### Fixes
+- GTA San Andreas ran at 20 fps at its original frame rate (and no higher
+  than 30 unlocked) since 1.0.98: the fix for Vice City's stutter held back
+  a CPU that needs most of each frame. It now only waits for the screen
+  when it has time to spare. San Andreas is back to 30 fps, and Vice City
+  keeps turning smoothly.
+
 ## 1.0.99 (2026-11)
 
 ### Fixes

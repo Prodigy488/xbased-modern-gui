@@ -1457,8 +1457,18 @@ static struct {
     uint64_t holds;
 } g_fl;
 
+/* flips: the last one's time and the time between the last two (any
+ * thread); the CPU's own time to make a frame (smoothed), from its frame's
+ * start (the last frame end or a flip since, whichever came later) */
+static int64_t g_fl_flip_ns, g_fl_every_ns, g_fl_end_ns, g_fl_work_ns;
+
 void hle_pb_frame_flipped(void)
 {
+    const int64_t now = hle_now_ns(), last = __atomic_load_n(&g_fl_flip_ns, __ATOMIC_RELAXED);
+    if (last && now - last > 1000000 && now - last < 200000000) {
+        __atomic_store_n(&g_fl_every_ns, now - last, __ATOMIC_RELAXED);
+    }
+    __atomic_store_n(&g_fl_flip_ns, now, __ATOMIC_RELEASE);
     hle_host_frame_flipped();
 }
 
@@ -1551,7 +1561,27 @@ void hle_pb_pushed(uint32_t put)
     if (g_fl.synced && (waiting < 0 || waiting > 6)) {
         g_fl.synced = false;                    /* counts that don't add up: again at a stall */
     }
-    g_fl.hold = ended && g_fl.synced && waiting >= 2 && waiting <= 6;
+    /* only with the GPU through every frame but this one (its swaps): held
+     * while the GPU still drew the one before, the CPU's next frame waited
+     * on it and the two no longer ran side by side (GTA San Andreas, its GPU
+     * the busier: 30 fps down to 20) */
+    const bool gpu_caught_up = (int32_t)(hle_pbd_frames_swapped() - (g_fl.ends - 1u)) >= 0;
+    /* ... and only a CPU that makes a frame in under a quarter of the time between
+     * flips: one nearer it (San Andreas' ~25 ms of 33), held to the flip,
+     * finished its next frame past the flip after (20 fps) */
+    bool quick = false;
+    if (ended) {
+        const int64_t now = hle_now_ns(), flip = __atomic_load_n(&g_fl_flip_ns, __ATOMIC_ACQUIRE);
+        const int64_t start = flip > g_fl_end_ns ? flip : g_fl_end_ns;
+        if (g_fl_end_ns && now - start < 200000000) {
+            const int64_t w = now - start;
+            g_fl_work_ns = g_fl_work_ns ? g_fl_work_ns + (w - g_fl_work_ns) / 8 : w;
+        }
+        g_fl_end_ns = now;
+        const int64_t every = __atomic_load_n(&g_fl_every_ns, __ATOMIC_RELAXED);
+        quick = every && g_fl_work_ns * 4 < every;
+    }
+    g_fl.hold = ended && g_fl.synced && waiting >= 2 && waiting <= 6 && gpu_caught_up && quick;
 }
 
 static void fl_hold(void)
