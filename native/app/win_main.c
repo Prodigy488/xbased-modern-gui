@@ -1506,7 +1506,7 @@ static const char *pick_disc(void)
 }
 
 #ifndef XBASED_VERSION
-#define XBASED_VERSION "1.0.76.11"
+#define XBASED_VERSION "1.0.76.12"
 #endif
 
 static void rm_tree(const char *path)
@@ -1618,6 +1618,18 @@ int main(int argc, char *argv[])
     bool again = opt_flag("relaunch");
     for (int i = 0; i < g_nargs; i++) {
         again |= !strncmp(g_args[i], "loadstate=", 10);
+    }
+    for (int i = 0; i < g_nargs; i++) {
+        /* the first run of an autofix chain (fixtrial=<id>@<frame>#1#<sym>): the log of the run that stalled
+         * is kept apart, or the new run's would take its place and the evidence of the stall with it */
+        const char *h = !strncmp(g_args[i], "fixtrial=", 9) ? strchr(g_args[i], '#') : NULL;
+        if (h && atoi(h + 1) == 1) {
+            char from[MAX_PATH + 16], to[MAX_PATH + 32];
+            snprintf(from, sizeof(from), "%sxbased.log", g_data_dir);
+            snprintf(to, sizeof(to), "%sxbased-before-autofix.log", g_data_dir);
+            remove(to);
+            rename(from, to);
+        }
     }
     log_setup(opt_flag("console"), again);
     if (again) {

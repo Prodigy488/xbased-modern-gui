@@ -27,7 +27,7 @@
 #endif
 
 #ifndef XBASED_VERSION
-#define XBASED_VERSION "1.0.76.11"
+#define XBASED_VERSION "1.0.76.12"
 #endif
 
 Dash D;
@@ -2535,7 +2535,7 @@ static void scr_ingame(void)
     }
     {
         /* the fixes the emulator found for a stalled game and kept (autofix.c) */
-        const int nfix = af_saved_count(&D.game);
+        const int nfix = af_noted_count(&D.game);
         if (nfix > 0 || g_ig_af_reset) {
             char t[200];
             if (g_ig_af_reset) {

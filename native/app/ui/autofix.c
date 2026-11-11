@@ -222,6 +222,12 @@ int af_saved_count(const Config *game)
     return game ? cfg_all(game, "fix", v, 64) : 0;
 }
 
+int af_noted_count(const Config *game)
+{
+    const char *v[64];
+    return game ? cfg_all(game, "fix", v, 64) + cfg_all(game, "fixfail", v, 64) : 0;
+}
+
 void af_reset_game(Config *game)
 {
     const char *v[64];

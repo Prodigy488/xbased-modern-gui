@@ -1,5 +1,13 @@
 # xbased changelog
 
+## 1.0.76.12 (Modern GUI fork)
+
+- Autofix keeps the log of the run that stalled. The first restart of a chain used to overwrite
+  xbased.log, and with it the evidence of the stall the fixes were tried for; it is now kept as
+  xbased-before-autofix.log (the run's log, then the last trial's in xbased.log).
+- "Reset this game's fixes" in the in-game menu also shows when the game's file only has fixes that were
+  tried without use ("fixfail="), which would otherwise have been skipped for that game for good.
+
 ## 1.0.76.11 (Modern GUI fork)
 
 - Autofix: a game that stalls is run again with another setting, and the one that works is kept. When

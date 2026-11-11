@@ -82,7 +82,9 @@ int main(void)
     for (int i = 0; i < n; i++) CHECK(strcmp(c[i]->id, "kernel-locks") && strcmp(c[i]->id, "short-slices"));
     af_record_fail(r, learned, AF_SYM_SPIN, 0, "short-slices");       /* already kept: not a failure */
     { const char *v[8]; CHECK(cfg_all(r, "fixfail", v, 8) == 1); }
+    CHECK(af_noted_count(r) == 2);                                    /* the kept one and the failed one */
     af_reset_game(r);
+    CHECK(af_noted_count(r) == 0);
     CHECK(af_saved_count(r) == 0);
     { const char *v[8]; CHECK(cfg_all(r, "fixfail", v, 8) == 0); }
 

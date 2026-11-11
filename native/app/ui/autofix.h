@@ -64,6 +64,8 @@ void af_record_pass(Config *game, Config *learned, AfSym sym, uint32_t publisher
 void af_record_fail(Config *game, Config *learned, AfSym sym, uint32_t publisher, const char *id);
 /* The game's saved fixes: how many, and all of them dropped (with the failures noted). */
 int af_saved_count(const Config *game);
+/* ... and with the ones tried without use (what the in-game reset row counts). */
+int af_noted_count(const Config *game);
 void af_reset_game(Config *game);
 
 /* ---- the loop: one per run, polled from the window's refresh ---- */
