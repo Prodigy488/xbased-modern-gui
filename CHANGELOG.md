@@ -1,5 +1,27 @@
 # xbased changelog
 
+## 1.0.76.11 (Modern GUI fork)
+
+- Autofix: a game that stalls is run again with another setting, and the one that works is kept. When
+  no frame comes for 25 seconds (or none at all in 90), the emulator looks at what the threads and the
+  render thread are doing (everything waits, something spins, the GPU is waited on, no frame ever) and
+  picks the next switch from a fixed list that fits it: the kernel running the locks itself, the
+  drives' own timing, reads in place, short thread slices, each of the audio, movie and Direct3D timer
+  patches off, GPU commands one by one, 128 MiB of memory. A notice counts down 10 seconds (opening the
+  menu, pausing or minimising cancels it), the game starts again with that one change, and a run that
+  gets 900 frames past where the last one stalled, and doesn't stall, writes "fix=<name>" into the game's
+  settings file, applied from then on. At most four tries a chain, each switch once; a try that stalls
+  again is noted ("fixfail=") and not tried for that game again. In-game menu: "Reset this game's fixes".
+  Settings: "Try fixes when a game stalls" (on).
+- What worked, and for which kind of stall, is kept for every game (compat_learned.ini) and orders the
+  tries for the next one: first what worked for a title of the same publisher, then what worked most.
+- The log says, at the start, which kernel functions the title imports that this build lacks ("known
+  gaps"): for those no setting helps.
+- Not tested on hardware (the machine that built it has no graphics card): the decisions are tested on
+  their own, the stall detection and the restart are the 1.0.76 code's that was there. A long loading
+  screen that draws no frame for 25 seconds would be taken for a stall: cancel it from the menu, or
+  turn Autofix off.
+
 ## 1.0.76.10 (Modern GUI fork)
 
 - Marvel vs. Capcom 2's audio, from the 1.0.76.9 log: the music plays (one stream voice) and the game

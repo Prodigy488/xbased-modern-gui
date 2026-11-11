@@ -33,6 +33,7 @@ set(NC_APP_SOURCES
   "${CMAKE_CURRENT_SOURCE_DIR}/app/ui/xiso_build.c"
   "${CMAKE_CURRENT_SOURCE_DIR}/app/ui/playtime.c"
   "${CMAKE_CURRENT_SOURCE_DIR}/app/ui/compat_scan.c"
+  "${CMAKE_CURRENT_SOURCE_DIR}/app/ui/autofix.c"
 )
 if(WIN32)
   enable_language(RC)

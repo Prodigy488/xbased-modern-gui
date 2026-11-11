@@ -258,6 +258,7 @@ void scr_settings(void)
         opt_bool(&l, S_SHOW_FPS, "showfps", false, false);
         opt_bool(&l, S_PAUSE_BG, "pausebg", false, false);
         opt_bool(&l, S_AUTOSAVE, "autosave", true, false);
+        opt_bool(&l, S_AUTOFIX, "autofix", true, false);
         {
             static const char *gv[] = {"auto", "1", "2", "3", "4"};
             static char gnames[5][40];

@@ -392,6 +392,13 @@ XE(S_ISA_HELP, "Insignia's Setup Assistant registers this Xbox with Insignia. Pr
 XE(S_CASE3D, "3D game cases (your own art: covers/<id>-3d.png)")
 XE(S_AUTOSAVE, "Save when leaving a game (Resume picks it up)")
 XE(S_AUTOSAVE_SLOT, "Auto-save")
+XE(S_AUTOFIX, "Try fixes when a game stalls (a game that stops for 25 s is run again with another setting, and the one that works is kept)")
+XE(S_AF_TRY, "The game stalled. Trying \"%s\" in %d s (open the menu to cancel).")
+XE(S_AF_KEPT, "Fixed: \"%s\". Kept for this game.")
+XE(S_AF_GIVEUP, "The game stalled, and no fix is left to try (details in the log).")
+XE(S_AF_CANCELLED, "Fix cancelled.")
+XE(S_AF_RESET, "Reset this game's fixes (%d)")
+XE(S_AF_RESET_DONE, "This game's fixes are reset. They apply from the next start.")
 X(S_PAUSE_BG, "Pause when the window loses focus", "Pausar al perder el foco de la ventana", "Pause quand la fenêtre perd le focus", "Pausieren, wenn das Fenster den Fokus verliert", "Pausa quando la finestra perde il focus", "Pausar quando a janela perde o foco", "Пауза при потере фокуса окном", "Pauza po utracie fokusu okna", "ウィンドウが非アクティブのとき一時停止", "窗口失去焦点时暂停", "창이 포커스를 잃으면 일시정지")
 /* floating covers, nearest upscaling, the graphics card, installing the Xbox dashboard */
 X(S_FLOAT_COVERS, "Floating game covers", "Portadas flotantes", "Jaquettes flottantes", "Schwebende Cover", "Copertine fluttuanti", "Capas flutuantes", "Плавающие обложки", "Pływające okładki", "浮かぶカバー", "漂浮封面", "떠다니는 표지")

@@ -99,6 +99,32 @@ static int by_count(const void *a, const void *b)
     return x[0] != y[0] ? (x[0] < y[0] ? 1 : -1) : (x[1] < y[1] ? -1 : 1);
 }
 
+int cs_missing_for_disc(const char *disc, char *out, size_t n)
+{
+    if (n) {
+        out[0] = 0;
+    }
+    XdImports im;
+    if (!disc || !xd_read_imports(disc, &im)) {
+        return -1;
+    }
+    const bool *impl = nc_kernel_impl_table();
+    int missing = 0;
+    size_t used = 0;
+    for (unsigned j = 0; j < im.n; j++) {
+        const unsigned o = im.ord[j];
+        const NcKExport *e = o < NC_KORDINAL_MAX ? nc_kernel_export(o) : NULL;
+        if (!e || e->abi == NC_KABI_DATA || impl[o]) {
+            continue;
+        }
+        if (n && used + 40 < n && missing < 12) {
+            used += (size_t)snprintf(out + used, n - used, "%s%s", missing ? ", " : "", e->name);
+        }
+        missing++;
+    }
+    return missing;
+}
+
 static int scan_thread(void *arg)
 {
     (void)arg;

@@ -4,6 +4,7 @@
  * are in dash_settings.c, dash_memory.c.
  */
 #include "native/app/ui/dash.h"
+#include "native/app/ui/autofix.h"
 #include "native/app/ui/console_cfg.h"
 #include "native/app/ui/dash_int.h"
 #include "native/app/ui/homebrew.h"
@@ -26,7 +27,7 @@
 #endif
 
 #ifndef XBASED_VERSION
-#define XBASED_VERSION "1.0.76.10"
+#define XBASED_VERSION "1.0.76.11"
 #endif
 
 Dash D;
@@ -2491,6 +2492,7 @@ static int g_ig_result, g_ig_slot;
 static bool g_ig_saving;            /* the slots screen: saving (else loading) */
 static bool g_ig_thumbs_stale;   /* the slots' pictures to read again */
 static bool g_ig_done;
+static bool g_ig_af_reset;          /* this game's kept fixes were dropped from this menu */
 
 static void scr_ingame(void)
 {
@@ -2530,6 +2532,23 @@ static void scr_ingame(void)
     if (list_row(&l, T(S_SETTINGS), NULL, NULL)) {
         D.tab = 0;
         dash_push(SCR_SETTINGS);
+    }
+    {
+        /* the fixes the emulator found for a stalled game and kept (autofix.c) */
+        const int nfix = af_saved_count(&D.game);
+        if (nfix > 0 || g_ig_af_reset) {
+            char t[200];
+            if (g_ig_af_reset) {
+                snprintf(t, sizeof(t), "%s", T(S_AF_RESET_DONE));
+            } else {
+                snprintf(t, sizeof(t), T(S_AF_RESET), nfix);
+            }
+            if (list_row(&l, t, NULL, NULL) && !g_ig_af_reset) {
+                af_reset_game(&D.game);
+                cfg_save(&D.game);
+                g_ig_af_reset = true;
+            }
+        }
     }
     if (list_row(&l, T(S_RESTART), NULL, NULL)) {
         g_ig_result = DASH_INGAME_RESTART;
@@ -2610,6 +2629,7 @@ int dash_ingame(SDL_Window *win, const char *key, const char *title, const char 
 {
     memset(&D, 0, sizeof(D));
     g_game_running = true;
+    g_ig_af_reset = false;
     g_win = win;
     SDL_HideCursor();   /* it shows when the mouse moves (poll_input) */
     g_cursor_at = 0;

@@ -52,8 +52,8 @@ No BIOS, MCPX ROM or hard-disk image is needed.
 
 | Platform | File | |
 |---|---|---|
-| **Windows** 10/11 (x64) | `xbased-modern-gui-1.0.76.10-windows-x64.zip` | Unzip anywhere and run `xbased.exe`. Portable: everything stays in its folder. |
-| **Linux** (x86-64) | `xbased-1.0.76.10-x86_64.AppImage` | `chmod +x` it and run it. Needs a Vulkan driver and glibc 2.38 or newer (Ubuntu 24.04, Fedora 39, Debian 13). |
+| **Windows** 10/11 (x64) | `xbased-modern-gui-1.0.76.11-windows-x64.zip` | Unzip anywhere and run `xbased.exe`. Portable: everything stays in its folder. |
+| **Linux** (x86-64) | `xbased-1.0.76.11-x86_64.AppImage` | `chmod +x` it and run it. Needs a Vulkan driver and glibc 2.38 or newer (Ubuntu 24.04, Fedora 39, Debian 13). |
 
 Get it from **[Releases](https://github.com/Prodigy488/xbased-modern-gui/releases/latest)**.
 The Linux AppImage starts, but it has not been run with a GPU or sound on Linux (it was
@@ -114,6 +114,11 @@ xbased doesn't include any copyrighted Xbox software.
 - **Import from xemu**: xemu's saves copied in and re-signed so games accept
   them (Memory, Y).
 - **Broad compatibility** with many games, inherited from hakuX.
+- **Autofix for stalled games**: a game that stops drawing for 25 seconds is
+  run again with another setting (one of nine switches the emulator already
+  has, picked by what the threads and the GPU are doing), and the one that
+  gets it past the stall is kept in that game's settings. Cancel it from the
+  menu or turn it off in Settings. Not yet run on real hardware.
 
 </td>
 </tr>
