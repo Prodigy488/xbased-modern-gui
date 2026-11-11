@@ -1,5 +1,17 @@
 # xbased changelog
 
+## 1.0.76.13 (Modern GUI fork)
+
+- Over the Hedge's cutscene stalls, from the 1.0.76.12 log: with "locks in the kernel" kept, the game got
+  from the intro to frame 12289 and stopped again at a later cutscene, in the same way as at the first
+  (the main thread spinning in Direct3D on a GPU fence, the decoder at a flip stall the game's vblank
+  handler never ends). The fix stayed on the whole run (the log's IRQL events are the kernel's own
+  locks at work); it only moves the timing, and the stall is the same bug each time. That log's
+  GPU event trace was all IRQL changes (a thread spinning on the kernel's own locks), so the flips and
+  traps of the stall were not in it. The trace now leaves IRQL changes out, and every second of a
+  flip stall the log says which indexes it waits on ("flip stall: read, write, modulo"). No fix for
+  the stall yet: this is the evidence for the next one.
+
 ## 1.0.76.12 (Modern GUI fork)
 
 - Autofix keeps the log of the run that stalled. The first restart of a chain used to overwrite

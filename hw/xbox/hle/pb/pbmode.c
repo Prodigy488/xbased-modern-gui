@@ -1728,6 +1728,11 @@ void hle_pb_diag(void)
                                               : ph && *ph == 'a'  ? " (arena wait)"
                                               : ph                ? " (ring wait)"
                                               : g_pb.in_run       ? " (decoding)" : "";
+    if (g_pb.flip_wait) {
+        /* a flip stall that lasts: the indexes it waits on (it goes on when read != write) */
+        hle_log("hakuX-hle-pb", "flip stall: read %u write %u modulo %u, %llu flips so far", surf_get(SURF_READ),
+                surf_get(SURF_WRITE), surf_get(SURF_MODULO), (unsigned long long)g_pb.flips);
+    }
     hle_log("hakuX-hle-pb", "kicks %u words %llu headers %llu methods %llu faults %u GET %08x "
             "PUT %08x binds %llu semaphores %llu flips %llu traps %llu (%s) runs %llu surfaces %u clears %llu "
             "swaps %llu draws %llu ff %llu skipped %llu (%s) textures %llu rt uploads %llu blits %llu "

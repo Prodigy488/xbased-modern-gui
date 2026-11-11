@@ -254,20 +254,40 @@ void hle_host_gpu_trace_dump(const char *why, uint32_t mark)
         "isr-ret", "irql",
     };
     uint32_t now = __atomic_load_n(&g_gtr_pos, __ATOMIC_ACQUIRE);
-    uint32_t from = mark > 150 ? mark - 150 : 0, end = mark + 6000 < now ? mark + 6000 : now;
-    if (now - from > GTR_N) {
-        from = now - GTR_N;                     /* overwritten since */
+    uint32_t end = mark + 6000 < now ? mark + 6000 : now;
+    /* from 150 events before the mark, the IRQL changes not counted: with the kernel's own locks (NC_NO_FAST)
+     * a thread spinning on them filled the ring with them, and the flips and traps of the stall were gone */
+    uint32_t from = mark, seen = 0, irqls = 0;
+    const uint32_t floor_ = now > GTR_N ? now - GTR_N : 0;     /* overwritten before this */
+    while (from > floor_ && seen < 150) {
+        from--;
+        if (g_gtr[from % GTR_N].kind == 16) {
+            irqls++;
+        } else {
+            seen++;
+        }
     }
     uint32_t n = end > from ? end - from : 0;
     if (!n) {
         return;
     }
-    const uint64_t t0 = g_gtr[(end - n) % GTR_N].ns;
-    nc_log("hakuX-native-trace", "%s: %u GPU events, from 150 before the mark", why, n);
+    const uint64_t t0 = g_gtr[from % GTR_N].ns;
+    uint32_t shown = 0;
+    for (uint32_t j = from; j != end; j++) {
+        shown += g_gtr[j % GTR_N].kind != 16;
+    }
+    nc_log("hakuX-native-trace", "%s: %u GPU events from 150 before the mark (%u IRQL changes left out)", why, shown,
+           irqls);
     char line[400];
     int o = 0;
-    for (uint32_t j = end - n; j != end; j++) {
+    for (uint32_t j = from; j != end; j++) {
         const uint32_t i = j % GTR_N;
+        if (g_gtr[i].kind == 16) {
+            if (j + 1 == end && o) {
+                nc_log("hakuX-native-trace", "%s", line);
+            }
+            continue;
+        }
         const uint32_t k = g_gtr[i].kind < sizeof(k_names) / sizeof(k_names[0]) ? g_gtr[i].kind : 0;
         o += snprintf(line + o, sizeof(line) - (size_t)o, " +%.2f %s %x",
                       (g_gtr[i].ns - t0) / 1e6, k_names[k], g_gtr[i].value);
