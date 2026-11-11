@@ -4110,6 +4110,10 @@ void hle_draw_cmd_draw(const HleCmdDraw *c, VkCommandBuffer cb, uint32_t rt_id, 
     } else {
         k.ps.wbuf = wbuf ? (g_hvk.caps.bary ? 2 : 1) : 0;
     }
+    if (c->tex_affine) {                /* (cmd.h) */
+        k.pk.compare |= HLE_PSH_TEX_AFFINE;
+        k.ps.tex_affine = 1;
+    }
     /* Polygon offset (decals over coplanar surfaces): NV2A adds the offset in
      * depth-buffer units and the slope factor times the polygon's depth slope,
      * which are Vulkan's constant (one depth step) and slope factors; under

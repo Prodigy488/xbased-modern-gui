@@ -1483,6 +1483,12 @@ static float zfloat_clear(uint32_t v, bool z24)
     uint32_t b = z24 ? (v << 7) | 0x7Fu : ((v << 11) + 0x3C000000u) | 0x7FFu;
     float f;
     memcpy(&f, &b, 4);
+    if (!z24 && !(v >> 12)) {
+        /* a 16-bit float's exponent 0: no implied bit, its 12 bits of 2^-18
+         * (zpack.c hle_zf16's below 2^-6; nxdk_pgraph_tests' Depth_buffer
+         * float clears at 0xF, 0x564, 0xAB9) */
+        f = (float)v / 262144.0f;
+    }
     return isfinite(f) ? MIN(f * zfloat_scale(z24), 1.0f) : 1.0f;
 }
 
@@ -3668,6 +3674,7 @@ static void emit(HleCmdDraw *d)
         d->tex_ord |= tex_order(s, d->tex[s]) << 2 * s;
     }
     d->quads = g_pd.prim == NV2A_PRIM_QUADS;
+    d->tex_affine = g_pd.bare && !(R(NV097_SET_CONTROL0) & (1u << 20));
     state();
     uint32_t zf = (R(NV097_SET_SURFACE_FORMAT) >> 4) & 0xF;
     d->vsh = ff ? ff_program() : program();

@@ -154,6 +154,7 @@ typedef struct HleFfPsKey {
                                          its pixel as the earlier draws left it (uFb),
                                          as the NV2A's texture unit reads the memory
                                          the draw renders */
+    uint8_t tex_affine;               /* texture coordinates without perspective (cmd.h) */
 } HleFfPsKey;
 
 /* Push constants (std430 layout, <= 256 bytes: 256 used); HLE_PUSH_GLSL

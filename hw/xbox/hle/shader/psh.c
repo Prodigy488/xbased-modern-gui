@@ -335,7 +335,7 @@ static const char *bump_in(const HlePshKey *k, unsigned in, char out[24])
 size_t hle_psh_glsl(const HlePshKey *k, char *buf, size_t cap, unsigned *unsupported)
 {
     Buf b = { buf, cap, 0, false, "0.5" };
-    const char *interp = k->flat ? "flat " : "";
+    const char *interp = k->flat ? "flat " : (k->compare & HLE_PSH_TEX_AFFINE) ? "noperspective " : "";
     /* The combiners compute in signed fixed point, 1.0 = 0xFF: the bias
      * mappings' 0.5 is 0x80, its MSB set, while a halving of 1.0 is 0x7F,
      * clear; both are 0.5 in float. A MUX on r0.a's MSB tells them apart:
@@ -441,16 +441,20 @@ size_t hle_psh_glsl(const HlePshKey *k, char *buf, size_t cap, unsigned *unsuppo
     } else {
         put(&b, "#define HLE_BORDER2(s, uv)\n#define HLE_BORDER3(s, uvw)\n");
     }
+    /* SET_CONTROL0's texture perspective off (a title without D3D): the
+     * coordinates interpolated across the screen, as the console's
+     * (nxdk_pgraph_tests' Texture_perspective_enable) */
+    put(&b, k->compare & HLE_PSH_TEX_AFFINE ? "#define HLE_TQ noperspective\n" : "#define HLE_TQ\n");
     put(&b, "layout(set = 0, binding = 0) uniform texture2D uTex2D[];\n"
             "layout(set = 0, binding = 1) uniform sampler uSmp[];\n"
             "layout(set = 0, binding = 2) uniform textureCube uTexCube[];\n"
             "layout(set = 0, binding = 3) uniform texture3D uTex3D[];\n"
             "layout(location = 0) %sin vec4 vDiffuse;\n"
             "layout(location = 1) %sin vec4 vSpecular;\n"
-            "layout(location = 2) in vec4 vTex0;\n"
-            "layout(location = 3) in vec4 vTex1;\n"
-            "layout(location = 4) in vec4 vTex2;\n"
-            "layout(location = 5) in vec4 vTex3i;\n"
+            "layout(location = 2) HLE_TQ in vec4 vTex0;\n"
+            "layout(location = 3) HLE_TQ in vec4 vTex1;\n"
+            "layout(location = 4) HLE_TQ in vec4 vTex2;\n"
+            "layout(location = 5) HLE_TQ in vec4 vTex3i;\n"
             "layout(location = 6) in float vFog;\n"
             "%s%s%s"
             "layout(location = 0) out vec4 oColor;\n"
@@ -597,6 +601,12 @@ size_t hle_psh_glsl(const HlePshKey *k, char *buf, size_t cap, unsigned *unsuppo
         put(&b, "  fogf = isinf(vFog) || isnan(fogf) ? %s : clamp(fogf, 0.0, 1.0);\n",
             one ? "1.0" : "0.0");
     }
+    /* a title without D3D, the vertex and linear modes: the factor truncated
+     * to the byte, as the console's (nxdk_pgraph_tests' Fog_gen, Fog_param,
+     * Fog_coord_vec4: a step more fog colour; the EXP modes' got further) */
+    if (k->fog == 1 || k->fog == 4) {
+        put(&b, "  if ((pc.flags & 8192u) != 0u) fogf = floor(fogf * 255.0 + 1.0 / 1024.0) / 255.0;\n");
+    }
     put(&b, "  vec4 fogr = vec4(col(pc.fog_color).rgb, fogf);\n"
             "  float dot1 = 0.0, dot2 = 0.0, dot3 = 0.0;\n%s",
         k->debug == 17 ? "  vec4 shdbg = vec4(0.0, 0.0, 0.0, 1.0);\n" : "");
@@ -641,7 +651,12 @@ size_t hle_psh_glsl(const HlePshKey *k, char *buf, size_t cap, unsigned *unsuppo
             put(&b, "  vec4 t%u = vec4(0.0, 0.0, 0.0, 1.0);\n", s);
             break;
         case HLE_PST_PASSTHRU:
-            put(&b, "  vec4 t%u = clamp(vTex%u, 0.0, 1.0);\n", s, s);
+            /* a title without D3D (pc.flags 8192): truncated to the byte, as
+             * the console's (nxdk_pgraph_tests' Texgen_with_texture_matrix
+             * PassThrough pictures, a step below the rounded value) */
+            put(&b, "  vec4 t%u = clamp(vTex%u, 0.0, 1.0);\n"
+                    "  if ((pc.flags & 8192u) != 0u) t%u = floor(t%u * 255.0 + 1.0 / 1024.0) / 255.0;\n",
+                s, s, s, s);
             break;
         case HLE_PST_CLIPPLANE:
             put(&b, "  vec4 t%u = vec4(0.0);\n", s);

@@ -127,6 +127,8 @@ typedef struct HlePshKey {
 /* HlePshKey.compare bits 20-23: the stage's texture has its own border
  * (cmd.h tex_border, its word in pc.scr: programs only) */
 #define HLE_PSH_BORDER_BIT(s) (1u << (20 + (s)))
+/* HlePshKey.compare bit 24: texture coordinates without perspective (cmd.h tex_affine) */
+#define HLE_PSH_TEX_AFFINE (1u << 24)
 #define HLE_PSH_RECT 0x10u              /* HlePshKey.vol: a linear texture kept to its size */
 #define HLE_PSH_RECT4 0x20u             /* HlePshKey.vol: each stage's in pc.scr (programs) */
 #define HLE_PSH_TWO_SIDE 0x40u          /* HlePshKey.vol: SET_TWO_SIDE_LIGHT_EN: a back face's

@@ -28,6 +28,7 @@
 #define NV_PFIFO_CACHE1_PUSH1        0x003204u  /* bits 4:0: the channel */
 #define NV_PFIFO_CACHE1_DMA_INSTANCE 0x00322Cu  /* bits 15:0: the push buffer's DMA object >> 4 */
 #define NV_PFIFO_CACHE1_DMA_PUT      0x003240u
+#define NV_PGRAPH_CTX_SWITCH1        0x40014Cu
 #define NV_PFIFO_CACHE1_DMA_GET      0x003244u
 #define NV_PFIFO_CACHE1_DMA_SUBROUTINE 0x00324Cu /* the return offset | 1 inside a call */
 #define NV_PGRAPH_INTR               0x400100u  /* pending; the ISR writes 1s to clear */
@@ -1010,6 +1011,11 @@ static int count_method(void *opaque, unsigned subch, uint32_t m, uint32_t v)
         g_pb.obj_inst[subch] = inst;
         g_pb.obj_class[subch] = inst ? (uint8_t)pramin(inst) : 0;
         g_pb.binds++;
+        if (g_pb.put_sync && g_pb.obj_class[subch] == 0x97) {
+            /* the graphics context's object word (a title without D3D reads
+             * it to write 0 there and back, below) */
+            hle_host_gpu_reg_set(NV_PGRAPH_CTX_SWITCH1, pramin(inst));
+        }
         static uint32_t s_seen[8];                  /* each class logged once */
         const uint8_t cls = g_pb.obj_class[subch];
         if (!(s_seen[cls >> 5] & (1u << (cls & 31)))) {
@@ -1019,6 +1025,13 @@ static int count_method(void *opaque, unsigned subch, uint32_t m, uint32_t v)
         return HLE_PB_GO;
     }
     if (g_pb.obj_class[subch] == 0x97) {
+        /* NV_PGRAPH_CTX_SWITCH1 written 0 by the title (no object: a title
+         * without D3D): the methods do nothing until it is back
+         * (nxdk_pgraph_tests' Context_switch GRZero: the polygon pushed then
+         * is not drawn and its colour not kept) */
+        if (g_pb.put_sync && !hle_host_gpu_reg(NV_PGRAPH_CTX_SWITCH1)) {
+            return HLE_PB_GO;
+        }
         if (!hle_kv_takes(m, v)) {
             return HLE_PB_GO;                   /* a value the method doesn't take: its state stays */
         }

@@ -1,5 +1,16 @@
 # xbased changelog
 
+## 1.0.104 (2026-11)
+
+### Fixes
+- Graphics chip accuracy for homebrew that drives the chip itself, from the
+  chip test program (nxdk_pgraph_tests): 1103 of its 3556 pictures now
+  match the console's exactly (1091 in 1.0.103). Texture perspective
+  correction can be turned off, linear and vertex fog and pass-through
+  texture coordinates round as the console does, 16-bit float depth
+  clears with tiny values are right, and drawing stops while the program
+  takes the graphics context away.
+
 ## 1.0.103 (2026-11)
 
 ### Fixes

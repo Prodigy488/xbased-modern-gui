@@ -490,7 +490,7 @@ static const char *k_cmp[8] = {
 size_t hle_ff_ps_glsl(const HleFfPsKey *k, char *buf, size_t cap)
 {
     Buf b = { buf, cap, 0, false };
-    const char *interp = k->flat ? "flat " : "";
+    const char *interp = k->flat ? "flat " : k->tex_affine ? "noperspective " : "";
     put(&b, "#version 450\n#extension GL_EXT_nonuniform_qualifier : require\n%s%s",
         k->wbuf == 2 ? HLE_WBUF_BARY_EXT_GLSL : "", hle_push_glsl());
     put(&b, "layout(set = 0, binding = 0) uniform texture2D uTex2D[];\n"
@@ -499,7 +499,8 @@ size_t hle_ff_ps_glsl(const HleFfPsKey *k, char *buf, size_t cap)
     put(&b, "layout(location = 1) %sin vec4 vSpecular;\n", interp);
     for (unsigned s = 0; s < k->nstages; s++) {
         if (k->st[s].texture) {
-            put(&b, "layout(location = %u) in vec4 vTex%u;\n", 2 + s, s);
+            put(&b, "layout(location = %u) %sin vec4 vTex%u;\n", 2 + s,
+                k->tex_affine ? "noperspective " : "", s);
         }
     }
     if (k->fog) {
@@ -596,7 +597,9 @@ size_t hle_ff_ps_glsl(const HleFfPsKey *k, char *buf, size_t cap)
                      "  fogf = isinf(vFog) || isnan(fogf) ? 1.0 : clamp(fogf, 0.0, 1.0);\n"); break;
     }
     if (k->fog) {
-        put(&b, "  cur.rgb = mix(unpackUnorm4x8(pc.fog_color).zyx, cur.rgb, fogf);\n");
+        put(&b, "%s  cur.rgb = mix(unpackUnorm4x8(pc.fog_color).zyx, cur.rgb, fogf);\n",   /* (psh.c) */
+            k->fog == 1 || k->fog == 4 ?
+            "  if ((pc.flags & 8192u) != 0u) fogf = floor(fogf * 255.0 + 1.0 / 1024.0) / 255.0;\n" : "");
     }
     if (k->alpha_test && k->alpha_func < 8) {
         /* in eight bits, as the pixel shaders' (psh.c) */
