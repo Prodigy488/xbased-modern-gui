@@ -375,6 +375,8 @@ int hle_vk_init(void)
     bool e_gpl = has_ext(ext, ne, VK_EXT_GRAPHICS_PIPELINE_LIBRARY_EXTENSION_NAME) &&
                  has_ext(ext, ne, VK_KHR_PIPELINE_LIBRARY_EXTENSION_NAME);
     bool e_lr = has_ext(ext, ne, VK_KHR_DYNAMIC_RENDERING_LOCAL_READ_EXTENSION_NAME);
+    bool e_bary = has_ext(ext, ne, VK_KHR_FRAGMENT_SHADER_BARYCENTRIC_EXTENSION_NAME);
+    bool e_drect = has_ext(ext, ne, VK_EXT_DISCARD_RECTANGLES_EXTENSION_NAME);
     bool e_pd = has_ext(ext, ne, VK_KHR_PUSH_DESCRIPTOR_EXTENSION_NAME);
     /* Below 1.3 (vk/compat.c): what 1.2 and 1.3 made core, from extensions;
      * a 1.2 device has 1.2's in its core (the structs are core 1.2's then) */
@@ -434,6 +436,8 @@ int hle_vk_init(void)
         .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_GRAPHICS_PIPELINE_LIBRARY_FEATURES_EXT };
     VkPhysicalDeviceDynamicRenderingLocalReadFeaturesKHR q_lr = {
         .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DYNAMIC_RENDERING_LOCAL_READ_FEATURES_KHR };
+    VkPhysicalDeviceFragmentShaderBarycentricFeaturesKHR q_bary = {
+        .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FRAGMENT_SHADER_BARYCENTRIC_FEATURES_KHR };
     VkPhysicalDeviceVulkan13Features q13 = {
         .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_3_FEATURES };
     VkPhysicalDeviceVulkan12Features q12 = {
@@ -479,6 +483,7 @@ int hle_vk_init(void)
     if (e_eds3) chain(&tail, &q_eds3);
     if (e_gpl) chain(&tail, &q_gpl);
     if (e_lr) chain(&tail, &q_lr);
+    if (e_bary) chain(&tail, &q_bary);
     vkGetPhysicalDeviceFeatures2(v->phys, &q);
     /* the limits the bindless set and the samplers need (Vulkan 1.2's: a 1.1
      * device fails the floor without them) */
@@ -521,6 +526,7 @@ int hle_vk_init(void)
     c->floor_ok = true;
     need(c, v->qfam != UINT32_MAX, "graphics queue");
     c->wide_lines = q.features.wideLines;
+    c->fill_lines = q.features.fillModeNonSolid;
     need(c, q.features.largePoints, "largePoints");
     c->depth_clamp = q.features.depthClamp;
     need(c, ok_tl, "timelineSemaphore");
@@ -596,6 +602,15 @@ int hle_vk_init(void)
     /* local read is dynamic rendering's: 1.3 devices only */
     c->local_read = v13 && e_lr && q_lr.dynamicRenderingLocalRead;
     c->fbfetch = c->local_read && !getenv("HAKUX_HLE_NO_FBFETCH");
+    c->bary = e_bary && q_bary.fragmentShaderBarycentric && !getenv("HAKUX_HLE_NO_BARY");
+    if (e_drect && !getenv("HAKUX_HLE_NO_DISCARD_RECTS")) {
+        VkPhysicalDeviceDiscardRectanglePropertiesEXT dp = {
+            .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DISCARD_RECTANGLE_PROPERTIES_EXT };
+        VkPhysicalDeviceProperties2 p2 = { .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2,
+                                           .pNext = &dp };
+        vkGetPhysicalDeviceProperties2(v->phys, &p2);
+        c->discard = dp.maxDiscardRectangles >= 8;
+    }
     c->exec_props = has_ext(ext, ne, VK_KHR_PIPELINE_EXECUTABLE_PROPERTIES_EXTENSION_NAME);
     c->aniso = q.features.samplerAnisotropy;
     c->host_query_reset = v13 ? q12.hostQueryReset : e_hqr && q_hqr.hostQueryReset;
@@ -666,6 +681,8 @@ int hle_vk_init(void)
         .sType = q_gpl.sType, .graphicsPipelineLibrary = VK_TRUE };
     VkPhysicalDeviceDynamicRenderingLocalReadFeaturesKHR f_lr = {
         .sType = q_lr.sType, .dynamicRenderingLocalRead = VK_TRUE };
+    VkPhysicalDeviceFragmentShaderBarycentricFeaturesKHR f_bary = {
+        .sType = q_bary.sType, .fragmentShaderBarycentric = VK_TRUE };
     VkPhysicalDeviceVulkan13Features f13 = {
         .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_3_FEATURES,
         .synchronization2 = VK_TRUE, .dynamicRendering = VK_TRUE,
@@ -702,6 +719,7 @@ int hle_vk_init(void)
     VkPhysicalDevicePipelineCreationCacheControlFeatures f_pcc = {
         .sType = q_pcc.sType, .pipelineCreationCacheControl = VK_TRUE };
     f.features.wideLines = c->wide_lines;
+    f.features.fillModeNonSolid = c->fill_lines;
     f.features.largePoints = VK_TRUE;
     f.features.depthClamp = c->depth_clamp;
     f.features.shaderSampledImageArrayDynamicIndexing = !c->bindless;
@@ -736,6 +754,7 @@ int hle_vk_init(void)
     if (c->eds3) chain(&tail, &f_eds3);
     if (c->gpl) chain(&tail, &f_gpl);
     if (c->fbfetch) chain(&tail, &f_lr);
+    if (c->bary) chain(&tail, &f_bary);
 
     const char *exts[32];
     uint32_t nx = 0;
@@ -779,6 +798,12 @@ int hle_vk_init(void)
         if (e_pd) {
             exts[nx++] = VK_KHR_PUSH_DESCRIPTOR_EXTENSION_NAME;
         }
+    }
+    if (c->bary) {
+        exts[nx++] = VK_KHR_FRAGMENT_SHADER_BARYCENTRIC_EXTENSION_NAME;
+    }
+    if (c->discard) {
+        exts[nx++] = VK_EXT_DISCARD_RECTANGLES_EXTENSION_NAME;
     }
     if (c->swapchain) {
         exts[nx++] = VK_KHR_SWAPCHAIN_EXTENSION_NAME;

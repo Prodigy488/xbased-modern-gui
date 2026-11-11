@@ -491,7 +491,8 @@ size_t hle_ff_ps_glsl(const HleFfPsKey *k, char *buf, size_t cap)
 {
     Buf b = { buf, cap, 0, false };
     const char *interp = k->flat ? "flat " : "";
-    put(&b, "#version 450\n#extension GL_EXT_nonuniform_qualifier : require\n%s", hle_push_glsl());
+    put(&b, "#version 450\n#extension GL_EXT_nonuniform_qualifier : require\n%s%s",
+        k->wbuf == 2 ? HLE_WBUF_BARY_EXT_GLSL : "", hle_push_glsl());
     put(&b, "layout(set = 0, binding = 0) uniform texture2D uTex2D[];\n"
             "layout(set = 0, binding = 1) uniform sampler uSmp[];\n");
     put(&b, "layout(location = 0) %sin vec4 vDiffuse;\n", interp);
@@ -505,7 +506,7 @@ size_t hle_ff_ps_glsl(const HleFfPsKey *k, char *buf, size_t cap)
         put(&b, "layout(location = 6) in float vFog;\n");
     }
     if (k->wbuf) {
-        put(&b, HLE_WBUF_IN_GLSL);
+        put(&b, k->wbuf == 2 ? HLE_WBUF_IN_BARY_GLSL : HLE_WBUF_IN_GLSL);
     }
     put(&b, "layout(location = 0) out vec4 oColor;\n" HLE_NVPROJ_GLSL);
     if (k->sblend || (k->fbfetch & ~HLE_FB_ZEQ)) {
@@ -517,7 +518,7 @@ size_t hle_ff_ps_glsl(const HleFfPsKey *k, char *buf, size_t cap)
     }
     put(&b, "void main() {\n  vec4 cur = vDiffuse, tmp = vec4(0.0), r;\n");
     if (k->wbuf) {
-        put(&b, HLE_WBUF_CALC_GLSL);
+        put(&b, k->wbuf == 2 ? HLE_WBUF_CALC_BARY_GLSL : HLE_WBUF_CALC_GLSL);
     }
     for (unsigned s = 0; s < k->nstages; s++) {
         const HleFfStage *st = &k->st[s];
@@ -578,10 +579,10 @@ size_t hle_ff_ps_glsl(const HleFfPsKey *k, char *buf, size_t cap)
     case 1:  put(&b, "  float fogf = isnan(vFog) ? 1.0 : clamp(vFog, 0.0, 1.0);\n"); break;
     /* the table modes: an infinite coordinate or a factor that is no number
      * is 1 in LINEAR and EXP, 0 in EXP2 (psh.c) */
-    case 2:  put(&b, "  float fogf = exp(-vFog * pc.fog.z);\n"
+    case 2:  put(&b, "  float fogf = pc.fog.x + exp(-vFog * pc.fog.z);\n"
                      "  fogf = isinf(vFog) || isnan(fogf) ? 1.0 : clamp(fogf, 0.0, 1.0);\n"); break;
     case 3:  put(&b, "  float fd = vFog * pc.fog.z;\n"
-                     "  float fogf = exp(-fd * fd);\n"
+                     "  float fogf = pc.fog.x + exp(-fd * fd);\n"
                      "  fogf = isinf(vFog) || isnan(fogf) ? 0.0 : clamp(fogf, 0.0, 1.0);\n"); break;
     default: put(&b, "  float fogf = (pc.fog.y - vFog) / (pc.fog.y - pc.fog.x);\n"
                      "  fogf = isinf(vFog) || isnan(fogf) ? 1.0 : clamp(fogf, 0.0, 1.0);\n"); break;

@@ -529,6 +529,7 @@ uint32_t hle_draw_overlay_upload(const uint32_t h5[5], uint32_t *w, uint32_t *h)
 enum {
     PT_POINTLIST = 1, PT_LINELIST, PT_LINELOOP, PT_LINESTRIP, PT_TRIANGLELIST,
     PT_TRIANGLESTRIP, PT_TRIANGLEFAN, PT_QUADLIST, PT_QUADSTRIP, PT_POLYGON,
+    PT_QUADLIST_EDGES, PT_QUADSTRIP_EDGES,      /* pbres.h */
 };
 /* VkPrimitiveTopology (no Vulkan headers here) */
 enum { VT_POINTS = 0, VT_LINES = 1, VT_LINE_STRIP = 2, VT_TRIS = 3, VT_TRI_STRIP = 4,
@@ -538,7 +539,9 @@ uint32_t hle_draw_prim_topology(uint32_t pt)
 {
     switch (pt) {
     case PT_POINTLIST:     return VT_POINTS;
-    case PT_LINELIST:      return VT_LINES;
+    case PT_LINELIST:
+    case PT_QUADLIST_EDGES:
+    case PT_QUADSTRIP_EDGES: return VT_LINES;
     case PT_LINELOOP:
     case PT_LINESTRIP:     return VT_LINE_STRIP;
     case PT_TRIANGLESTRIP:
@@ -557,6 +560,12 @@ uint32_t hle_draw_prim_count(uint32_t pt, uint32_t n)
     if (pt == PT_LINELOOP) {
         return n ? n + 1 : 0;
     }
+    if (pt == PT_QUADLIST_EDGES) {
+        return n / 4 * 8;
+    }
+    if (pt == PT_QUADSTRIP_EDGES) {
+        return n >= 4 ? (n / 2 - 1) * 8 : 0;
+    }
     return n;
 }
 
@@ -568,6 +577,18 @@ void hle_draw_prim_indices(uint32_t pt, const uint16_t *in, uint32_t n, uint32_t
         for (uint32_t q = 0; q + 3 < n; q += 4) {
             *out++ = IN(q); *out++ = IN(q + 1); *out++ = IN(q + 2);
             *out++ = IN(q); *out++ = IN(q + 2); *out++ = IN(q + 3);
+        }
+        return;
+    }
+    if (pt == PT_QUADLIST_EDGES || pt == PT_QUADSTRIP_EDGES) {
+        /* each quad's four sides (a strip's quad i: 2i, 2i + 1, 2i + 3, 2i + 2) */
+        const bool st = pt == PT_QUADSTRIP_EDGES;
+        for (uint32_t q = 0; q + 3 < n; q += st ? 2 : 4) {
+            const uint32_t v[4] = { q, q + 1, st ? q + 3 : q + 2, st ? q + 2 : q + 3 };
+            for (unsigned e = 0; e < 4; e++) {
+                *out++ = IN(v[e]);
+                *out++ = IN(v[(e + 1) & 3]);
+            }
         }
         return;
     }

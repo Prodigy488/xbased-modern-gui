@@ -237,7 +237,12 @@ size_t hle_ffhw_glsl(const uint32_t *tokens, unsigned nslots, const HleVshKey *v
     }
     texgen(&b, &k);
     lighting(&b, &k);
-    put(&b, "    oB0 = v7;\n    oB1 = v8;\n");
+    /* the back colours (two-sided lighting's back faces, psh.c HLE_PSH_TWO_SIDE):
+     * unlit, none (nxdk_pgraph_tests' Specular_back: back faces black with
+     * lighting off, whatever colours the vertices carry); lit, the front
+     * ones for now (the back material's lighting isn't made) */
+    put(&b, k.lighting ? "    oB0 = oD0;\n    oB1 = oD1;\n" :
+                         "    oB0 = vec4(0.0, 0.0, 0.0, 1.0);\n    oB1 = vec4(0.0, 0.0, 0.0, 1.0);\n");
     if (!k.specular) {
         put(&b, "    oD1 = vec4(0.0, 0.0, 0.0, 1.0);\n    oB1 = vec4(0.0, 0.0, 0.0, 1.0);\n");
     } else {

@@ -288,12 +288,12 @@ static void test_fog_exceptional(void)
         uint8_t fog, abs;
         const char *formula, *rule;
     } c[] = {
-        /* EXP: unfogged; EXP_ABS: fogged */
-        { 2, 0, "float fogf = exp(-vFog * pc.fog.z);", "fogf = isinf(vFog) || isnan(fogf) ? 1.0 :" },
-        { 2, 1, "float fogf = exp(-abs(vFog) * pc.fog.z);", "fogf = isinf(vFog) || isnan(fogf) ? 0.0 :" },
+        /* EXP: unfogged; EXP_ABS: fogged (pc.fog.x: FOG_PARAMS p0 - 1.5) */
+        { 2, 0, "float fogf = pc.fog.x + exp(-vFog * pc.fog.z);", "fogf = isinf(vFog) || isnan(fogf) ? 1.0 :" },
+        { 2, 1, "float fogf = pc.fog.x + exp(-abs(vFog) * pc.fog.z);", "fogf = isinf(vFog) || isnan(fogf) ? 0.0 :" },
         /* EXP2, EXP2_ABS: fogged */
-        { 3, 0, "float fogf = exp(-fd * fd);", "fogf = isinf(vFog) || isnan(fogf) ? 0.0 :" },
-        { 3, 1, "float fogf = exp(-fd * fd);", "fogf = isinf(vFog) || isnan(fogf) ? 0.0 :" },
+        { 3, 0, "float fogf = pc.fog.x + exp(-fd * fd);", "fogf = isinf(vFog) || isnan(fogf) ? 0.0 :" },
+        { 3, 1, "float fogf = pc.fog.x + exp(-fd * fd);", "fogf = isinf(vFog) || isnan(fogf) ? 0.0 :" },
         /* LINEAR, LINEAR_ABS: unfogged */
         { 4, 0, "float fogf = (pc.fog.y - vFog) / (pc.fog.y - pc.fog.x);",
           "fogf = isinf(vFog) || isnan(fogf) ? 1.0 :" },

@@ -34,6 +34,10 @@ enum {
     RS_FOGDENSITY = 96, RS_SPECULARENABLE = 103, RS_POINTSPRITEENABLE = 118,
     RS_FOGCOLOR = 138, RS_ZENABLE = 143, RS_STENCILENABLE = 144, RS_STENCILFAIL = 145,
     RS_FRONTFACE = 146, RS_CULLMODE = 147, RS_SHADOWFUNC = 156,
+    /* not D3D's: the NV2A's polygon modes and line width as pushed (vk/draw.c) */
+    RS_NV_FRONTMODE = 160, RS_NV_BACKMODE = 161, RS_NV_LINEWIDTH = 162, RS_NV_TWOSIDE = 163,
+    RS_NV_LIGHTCTL = 164,
+    RS_NV_EYEVEC = 82,                  /* .. 84: SET_EYE_VECTOR (DOT_RFLCT_SPEC_CONST) */
 };
 enum {
     TSS_ADDRESSU = 0, TSS_ADDRESSV, TSS_ADDRESSW, TSS_MAGFILTER, TSS_MINFILTER,
@@ -199,6 +203,9 @@ static const struct { uint16_t m, rs; } k_rs_map[] = {
     { 0x0374, RS_STENCILZFAIL }, { 0x0378, RS_STENCILPASS }, { 0x0330, RS_POINTOFFSETENABLE },
     { 0x0334, RS_WIREFRAMEOFFSETENABLE }, { 0x0338, RS_SOLIDOFFSETENABLE },
     { 0x0384, RS_ZSLOPESCALE }, { 0x0388, RS_ZOFFSET }, { 0x02A4, RS_FOGENABLE },
+    { 0x038C, RS_NV_FRONTMODE }, { 0x0390, RS_NV_BACKMODE }, { 0x0380, RS_NV_LINEWIDTH },
+    { 0x17C4, RS_NV_TWOSIDE }, { 0x0294, RS_NV_LIGHTCTL },
+    { 0x181C, RS_NV_EYEVEC }, { 0x1820, RS_NV_EYEVEC + 1 }, { 0x1824, RS_NV_EYEVEC + 2 },
     { 0x03B8, RS_SPECULARENABLE },
     /* SET_SHADOW_COMPARE_FUNC (D3DCMP_*: NEVER put Fable's whole world in
      * shadow), SET_POINT_SMOOTH_ENABLE (point sprites) */
@@ -229,7 +236,7 @@ void hle_kelvin_state(HleCmdState *st)
         rs[RS_FOGTABLEMODE] = (m == 0x2601 || m == 0x804 ? 3 : m == 0x801 || m == 0x803 ? 2 : 1) |
                               (m >= 0x802 && m <= 0x804 ? 0x100 : 0);
     }
-    if (W(0x09C0) || W(0x09C4)) {
+    if (W(0x09C0) || W(0x09C4) || W(0x029C)) {
         /* SET_FOG_PARAMS as pushed (Conker's meshes: their own fog): the
          * NV2A's linear factor is p0 - 1 + p1 d, exp / exp2 take the density
          * from p1 (D3D's encoding, as LLE decodes it). The back end's fog
@@ -252,6 +259,10 @@ void hle_kelvin_state(HleCmdState *st)
             dens = -p1 * 2.0f *
                    ((rs[RS_FOGTABLEMODE] & 3) == 2 ? sqrtf(logf(256.0f)) : logf(256.0f));
             memcpy(&rs[RS_FOGDENSITY], &dens, 4);
+            /* and p0's part: the factor is p0 - 1.5 + 2^(16 p1 d) (xemu's;
+             * D3D's p0 is 1.5: none), in the start's place (vk/draw.c pc.fog.x) */
+            st = p0 - 1.5f;
+            memcpy(&rs[RS_FOGSTART], &st, 4);
         }
     }
     if (W(0x02A8)) {                    /* ABGR -> D3DCOLOR */

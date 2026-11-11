@@ -89,11 +89,12 @@ uint32_t hle_pbd_target_rows(uint32_t pa, uint32_t pitch);
  * queued at on the timeline (vk/timeline.c hle_tl_land_copy: behind the
  * landings of the targets over the source whose images are newer, and the
  * copies queued over either range before it; dbase: a blit's destination
- * surface, 0 for M2MF); then hle_pbd_copy_done: a queued one's destination
- * closed to the guest till it lands, the targets over it with their memory
- * newer than their images. */
+ * surface, 0 for M2MF; reads_dst: the copy reads its destination too, a
+ * blend: made now, after every image over either range landed); then
+ * hle_pbd_copy_done: a queued one's destination closed to the guest till it
+ * lands, the targets over it with their memory newer than their images. */
 uint64_t hle_pbd_copy_begin(uint32_t slo, uint32_t sp, uint32_t dlo, uint32_t dp, uint32_t row,
-                            uint32_t rows, uint32_t dbase);
+                            uint32_t rows, uint32_t dbase, bool reads_dst);
 void hle_pbd_copy_done(uint32_t dlo, uint32_t dp, uint32_t row, uint32_t rows, uint64_t dep);
 /* Counters: targets' images landed, copies queued, decoder waits for them */
 void hle_pbd_coh_counts(uint64_t *lands, uint64_t *copies, uint64_t *waits);

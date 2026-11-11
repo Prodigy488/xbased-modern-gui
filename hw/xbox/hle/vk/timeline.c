@@ -55,6 +55,7 @@ typedef struct LandEnt {
     uint32_t dpitch;                    /* COPY */
     uint32_t soff1;                     /* DEPTH: the stencil's bytes in the landing buffer + 1 */
     uint8_t zsrc;                       /* DEPTH: what the depth aspect copied as (tex/zpack.h) */
+    float zf;                           /* DEPTH: a float buffer's scale (hle_zpack), 0 fixed */
     HleLandDone done;
     uint32_t token;
 } LandEnt;
@@ -125,11 +126,11 @@ bool hle_tl_land_copy(uint64_t value, uint32_t spa, uint32_t spitch, uint32_t dp
 }
 
 bool hle_tl_land_depth(uint64_t value, uint32_t off, uint32_t pa, uint32_t w, uint32_t h,
-                       uint32_t pitch, uint32_t gbpp)
+                       uint32_t pitch, uint32_t gbpp, float zf)
 {
     const LandEnt e = { .value = value, .kind = LAND_DEPTH, .off = off, .pa = pa,
                         .len = pitch ? pitch * (h - 1) + w * gbpp : w * h * gbpp,
-                        .w = w, .h = h, .bpp = gbpp, .pitch = pitch };
+                        .w = w, .h = h, .bpp = gbpp, .pitch = pitch, .zf = zf };
     return w && h && land_add(&e);
 }
 
@@ -246,14 +247,14 @@ static void land_one(const LandEnt *e)
             if (e->pitch) {
                 for (uint32_t y = 0; y < e->h; y++) {
                     hle_zpack(d + (size_t)y * e->w * zb, s ? s + (size_t)y * e->w : NULL, e->zsrc,
-                              e->w, e->bpp, dst + (size_t)y * e->pitch);
+                              e->w, e->bpp, dst + (size_t)y * e->pitch, e->zf);
                 }
                 landed = true;
             } else {
                 uint8_t *rows = malloc((size_t)n * e->bpp);
                 if (rows) {
                     const HleXgRect r = { 0, 0, e->w, e->h };
-                    hle_zpack(d, s, e->zsrc, n, e->bpp, rows);
+                    hle_zpack(d, s, e->zsrc, n, e->bpp, rows, e->zf);
                     hle_xg_swizzle_rect(rows, e->w * e->bpp, &r, dst, e->w, e->h, 0, 0, e->bpp);
                     free(rows);
                     landed = true;

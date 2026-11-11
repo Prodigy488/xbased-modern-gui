@@ -327,8 +327,13 @@ static void tail(Buf *bp, const HleVshKey *k, bool fogw)
     Buf b = *bp;
     /* specular off (NV2A SPECULAR_ENABLE clear): the pixel stage sees
      * (0, 0, 0, 1) whatever the program wrote */
-    const char *d1 = k->spec_off ? "vec4(0.0, 0.0, 0.0, 1.0)" : "clamp(oD1, 0.0, 1.0)";
-    const char *b1 = k->spec_off ? "vec4(0.0, 0.0, 0.0, 1.0)" : "clamp(oB1, 0.0, 1.0)";
+    /* the specular alpha 1 unless LIGHT_CONTROL takes it from the material,
+     * for a program as for fixed function (nxdk_pgraph_tests' Specular_back
+     * _VS: the console's back faces opaque there) */
+    const char *d1 = k->spec_off & 1 ? "vec4(0.0, 0.0, 0.0, 1.0)" :
+                     k->spec_off & 2 ? "vec4(clamp(oD1.rgb, 0.0, 1.0), 1.0)" : "clamp(oD1, 0.0, 1.0)";
+    const char *b1 = k->spec_off & 1 ? "vec4(0.0, 0.0, 0.0, 1.0)" :
+                     k->spec_off & 2 ? "vec4(clamp(oB1.rgb, 0.0, 1.0), 1.0)" : "clamp(oB1, 0.0, 1.0)";
     put(&b, "  vDiffuse = clamp(oD0, 0.0, 1.0);\n"
             "  vSpecular = %s;\n"
             "  vBack0 = clamp(oB0, 0.0, 1.0);\n"

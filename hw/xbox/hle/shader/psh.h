@@ -126,6 +126,8 @@ typedef struct HlePshKey {
 #define HLE_PSH_TKIND_BIT(s) (1u << (16 + (s)))
 #define HLE_PSH_RECT 0x10u              /* HlePshKey.vol: a linear texture kept to its size */
 #define HLE_PSH_RECT4 0x20u             /* HlePshKey.vol: each stage's in pc.scr (programs) */
+#define HLE_PSH_TWO_SIDE 0x40u          /* HlePshKey.vol: SET_TWO_SIDE_LIGHT_EN: a back face's
+                                           v0 / v1 are the program's oB0 / oB1 */
 
 /* Key from the render-state array (rs[0..56] = the pixel-shader block). */
 void hle_psh_key(const uint32_t *rs, HlePshKey *k);

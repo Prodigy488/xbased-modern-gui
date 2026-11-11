@@ -62,7 +62,7 @@ bool hle_tl_land_note(uint64_t value, HleLandDone done, uint32_t token);
  * its copy (hle_tl_land_depth_copied: what the depth aspect copied as,
  * tex/zpack.h, and where the stencil's bytes are, + 1; 0 none). */
 bool hle_tl_land_depth(uint64_t value, uint32_t off, uint32_t pa, uint32_t w, uint32_t h,
-                       uint32_t pitch, uint32_t gbpp);
+                       uint32_t pitch, uint32_t gbpp, float zf);
 void hle_tl_land_depth_copied(uint32_t off, int zsrc, uint32_t stencil_off1);
 /* Guest memory [pa, pa + len) was freed (any thread): the landings queued
  * into it are dropped (their done hears "not landed"). */

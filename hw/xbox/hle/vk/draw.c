@@ -59,6 +59,13 @@ enum {
     /* polygon offset (ZBias writes these: slope -0.25 * bias, offset -bias) */
     RS_ZSLOPESCALE = 77, RS_ZOFFSET = 78, RS_POINTOFFSETENABLE = 79,
     RS_WIREFRAMEOFFSETENABLE = 80, RS_SOLIDOFFSETENABLE = 81,
+    /* the NV2A's SET_FRONT / BACK_POLYGON_MODE (GL_POINT 0x1B00, GL_LINE,
+     * GL_FILL; 0 never set: fill) and SET_LINE_WIDTH (1/8 pixel, 6.3 bits),
+     * as pb/kelvin.c pushes them */
+    RS_NV_FRONTMODE = 160, RS_NV_BACKMODE = 161, RS_NV_LINEWIDTH = 162,
+    RS_NV_TWOSIDE = 163,                /* SET_TWO_SIDE_LIGHT_EN */
+    RS_NV_LIGHTCTL = 164,               /* SET_LIGHT_CONTROL */
+    RS_NV_EYEVEC = 82,                  /* .. 84: SET_EYE_VECTOR (float bits) */
 };
 /* texture-stage state indices */
 enum {
@@ -1856,7 +1863,12 @@ typedef struct PipeKey {
     HleFfVsKey vs;
     HleFfPsKey ps;
     uint32_t blend_en, src, dst, op, wmask;
-    uint32_t cfmt, dfmt, topo_class;
+    uint32_t cfmt, dfmt;
+    uint32_t topo_class;                /* bits 0-7: points, lines, triangles; 8-9: a
+                                           triangle's polygon mode (0 fill, 1 line, 2
+                                           point); 10-11: the discard rectangles' mode
+                                           (HleCmdViewport.wmode); 16-24: a line's width
+                                           in 1/8 pixel */
     uint64_t vsh;                       /* vertex program hash, 0 = FF vertex shader */
     HleVshKey vk;
     uint32_t psh;                       /* 1 = register combiners (pk), else FF stages */
@@ -2202,7 +2214,7 @@ static HlePbResult pipeline_build(const void *key, const uint32_t *tok, uint32_t
             VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST };
         VkPipelineInputAssemblyStateCreateInfo ia = {
             .sType = VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO,
-            .topology = k_class[k->topo_class] };
+            .topology = k_class[k->topo_class & 0xFF] };
         VkPipelineViewportStateCreateInfo vp = {
             .sType = VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO,
             .viewportCount = 1, .scissorCount = 1 };
@@ -2210,7 +2222,10 @@ static HlePbResult pipeline_build(const void *key, const uint32_t *tok, uint32_t
             .sType = VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO,
             /* without depthClamp the vertex shader clamps (HLE_ZCLAMP_GLSL) */
             .depthClampEnable = (k->vsh ? k->vk.zclamp : k->vs.zclamp) && g_hvk.caps.depth_clamp,
-            .polygonMode = VK_POLYGON_MODE_FILL, .lineWidth = 1.0f };
+            .polygonMode = ((k->topo_class >> 8) & 3) == 1 ? VK_POLYGON_MODE_LINE :
+                           ((k->topo_class >> 8) & 3) == 2 ? VK_POLYGON_MODE_POINT :
+                           VK_POLYGON_MODE_FILL,
+            .lineWidth = (k->topo_class >> 16) ? (float)(k->topo_class >> 16) / 8.0f : 1.0f };
         VkPipelineMultisampleStateCreateInfo ms = {
             .sType = VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO,
             .rasterizationSamples = VK_SAMPLE_COUNT_1_BIT };
@@ -2306,6 +2321,20 @@ static HlePbResult pipeline_build(const void *key, const uint32_t *tok, uint32_t
             .colorAttachmentCount = cf ? 1 : 0, .pColorAttachmentFormats = &cf,
             .depthAttachmentFormat = df,
             .stencilAttachmentFormat = stencil ? df : VK_FORMAT_UNDEFINED };
+        /* the window clip's rectangles (dynamic), in or out */
+        VkDynamicState dynx[64];
+        const uint32_t wm = (k->topo_class >> 10) & 3;
+        VkPipelineDiscardRectangleStateCreateInfoEXT drs = {
+            .sType = VK_STRUCTURE_TYPE_PIPELINE_DISCARD_RECTANGLE_STATE_CREATE_INFO_EXT,
+            .discardRectangleMode = wm == 2 ? VK_DISCARD_RECTANGLE_MODE_EXCLUSIVE_EXT :
+                                              VK_DISCARD_RECTANGLE_MODE_INCLUSIVE_EXT,
+            .discardRectangleCount = 8 };
+        if (wm && dy.dynamicStateCount < ARRAY_SIZE(dynx)) {
+            memcpy(dynx, dy.pDynamicStates, dy.dynamicStateCount * sizeof(dynx[0]));
+            dynx[dy.dynamicStateCount++] = VK_DYNAMIC_STATE_DISCARD_RECTANGLE_EXT;
+            dy.pDynamicStates = dynx;
+            ri.pNext = &drs;
+        }
         VkGraphicsPipelineCreateInfo gci = {
             .sType = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO, .pNext = &ri,
             .stageCount = 2, .pStages = st, .pInputAssemblyState = &ia,
@@ -3341,6 +3370,7 @@ static struct {
     uint32_t set1_off;
     VkViewport vp;
     VkRect2D sc;
+    VkRect2D wr[8];                     /* the discard rectangles (topo_class bits 10-11) */
     HleFfPush pc;
     uint32_t cull, ff, topo, zt, zw, zop, bias_en, stn, sop[4], smask, swmask, sref;
     uint32_t sraw[4];               /* the registers sop was translated from */
@@ -3754,6 +3784,9 @@ void hle_draw_cmd_draw(const HleCmdDraw *c, VkCommandBuffer cb, uint32_t rt_id, 
                 }
             }
         }
+        if (s->rs[RS_NV_TWOSIDE]) {
+            k.pk.vol |= HLE_PSH_TWO_SIDE;
+        }
         if (rect) {
             k.pk.vol |= HLE_PSH_RECT;           /* the stage fog.w names, kept to its size */
         }
@@ -3817,6 +3850,11 @@ void hle_draw_cmd_draw(const HleCmdDraw *c, VkCommandBuffer cb, uint32_t rt_id, 
                 mt[1] = half2(t[TSS_BUMPENVMAT00 + 2], t[TSS_BUMPENVMAT00 + 3]);
                 pc.bumpl[st - 1] = half2(t[TSS_BUMPENVLSCALE], t[TSS_BUMPENVLSCALE + 1]);
             }
+        }
+        /* DOT_RFLCT_SPEC_CONST's eye vector, where stages 1 and 2 (dot products)
+         * leave the bump matrices' words free */
+        if (((k.pk.tex_modes >> 15) & 0x1F) == HLE_PST_DOT_RFLCT_SPEC_CONST) {
+            memcpy(pc.bump, &s->rs[RS_NV_EYEVEC], 12);
         }
         psframe_log(c, s, &k.pk, rt_id, pc.psc);
         static unsigned s_logged, s_cube;
@@ -3923,7 +3961,7 @@ void hle_draw_cmd_draw(const HleCmdDraw *c, VkCommandBuffer cb, uint32_t rt_id, 
         k.vk.cmp_mask = cmps;
         k.vk.w1_mask = (uint16_t)w1s;
         k.vk.flat = s->rs[RS_SHADEMODE] == 0x1D00;
-        k.vk.spec_off = !s->spec;
+        k.vk.spec_off = (uint8_t)(!s->spec | (((s->rs[RS_NV_LIGHTCTL] >> 17) & 1) ? 0 : 2));
         k.vk.pt_size = (uint16_t)c->pt_size;
         k.vk.fog_table = s->rs[RS_FOGENABLE] && (s->rs[RS_FOGTABLEMODE] & 3) != 0;
     }
@@ -3982,6 +4020,25 @@ void hle_draw_cmd_draw(const HleCmdDraw *c, VkCommandBuffer cb, uint32_t rt_id, 
     k.cfmt = rt ? rt->fmt : 0;
     k.dfmt = ds ? ds->fmt : 0;
     k.topo_class = c->prim == 0 ? 0 : c->prim <= 2 ? 1 : 2;
+    if (g_hvk.caps.discard && vpc->wmode) {
+        k.topo_class |= (vpc->wmode & 3) << 10;
+    }
+    if (k.topo_class == 2 && g_hvk.caps.fill_lines) {
+        /* the faces drawn: the front one's mode unless fronts are culled */
+        const uint32_t m = s->rs[s->rs[RS_CULLMODE] && s->rs[RS_CULLMODE] == s->rs[RS_FRONTFACE] ?
+                                 RS_NV_BACKMODE : RS_NV_FRONTMODE];
+        k.topo_class |= (m == 0x1B01 ? 1u : m == 0x1B00 ? 2u : 0u) << 8;
+    }
+    if ((k.topo_class == 1 || ((k.topo_class >> 8) & 3) == 1) && g_hvk.caps.wide_lines) {
+        /* wide lines: the width's 1/8 pixels within the device's range */
+        float lw = (float)(s->rs[RS_NV_LINEWIDTH] & 0x1FF) / 8.0f;
+        const float *lr = g_hvk.props.limits.lineWidthRange;
+        lw = lw < lr[0] ? lr[0] : lw > lr[1] ? lr[1] : lw;
+        const uint32_t l8 = (uint32_t)(lw * 8.0f + 0.5f);
+        if (l8 != 8) {
+            k.topo_class |= l8 << 16;
+        }
+    }
     /* HAKUX_HLE_DBGFLAGS (debug): 1 stencil test off, 2 depth test off on
      * stencil-tested draws, 4 polygon offset off, 8 W-buffering off, 16 fog
      * off, 32 culling off */
@@ -4017,9 +4074,9 @@ void hle_draw_cmd_draw(const HleCmdDraw *c, VkCommandBuffer cb, uint32_t rt_id, 
         k.vs.zclamp = zclamp;
     }
     if (s->psh) {
-        k.pk.wbuf = wbuf;
+        k.pk.wbuf = wbuf ? (g_hvk.caps.bary ? 2 : 1) : 0;
     } else {
-        k.ps.wbuf = wbuf;
+        k.ps.wbuf = wbuf ? (g_hvk.caps.bary ? 2 : 1) : 0;
     }
     /* Polygon offset (decals over coplanar surfaces): NV2A adds the offset in
      * depth-buffer units and the slope factor times the polygon's depth slope,
@@ -4179,7 +4236,8 @@ void hle_draw_cmd_draw(const HleCmdDraw *c, VkCommandBuffer cb, uint32_t rt_id, 
     VkRect2D sc = full ? (VkRect2D){ { 0, 0 }, { sw, sh } } :
                          (VkRect2D){ { (int32_t)(vpc->x * rs), (int32_t)(vpc->y * rs) },
                                      { vpc->w * rs, vpc->h * rs } };
-    if (vpc->clip) {
+    const bool wdisc = g_hvk.caps.discard && vpc->wmode;
+    if (vpc->clip && !wdisc) {
         /* SetScissors' rectangle replaces the viewport as the clip */
         int32_t x1 = MAX(vpc->cx1, 0), y1 = MAX(vpc->cy1, 0);
         int32_t x2 = MIN(vpc->cx2, (int32_t)tw), y2 = MIN(vpc->cy2, (int32_t)th);
@@ -4204,6 +4262,18 @@ void hle_draw_cmd_draw(const HleCmdDraw *c, VkCommandBuffer cb, uint32_t rt_id, 
         g_rec.sc = sc;
         T.vkCmdSetScissor(cb, 0, 1, &sc);
         g_dr.emits[EM_SC]++;
+    }
+    if (wdisc) {
+        VkRect2D wr[8];
+        for (unsigned i = 0; i < 8; i++) {
+            const HleRect *r = &vpc->wr[i];
+            wr[i] = (VkRect2D){ { r->x1 * (int32_t)rs, r->y1 * (int32_t)rs },
+                                { (uint32_t)(r->x2 - r->x1) * rs, (uint32_t)(r->y2 - r->y1) * rs } };
+        }
+        if (!g_rec.valid || memcmp(g_rec.wr, wr, sizeof(wr))) {
+            memcpy(g_rec.wr, wr, sizeof(wr));
+            T.vkCmdSetDiscardRectangleEXT(cb, 0, 8, wr);
+        }
     }
     float msx = MAX(s->xs, 1u), msy = MAX(s->ys, 1u);
     float aax = s->aa ? msx : 1.0f, aay = s->aa ? msy : 1.0f;

@@ -413,8 +413,19 @@ size_t hle_psh_glsl(const HlePshKey *k, char *buf, size_t cap, unsigned *unsuppo
             break;
         }
     }
-    put(&b, "#version 450\n#extension GL_EXT_nonuniform_qualifier : require\n%s",
-        hle_push_glsl());
+    put(&b, "#version 450\n#extension GL_EXT_nonuniform_qualifier : require\n%s%s",
+        k->wbuf == 2 ? HLE_WBUF_BARY_EXT_GLSL : "", hle_push_glsl());
+    /* two-sided lighting: a back face's v0 / v1 from the program's oB0 / oB1
+     * (nxdk_pgraph_tests' Specular_back: black on the console, the front
+     * colours here) */
+    if (k->vol & HLE_PSH_TWO_SIDE) {
+        put(&b, "layout(location = 7) %sin vec4 vBack0;\n"
+                "layout(location = 8) %sin vec4 vBack1;\n"
+                "#define HLE_V0 (gl_FrontFacing ? vDiffuse : vBack0)\n"
+                "#define HLE_V1 (gl_FrontFacing ? vSpecular : vBack1)\n", interp, interp);
+    } else {
+        put(&b, "#define HLE_V0 vDiffuse\n#define HLE_V1 vSpecular\n");
+    }
     put(&b, "layout(set = 0, binding = 0) uniform texture2D uTex2D[];\n"
             "layout(set = 0, binding = 1) uniform sampler uSmp[];\n"
             "layout(set = 0, binding = 2) uniform textureCube uTexCube[];\n"
@@ -438,6 +449,17 @@ size_t hle_psh_glsl(const HlePshKey *k, char *buf, size_t cap, unsigned *unsuppo
             "  if ((pc.flags & (1u << s)) != 0u)\n"
             "    uv /= vec2(textureSize(sampler2D(uTex2D[nonuniformEXT(ti)], uSmp[0]), 0)) /\n"
             "          ((pc.flags & (256u << s)) != 0u ? float(pc.flags >> 24) : 1.0);\n"
+            /* a title without D3D, a primitive without perspective (1/w the
+             * same over it): a coordinate within 1/65536 texel of a texel edge
+             * on it (the NV2A's exact edges where the interpolation here lands
+             * a hair short: nxdk_pgraph_tests' checkerboard rows 75, 150 ...
+             * took the texel before the console's; under perspective the
+             * console's own ties go the other way, Shade_model) */
+            "  if ((pc.flags & 8192u) != 0u && dFdx(gl_FragCoord.w) == 0.0 && dFdy(gl_FragCoord.w) == 0.0) {\n"
+            "    vec2 qs = vec2(textureSize(sampler2D(uTex2D[nonuniformEXT(ti)], uSmp[0]), 0));\n"
+            "    vec2 qt = uv * qs, qr = floor(qt + 0.5);\n"
+            "    uv = mix(uv, qr / qs, lessThan(abs(qt - qr), vec2(1.0 / 65536.0)));\n"
+            "  }\n"
             "  return texture(sampler2D(uTex2D[nonuniformEXT(ti)], uSmp[nonuniformEXT(si)]), uv);\n"
             "}\n"
             "vec4 samp3(uint s, vec3 uvw) {\n"
@@ -463,9 +485,19 @@ size_t hle_psh_glsl(const HlePshKey *k, char *buf, size_t cap, unsigned *unsuppo
             "%s"
             "  if (m == 3u) { vec3 v = floor(c.rgb * 255.0 + 0.5);\n"
             "    return mix(v, v - 256.0, greaterThanEqual(v, vec3(128.0))) / 127.0; }\n"
-            "  if (m >= 4u) { vec2 h = c.rg * 2.0 - 1.0;\n"
-            "    return vec3(h, m == 4u ? 1.0 : sqrt(max(1.0 - dot(h, h), 0.0))); }\n"
-            "  return c.rgb * 2.0 - 1.0;\n"
+            "  if (m == 4u) { vec2 h = c.rg * 2.0 - 1.0; return vec3(h, 1.0); }\n"
+            /* HILO_HEMISPHERE: the texel's two 16-bit halves (A R, G B) as signed
+             * numbers over 32767, z completing the unit vector */
+            "  if (m >= 5u) { uvec4 i = uvec4(c * 255.0 + 0.5);\n"
+            "    ivec2 hs = ivec2(int(i.a << 8 | i.r), int(i.g << 8 | i.b));\n"
+            "    hs = hs - ivec2(greaterThanEqual(hs, ivec2(32768))) * 65536;\n"
+            "    vec2 h = clamp(vec2(hs) / 32767.0, -1.0, 1.0);\n"
+            "    return vec3(h, sqrt(max(1.0 - dot(h, h), 0.0))); }\n"
+            /* MINUS1_TO_1_D3D: (b - 128) / 127; _GL: (b + 0.5) / 127.5 below 128,
+             * (b - 255.5) / 127.5 from it (xemu's, measured on a console) */
+            "  { vec3 b = floor(c.rgb * 255.0 + 0.5);\n"
+            "    if (m == 1u) return (b - 128.0) / 127.0;\n"
+            "    return mix((b + 0.5) / 127.5, (b - 255.5) / 127.5, greaterThanEqual(b, vec3(128.0))); }\n"
             "}\n"
             /* bytes as two's complement over 127 (bump offsets) */
             "vec2 sgn8(vec2 c) {\n"
@@ -474,8 +506,8 @@ size_t hle_psh_glsl(const HlePshKey *k, char *buf, size_t cap, unsigned *unsuppo
             "}\n"
             "%s%s%s"
             "void main() {\n"
-            "  vec4 v0 = vDiffuse, v1 = vSpecular;\n"
-            "  vec4 vTex3 = %s;\n", interp, interp, k->wbuf ? HLE_WBUF_IN_GLSL : "",
+            "  vec4 v0 = HLE_V0, v1 = HLE_V1;\n"
+            "  vec4 vTex3 = %s;\n", interp, interp, k->wbuf == 2 ? HLE_WBUF_IN_BARY_GLSL : k->wbuf ? HLE_WBUF_IN_GLSL : "",
         (k->fbfetch & ~HLE_FB_ZEQ) || k->sblend ?
             "layout(input_attachment_index = 0, set = 2, binding = 0) "
             "uniform subpassInput uFb;\n" : "",
@@ -512,7 +544,7 @@ size_t hle_psh_glsl(const HlePshKey *k, char *buf, size_t cap, unsigned *unsuppo
             "}\n" : "",
         k->point_sprite ? "vec4(gl_PointCoord, 1.0, 1.0)" : "vTex3i");
     if (k->wbuf) {
-        put(&b, HLE_WBUF_CALC_GLSL);
+        put(&b, k->wbuf == 2 ? HLE_WBUF_CALC_BARY_GLSL : HLE_WBUF_CALC_GLSL);
     }
     /* the table modes' distance: signed, as D3D's fog modes (LTCG 5849
      * 0x5421d0: 0x2601 linear, 0x800 / 0x801 exp, never the _ABS ones);
@@ -527,9 +559,9 @@ size_t hle_psh_glsl(const HlePshKey *k, char *buf, size_t cap, unsigned *unsuppo
     /* the table modes too: the NV2A's linear mode is the same hardware
      * (push-buffer mode decodes D3D's vertex fog as linear, p0 1 / p1 1), so
      * Otogi 2's NaN fog coordinates turned every surface the fog colour */
-    case 2:  put(&b, "  float fogf = exp(-%s * pc.fog.z);\n", fd); break;
+    case 2:  put(&b, "  float fogf = pc.fog.x + exp(-%s * pc.fog.z);\n", fd); break;
     case 3:  put(&b, "  float fd = %s * pc.fog.z;\n"
-                     "  float fogf = exp(-fd * fd);\n", fd); break;
+                     "  float fogf = pc.fog.x + exp(-fd * fd);\n", fd); break;
     default: put(&b, "  float fogf = (pc.fog.y - %s) / (pc.fog.y - pc.fog.x);\n", fd); break;
     }
     if (k->fog >= 2) {
@@ -690,16 +722,17 @@ size_t hle_psh_glsl(const HlePshKey *k, char *buf, size_t cap, unsigned *unsuppo
                                         : "  vec4 t%u = sampc(%uu, vec3(dot1, dot2, dot3));\n", s, s);
             break;
         case HLE_PST_DOT_RFLCT_SPEC:                /* stage 3: N reflected about E */
-        case HLE_PST_DOT_RFLCT_SPEC_CONST:          /* (E = the eye vector: q coordinates) */
+        case HLE_PST_DOT_RFLCT_SPEC_CONST:          /* (E = the eye vector: q coordinates, or
+                                                       SET_EYE_VECTOR's: pc.bump) */
             put(&b, "  vec4 t%u;\n  { vec3 n = vec3(dot1, dot2, dot3), "
-                    "e = vec3(vTex1.w, vTex2.w, vTex3.w);\n"
+                    "e = %s;\n", s, m == HLE_PST_DOT_RFLCT_SPEC_CONST ? "uintBitsToFloat(pc.bump.xyz)" :
+                                                                       "vec3(vTex1.w, vTex2.w, vTex3.w)");
+            put(&b, 
                     "    vec3 rv = 2.0 * n * dot(n, e) / max(dot(n, n), 1e-8) - e;\n"
                     "    t%u = %s; }\n",
-                s, s, HLE_PSH_TKIND(k, s) ? (s == 3 ? "samp2(3u, cube2d(rv))" : "samp2(2u, cube2d(rv))")
+                s, HLE_PSH_TKIND(k, s) ? (s == 3 ? "samp2(3u, cube2d(rv))" : "samp2(2u, cube2d(rv))")
                                           : (s == 3 ? "sampc(3u, rv)" : "sampc(2u, rv)"));
-            if (m == HLE_PST_DOT_RFLCT_SPEC_CONST) {
-                unsup |= 1u << m;
-            }
+
             break;
         default:                        /* volume, BRDF, DOT_ZW, dependent AR/GB */
             unsup |= 1u << m;

@@ -1,5 +1,27 @@
 # xbased changelog
 
+## 1.0.101 (2026-11)
+
+### Fixes
+- Graphics chip accuracy, from the chip test program (nxdk_pgraph_tests):
+  977 of its 3556 pictures now match the console's exactly (803 in 1.0.99).
+  What games can see of it:
+  - Wireframe and point fill modes, and line widths, are drawn as the
+    console draws them (they were always filled, and lines 1 pixel wide).
+  - Two-sided lighting: back faces take their own colours (unlit, none).
+  - The specular alpha is 1 unless the material provides it, with vertex
+    shaders too.
+  - Exponential fog takes the fog parameters' bias.
+  - 2D blits honour their clip rectangle, the blend with a beta factor and
+    the alpha of the X8R8G8B8 surface formats.
+  - Pixel shader dot mappings (signed D3D / GL, HILO hemisphere) and the
+    specular reflection with a constant eye vector are the console's.
+  - W-buffered surfaces with a depth offset (decals) take the console's
+    offset slope.
+- Homebrew that drives the chip itself: float depth buffers, the window
+  clip's eight rectangles (inside or outside), the surface clip, the 2D
+  line object and texel edges now behave as on the console.
+
 ## 1.0.100 (2026-11)
 
 ### Fixes

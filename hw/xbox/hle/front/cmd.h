@@ -145,6 +145,10 @@ typedef struct HleCmdSetRt {
     uint32_t rt, ds;            /* object ids, 0 = none */
 } HleCmdSetRt;
 
+typedef struct HleRect {
+    int32_t x1, y1, x2, y2;
+} HleRect;
+
 typedef struct HleCmdViewport {
     uint32_t x, y, w, h;        /* render-target pixels */
     float minz, maxz;
@@ -155,11 +159,12 @@ typedef struct HleCmdViewport {
      * instead of the viewport (the NV2A surface clip); clip 0 = the viewport */
     uint32_t clip;
     int32_t cx1, cy1, cx2, cy2;
+    /* the window clip's eight rectangles as the NV2A has them (a title
+     * without D3D: pb/pbdraw.c), render-target pixels: wmode 1 draws inside
+     * any, 2 outside all (vk/draw.c, VK_EXT_discard_rectangles); 0 none */
+    uint32_t wmode;
+    HleRect wr[8];
 } HleCmdViewport;
-
-typedef struct HleRect {
-    int32_t x1, y1, x2, y2;
-} HleRect;
 
 typedef struct HleCmdClear {
     uint32_t flags;             /* D3DCLEAR_* */

@@ -28,7 +28,9 @@ typedef struct HleVshKey {
     uint16_t int_mask;          /* of those, fetched as signed integers */
     uint16_t cmp_mask;          /* of those, packed 11:11:10 dwords */
     uint8_t flat;               /* SHADEMODE FLAT */
-    uint8_t spec_off;           /* specular off: oD1 / oB1 read as (0, 0, 0, 1) */
+    uint8_t spec_off;           /* bit 0, specular off: oD1 / oB1 read as (0, 0, 0, 1); bit 1,
+                                   SET_LIGHT_CONTROL without ALPHA_FROM_MATERIAL: their
+                                   alpha 1, a program's too */
     uint8_t wbuf;               /* W-buffering: oPos.w to the pixel stage (vW) */
     uint8_t zfree;              /* no depth test: the program's z clips nothing */
     uint8_t fog_table;          /* FOGTABLEMODE other than NONE (a program writing

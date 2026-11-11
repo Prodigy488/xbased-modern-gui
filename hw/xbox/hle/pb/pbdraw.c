@@ -138,6 +138,11 @@ typedef struct PbObj {
                                            last found unchanged at */
     uint64_t mem_pend;                  /* a copy queued into its memory lands at this value */
     uint32_t armed_drops;               /* hle_barrier_guard_drops() when guarded (0: not) */
+    float zfs;                          /* a float depth target: the scale its image was last drawn or
+                                           cleared at (zfloat_scale), its words made with it; 0 fixed */
+    uint64_t zclr_w;                    /* a depth target: its written when its last write was a whole
+                                           clear (zalias_carry), of the word zclr_raw */
+    uint32_t zclr_raw;
     uint32_t mn_epoch;                  /* coh_mem_newer's answer (mn) as of this write epoch */
     bool mn;
     bool learned;                       /* the guest reads it: landed at fences (coh_fence) */
@@ -816,6 +821,18 @@ static uint64_t span_hash(uint32_t pa, uint32_t len);
 /* The bound depth target was (or may have been) written: its written, as a
  * colour target's at its draws (zread: the memory's last writer). */
 static void zcoh_drawn(PbObj *o);
+static float zfloat_scale(bool z24);
+static float zfloat_clear(uint32_t v, bool z24);
+
+static bool zfmt_float(uint32_t x)
+{
+    return x == HLE_XFMT_F16 || x == HLE_XFMT_LIN_F16 || x == HLE_XFMT_F24S8 || x == HLE_XFMT_LIN_F24S8;
+}
+
+static bool zfmt_24(uint32_t x)
+{
+    return x == HLE_XFMT_D24S8 || x == HLE_XFMT_LIN_D24S8 || x == HLE_XFMT_F24S8 || x == HLE_XFMT_LIN_F24S8;
+}
 
 static void ds_written(void)
 {
@@ -827,6 +844,7 @@ static void ds_written(void)
     }
     if (g_pd.ds_obj) {
         g_pd.ds_obj->written = ++g_pd.wseq;
+        g_pd.ds_obj->zfs = zfmt_float(g_pd.ds_obj->d.xfmt) ? zfloat_scale(zfmt_24(g_pd.ds_obj->d.xfmt)) : 0.0f;
         zcoh_drawn(g_pd.ds_obj);
     }
 }
@@ -1107,6 +1125,49 @@ static void writeback(uint32_t id)
  * geometry smeared over it. The back end converts the colour image into
  * the depth image (HLE_OP_ZWRITE) when the colour one was written later,
  * as D3D mode's depth views do. */
+/* The depth target bound now is a format's object over memory another
+ * format's object (fixed against float, CONTROL0's Z_FORMAT) wrote later:
+ * on the NV2A both are the same words. A whole clear the other took is
+ * carried (nxdk_pgraph_tests' W_buffering and depth suites clear with the
+ * fixed format and then set the float one: our float image held the test
+ * before's depths, and the floor came out in a grid of failed tests). */
+static void zalias_carry(void)
+{
+    PbObj *o = g_pd.ds_obj;
+    if (!o || !o->id) {
+        return;
+    }
+    const PbObj *a = NULL;
+    for (unsigned i = 0; i < g_pd.nobjs; i++) {
+        const PbObj *p = &g_pd.objs[i];
+        if (p != o && p->id && p->d.pa == o->d.pa && p->d.w == o->d.w && p->d.h == o->d.h &&
+            p->d.pitch == o->d.pitch && zfmt_24(p->d.xfmt) == zfmt_24(o->d.xfmt) &&
+            p->d.xfmt != o->d.xfmt && (zfmt_24(p->d.xfmt) || p->d.xfmt == HLE_XFMT_D16 || p->d.xfmt == HLE_XFMT_LIN_D16 || zfmt_float(p->d.xfmt)) &&
+            p->written > o->written && (!a || p->written > a->written)) {
+            a = p;
+        }
+    }
+    if (!a || a->zclr_w != a->written) {
+        return;
+    }
+    const bool z24 = zfmt_24(o->d.xfmt), zfl = zfmt_float(o->d.xfmt);
+    const uint32_t zs = a->zclr_raw;
+    HleCmdClear *c = begin(HLE_OP_CLEAR, sizeof(*c));
+    memset(c, 0, sizeof(*c));
+    c->flags = HLE_CLEAR_ZBUFFER | (z24 ? HLE_CLEAR_STENCIL : 0);
+    c->color = 0;
+    if (z24) {
+        c->z = zfl ? zfloat_clear(zs >> 8, true) : (zs >> 8) / 16777215.0f;
+        c->stencil = zs & 0xFF;
+    } else {
+        c->z = zfl ? zfloat_clear(zs & 0xFFFF, false) : (zs & 0xFFFF) / 65535.0f;
+    }
+    hle_fe_commit();
+    ds_written();
+    o->zclr_w = o->written;
+    o->zclr_raw = zs;
+}
+
 static void zwrite_from_colour(uint32_t ds)
 {
     const HleSurfDesc *d = object_desc(ds);
@@ -1269,6 +1330,7 @@ static void sync_rt(void)
         s->ds = ds;
         hle_fe_commit();
         rt_cpu_sync(rt);
+        zalias_carry();
         g_pd.rt_fresh = true;
         g_pd.vp_key[0] = g_pd.vp_key[1] = ~0u;
     }
@@ -1307,6 +1369,25 @@ static void sync_rt(void)
         v->minz = 0.0f;
         v->maxz = 1.0f;
         int32_t r[4];
+        v->wmode = 0;
+        if (g_pd.bare) {
+            /* every rectangle as it is (a zero word: the pixel at the
+             * origin; nxdk_pgraph_tests' Window_clip), inclusive or
+             * exclusive; one over the whole surface clips nothing inclusive */
+            const uint32_t sw = swz ? w : cx + cw, sh = swz ? h : cy + ch;
+            const bool ex = R(NV097_SET_WINDOW_CLIP_TYPE) & 1;
+            bool all = false;
+            for (unsigned i = 0; i < 8; i++) {
+                const uint32_t x = R(NV097_SET_WINDOW_CLIP_HORIZONTAL + 4 * i);
+                const uint32_t y = R(NV097_SET_WINDOW_CLIP_VERTICAL + 4 * i);
+                const int32_t x1 = x & 0xFFF, x2 = ((x >> 16) & 0xFFF) + 1;
+                const int32_t y1 = y & 0xFFF, y2 = ((y >> 16) & 0xFFF) + 1;
+                all |= !ex && x1 == 0 && y1 == 0 && x2 >= (int32_t)sw && y2 >= (int32_t)sh;
+                v->wr[i] = (HleRect){ x1 * (int32_t)g_pd.aa_x, y1 * (int32_t)g_pd.aa_y,
+                                      MAX(x2, x1) * (int32_t)g_pd.aa_x, MAX(y2, y1) * (int32_t)g_pd.aa_y };
+            }
+            v->wmode = all ? 0 : ex ? 2 : 1;
+        }
         if (window_clip(swz ? w : cx + cw, swz ? h : cy + ch, r)) {
             v->clip = 1;
             v->cx1 = MAX(r[0] * (int32_t)g_pd.aa_x, (int32_t)v->x);
@@ -1350,11 +1431,13 @@ static void rt_first_write(bool full)
  * clear's, not in rt_first_write: a draw's comes after its arena blocks,
  * and a landing kicks and waits; with the GPU idle the arena starts again
  * at 0, over them. Once an object: never drawn into, its memory newer. */
+static bool coh_newer_over(const PbObj *o, uint32_t len);
+
 static void rt_first_land(bool full)
 {
     PbObj *o = g_pd.rt_fresh && !full ? obj_of(g_pd.rt) : NULL;
     uint32_t len;
-    if (o && !o->written && coh_managed(o, &len)) {
+    if (o && coh_managed(o, &len) && (!o->written || coh_newer_over(o, len))) {
         coh_land_over(o, len);
     }
 }
@@ -1369,16 +1452,23 @@ static void rt_first_land(bool full)
  * and failed its LESSEQUAL test: the screen black under the HUD. */
 static float zfloat_scale(bool z24)
 {
-    static float s[2];
-    if (!s[z24]) {
-        const float m = z24 ? 1.0e30f : 511.9375f;
-        float v = 1.0f / m;
-        while (m * v > 1.0f) {
-            v = nextafterf(v, 0.0f);
-        }
-        s[z24] = v;
+    /* The NV2A clips the depth to CLIP_MIN .. CLIP_MAX: a CLIP_MAX below the
+     * format's own maximum is the image's 1.0, and a depth past it clips
+     * (nxdk_pgraph_tests' depth format suites put a float buffer's CLIP_MAX
+     * at 2^24 under a viewport that takes the depth to 1e30: nothing is drawn
+     * on the console, and the buffer keeps its clear). */
+    float m = z24 ? 1.0e30f : 511.9375f;
+    float clip;
+    const uint32_t cb = R(0x0398);
+    memcpy(&clip, &cb, 4);
+    if (clip > 0.0f && clip < m) {
+        m = clip;
     }
-    return s[z24];
+    float v = 1.0f / m;
+    while (m * v > 1.0f) {
+        v = nextafterf(v, 0.0f);
+    }
+    return v;
 }
 
 /* A float depth buffer's clear value (F24: 8-bit exponent, 16-bit mantissa;
@@ -1404,6 +1494,19 @@ static void clear(uint32_t flags)
     const int32_t ax = (int32_t)MAX(g_pd.aa_x, 1u), ay = (int32_t)MAX(g_pd.aa_y, 1u);
     HleRect r = { (int32_t)(hr & 0xFFFF) * ax, (int32_t)(vr & 0xFFFF) * ay,
                   (int32_t)((hr >> 16) + 1) * ax, (int32_t)((vr >> 16) + 1) * ay };
+    if (g_pd.bare) {
+        /* within the surface clip (nxdk_pgraph_tests' Surface_clip: the
+         * memory outside it keeps what the CPU wrote there) */
+        const uint32_t ch = R(NV097_SET_SURFACE_CLIP_HORIZONTAL), cv = R(NV097_SET_SURFACE_CLIP_VERTICAL);
+        const int32_t cx1 = (int32_t)(ch & 0xFFFF) * ax, cy1 = (int32_t)(cv & 0xFFFF) * ay;
+        r.x1 = MAX(r.x1, cx1);
+        r.y1 = MAX(r.y1, cy1);
+        r.x2 = MIN(r.x2, cx1 + (int32_t)(ch >> 16) * ax);
+        r.y2 = MIN(r.y2, cy1 + (int32_t)(cv >> 16) * ay);
+        if (r.x2 <= r.x1 || r.y2 <= r.y1) {
+            return;
+        }
+    }
     const bool full = (flags & 0xF0) == 0xF0 && R(0x0358) == 0x01010101u && r.x1 <= 0 && r.y1 <= 0 &&
                       (uint32_t)r.x2 >= g_pd.rt_w && (uint32_t)r.y2 >= g_pd.rt_h;
     rt_first_land(full);
@@ -1439,6 +1542,12 @@ static void clear(uint32_t flags)
     }
     if (c->flags & (HLE_CLEAR_ZBUFFER | HLE_CLEAR_STENCIL)) {
         ds_written();
+        PbObj *zo = g_pd.ds_obj;
+        if (zo && r.x1 <= 0 && r.y1 <= 0 && (uint32_t)r.x2 >= g_pd.rt_w && (uint32_t)r.y2 >= g_pd.rt_h &&
+            (c->flags & HLE_CLEAR_ZBUFFER) && (zf != 2 || (c->flags & HLE_CLEAR_STENCIL))) {
+            zo->zclr_w = zo->written;
+            zo->zclr_raw = zs;
+        }
     }
     g_pd.clears++;
 }
@@ -3887,7 +3996,8 @@ static void draw_arrays(void)
      * snowy town as ~17k short strips a frame, which as indexed draws went to
      * the GPU one by one at ~1.7 us each, and the frame took the GPU 30 ms
      * at 2x (26 fps; 30 at 3x in D3D mode, whose strips were joined). */
-    if (hi - lo + 1 == n && pt != NV2A_PRIM_QUADS && pt != NV2A_PRIM_LINE_LOOP) {
+    if (hi - lo + 1 == n && pt != NV2A_PRIM_QUADS && pt != NV2A_PRIM_LINE_LOOP &&
+        pt != HLE_PT_QUADLIST_EDGES && pt != HLE_PT_QUADSTRIP_EDGES) {
         bool seq = true;
         for (uint32_t i = 0; i < n && seq; i++) {
             seq = g_pd.idx[i] == lo + i;
@@ -3909,7 +4019,8 @@ static void draw_arrays(void)
         skip(SK_DRAW_ARRAYS_ARENA2);
         return;
     }
-    if (pt == NV2A_PRIM_QUADS || pt == NV2A_PRIM_LINE_LOOP) {
+    if (pt == NV2A_PRIM_QUADS || pt == NV2A_PRIM_LINE_LOOP || pt == HLE_PT_QUADLIST_EDGES ||
+        pt == HLE_PT_QUADSTRIP_EDGES) {
         for (uint32_t i = 0; i < n; i++) {
             g_pd.idx16[i] = (uint16_t)(g_pd.idx[i] - lo);
         }
@@ -3926,8 +4037,32 @@ static void draw_arrays(void)
     emit(&d);
 }
 
-/* The draw gathered since SET_BEGIN_END. */
+static void draw_prim(void);
+
+/* The draw gathered since SET_BEGIN_END. Under SET_FRONT_POLYGON_MODE
+ * GL_LINE a quad list's, strip's or polygon's outline (its sides as lines:
+ * the triangles they are drawn as would show their diagonals; nxdk_pgraph_tests'
+ * Line_width) */
 static void draw(void)
+{
+    const uint32_t pt = g_pd.prim;
+    /* a surface clip of no width or height draws nothing (nxdk_pgraph_tests'
+     * Surface_clip; a title without D3D only: D3D always sets its target's) */
+    if (g_pd.bare && (!(R(NV097_SET_SURFACE_CLIP_HORIZONTAL) >> 16) ||
+                      !(R(NV097_SET_SURFACE_CLIP_VERTICAL) >> 16))) {
+        return;
+    }
+    if (R(0x038C) == 0x1B01u && pt >= NV2A_PRIM_QUADS && pt <= 10u) {
+        g_pd.prim = pt == NV2A_PRIM_QUADS ? HLE_PT_QUADLIST_EDGES :
+                    pt == 9u ? HLE_PT_QUADSTRIP_EDGES : NV2A_PRIM_LINE_LOOP;
+        draw_prim();
+        g_pd.prim = pt;
+        return;
+    }
+    draw_prim();
+}
+
+static void draw_prim(void)
 {
     sync_rt();
     if (!g_pd.rt && !g_pd.ds) {
@@ -4735,7 +4870,7 @@ static bool copy_covers(const PbObj *o, uint32_t len, uint32_t dlo, uint32_t dp,
  * queued from its destination (they read it as they land); queued, the
  * guest's first write to its source waits for it too. */
 uint64_t hle_pbd_copy_begin(uint32_t slo, uint32_t sp, uint32_t dlo, uint32_t dp, uint32_t row,
-                            uint32_t rows, uint32_t dbase)
+                            uint32_t rows, uint32_t dbase, bool reads_dst)
 {
     g_coh_rows.id = 0;
     if (!g_pd.on || !rows || !row) {
@@ -4747,7 +4882,9 @@ uint64_t hle_pbd_copy_begin(uint32_t slo, uint32_t sp, uint32_t dlo, uint32_t dp
     const uint32_t d0 = (uint32_t)MIN((int64_t)dlo, (int64_t)dlo + dl), d1 = (uint32_t)MAX((int64_t)dlo, (int64_t)dlo + dl) + row;
     coh_adopt();
     uint32_t len;
-    PbObj *rd = dbase && g_pd.device ? obj_of(object_at(dbase)) : NULL;
+    /* (a copy that reads its destination, NV09F BLEND_AND: every image over
+     * it lands first, the destination target's too, and the copy is made now) */
+    PbObj *rd = dbase && !reads_dst && g_pd.device ? obj_of(object_at(dbase)) : NULL;
     if (rd && (!rd->d.pitch || !coh_managed(rd, &len))) {
         rd = NULL;
     }
@@ -4790,6 +4927,11 @@ uint64_t hle_pbd_copy_begin(uint32_t slo, uint32_t sp, uint32_t dlo, uint32_t dp
     if (v > hle_fe_last_value()) {
         kick();                             /* (a writeback in the open submission: sent, so a
                                                wait for the copy never waits on the decoder) */
+    }
+    if (v && reads_dst) {
+        coh_wait(v);
+        coh_adopt();
+        v = 0;
     }
     if (v && !hle_tl_land_copy(v, slo, sp, dlo, dp, row, rows, NULL, 0)) {
         coh_wait(v);                        /* no room in the queue: made now, after its landings */
@@ -4939,10 +5081,10 @@ static bool zcoh_len(const PbObj *o, uint32_t *guard, uint32_t *gbpp)
         return false;
     }
     switch (o->d.xfmt) {
-    case HLE_XFMT_D16: case HLE_XFMT_LIN_D16:
+    case HLE_XFMT_D16: case HLE_XFMT_LIN_D16: case HLE_XFMT_F16: case HLE_XFMT_LIN_F16:
         *gbpp = 2;
         break;
-    case HLE_XFMT_D24S8: case HLE_XFMT_LIN_D24S8:
+    case HLE_XFMT_D24S8: case HLE_XFMT_LIN_D24S8: case HLE_XFMT_F24S8: case HLE_XFMT_LIN_F24S8:
         *gbpp = 4;
         break;
     default:
@@ -5010,7 +5152,10 @@ static uint64_t zcoh_land(PbObj *o)
     rb->w = o->d.w;
     rb->h = o->d.h;
     /* (queued before the back end can record its copy) */
-    const bool queued = hle_tl_land_depth(v, fb - 1, o->d.pa, o->d.w, o->d.h, o->d.pitch, gbpp);
+    const bool zfl = o->d.xfmt == HLE_XFMT_F16 || o->d.xfmt == HLE_XFMT_LIN_F16 ||
+                     o->d.xfmt == HLE_XFMT_F24S8 || o->d.xfmt == HLE_XFMT_LIN_F24S8;
+    const bool queued = hle_tl_land_depth(v, fb - 1, o->d.pa, o->d.w, o->d.h, o->d.pitch, gbpp,
+                                          zfl ? (o->zfs > 0.0f ? o->zfs : zfloat_scale(gbpp == 4)) : 0.0f);
     hle_barrier_arm_keep(o->d.pa, len, v, false);
     hle_fe_commit();
     if (!queued) {
@@ -5148,6 +5293,27 @@ static void coh_land_over(const PbObj *o, uint32_t len)
         coh_wait(v);
         coh_adopt();
     }
+}
+
+/* Another target over o's memory (another format's, a view's) holds an
+ * image drawn after o's and newer than the memory (a colour target of another
+ * format at the same address): the NV2A's draws into it
+ * went into o's bytes too. nxdk_pgraph_tests' Surface_clip draws into the
+ * frame buffer as R5G6B5 and then its text as A8R8G8B8: the 32-bit target's
+ * image, older, lost the 16-bit drawing the console shows under the text. */
+static bool coh_newer_over(const PbObj *o, uint32_t len)
+{
+    for (unsigned i = 0; i < g_pd.nobjs; i++) {
+        const PbObj *x = &g_pd.objs[i];
+        uint32_t xl;
+        const HleFmtInfo *xi = x != o && x->d.pa == o->d.pa && x->d.xfmt != o->d.xfmt && !x->cube &&
+                               !x->d.parent ? hle_fmt_info(x->d.xfmt) : NULL;
+        if (xi && !(xi->flags & HLE_FI_DEPTH) && x->written > o->written && x->written > x->synced &&
+            coh_managed(x, &xl)) {
+            return true;
+        }
+    }
+    return false;
 }
 
 static void coh_first_write(PbObj *o, bool full)

@@ -45,6 +45,10 @@
 #define NV_CLASS_PATTERN    0x44u
 #define NV_CLASS_SURFACES2D 0x62u
 #define NV_CLASS_BLIT       0x9Fu
+#define NV_CLASS_BETA       0x12u
+#define NV_CLASS_CLIPRECT   0x19u
+#define NV_CLASS_SURF2D_NV4 0x42u                 /* NV04's 2D surfaces: NV062's methods */
+#define NV_CLASS_SOLID_LINE 0x5Cu
 #define PGRAPH_INTR_ERROR            (1u << 20)
 #define PGRAPH_NSOURCE_NOTIFICATION  1u
 #define NV_PRAMIN                    0x700000u
@@ -104,6 +108,9 @@ static struct {
     bool trap_wait;                     /* a software trap until the ISR clears it */
     uint32_t sub_r[8][0x400 / 4];       /* the 2D objects' methods, by subchannel */
     uint32_t s2d[0x400 / 4];            /* the 2D surfaces' (one at a time in D3D) */
+    uint32_t beta;                      /* NV012 SET_BETA as the blend uses it (blit) */
+    uint32_t clip_pt, clip_sz;          /* NV019 SET_POINT, SET_SIZE (blit) */
+    uint32_t line_pt[2];                /* NV04_SOLID_LINE START, END (solid_line) */
     uint64_t blits, blit_bytes, m2mfs, m2mf_bytes, copies_skipped;
     volatile bool in_run;               /* debug: the decode thread is in the pusher */
     uint32_t disp_pa;                   /* hle_pb_display_start's, for the decode thread */
@@ -531,13 +538,33 @@ static void blit(const uint32_t *r)
 {
     static const uint8_t k_bpp[16] = { 0, 1, 2, 2, 2, 2, 4, 4, 4, 4, 4, 4 };
     const uint32_t *s = g_pb.s2d;
-    const uint32_t bpp = k_bpp[s[0x300 >> 2] & 0xF];
+    const uint32_t bpp = k_bpp[s[0x300 >> 2] & 0xF], cfmt = s[0x300 >> 2] & 0xF;
+    const uint32_t op = r[0x2FC >> 2];      /* NV09F SET_OPERATION: 2 BLEND_AND, 3 SRCCOPY */
     const uint32_t pin = r[0x300 >> 2], pout = r[0x304 >> 2], size = r[0x308 >> 2];
     uint32_t w = size & 0xFFFF, h = size >> 16;
     const uint32_t sp = s[0x304 >> 2] & 0xFFFF, dp = s[0x304 >> 2] >> 16;
     const uint32_t sbase = (ctx_base(s[0x184 >> 2]) + s[0x308 >> 2]) & 0x07FFFFFFu;
     const uint32_t dbase = (ctx_base(s[0x188 >> 2]) + s[0x30C >> 2]) & 0x07FFFFFFu;
-    const uint32_t ix = pin & 0xFFFF, iy = pin >> 16, ox = pout & 0xFFFF, oy = pout >> 16;
+    uint32_t ix = pin & 0xFFFF, iy = pin >> 16, ox = pout & 0xFFFF, oy = pout >> 16;
+    /* SET_CONTEXT_CLIP_RECTANGLE naming an NV019 object: the destination
+     * pixels inside its rectangle only (a null object's: all of them) */
+    const uint32_t cinst = r[0x188 >> 2] ? ramht_find(r[0x188 >> 2]) : 0;
+    if (cinst && (pramin(cinst) & 0xFF) == NV_CLASS_CLIPRECT) {
+        const uint32_t cx0 = g_pb.clip_pt & 0xFFFF, cy0 = g_pb.clip_pt >> 16;
+        const uint32_t cx1 = cx0 + (g_pb.clip_sz & 0xFFFF), cy1 = cy0 + (g_pb.clip_sz >> 16);
+        const uint32_t x0 = MAX(ox, cx0), y0 = MAX(oy, cy0);
+        const uint32_t x1 = MIN(ox + w, cx1), y1 = MIN(oy + h, cy1);
+        if (x1 <= x0 || y1 <= y0) {
+            g_pb.copies_skipped++;
+            return;
+        }
+        ix += x0 - ox;
+        iy += y0 - oy;
+        ox = x0;
+        oy = y0;
+        w = x1 - x0;
+        h = y1 - y0;
+    }
     /* Rows wider than the destination's pitch, into a render target: as
      * much as lands in it. Each row's spill past the target's width goes
      * under the next row's start, which the next row then writes, so the
@@ -570,7 +597,7 @@ static void blit(const uint32_t *r)
      * the images over it following */
     if (!hle_pbd_blit_images(sbase, sp, dbase, dp, bpp, ix, iy, ox, oy, w, h)) {
         const uint32_t slo = sbase + iy * sp + ix * bpp, dlo = dbase + oy * dp + ox * bpp;
-        const uint64_t dep = hle_pbd_copy_begin(slo, sp, dlo, dp, row, h, dbase);
+        const uint64_t dep = hle_pbd_copy_begin(slo, sp, dlo, dp, row, h, dbase, op == 2);
         for (uint32_t y = 0; !dep && y < h; y++) {
             const uint32_t so = slo + y * sp, d = dlo + y * dp;
             uint8_t *sr = hle_pa_ptr(so, row), *dr = hle_pa_ptr(d, row);
@@ -578,7 +605,24 @@ static void blit(const uint32_t *r)
                 g_pb.copies_skipped++;
                 return;
             }
-            memmove(dr, sr, row);
+            if (op == 2 && bpp == 4) {
+                /* BLEND_AND: source by beta, destination by the rest (8 bits of
+                 * 0x7F80), the alpha left */
+                const uint32_t bm = g_pb.beta >> 16, im = 0x7F80u - bm;
+                for (uint32_t x = 0; x < w; x++) {
+                    for (unsigned ch = 0; ch < 3; ch++) {
+                        dr[x * 4 + ch] = (uint8_t)((sr[x * 4 + ch] * bm + dr[x * 4 + ch] * im) / 0x7F80u);
+                    }
+                }
+            } else {
+                memmove(dr, sr, row);
+            }
+            if (bpp == 4 && (cfmt == 6 || cfmt == 7)) {
+                /* X8R8G8B8 writes its X: Z8R8G8B8 zeros, O8R8G8B8 ones */
+                for (uint32_t x = 0; x < w; x++) {
+                    dr[x * 4 + 3] = cfmt == 7 ? 0xFF : 0x00;
+                }
+            }
             hle_mem_mark_written(d, row);
         }
         hle_pbd_copy_done(dlo, dp, row, h, dep);
@@ -586,6 +630,72 @@ static void blit(const uint32_t *r)
     }
     g_pb.blits++;
     g_pb.blit_bytes += (uint64_t)row * h;
+}
+
+/* NV04_SOLID_LINE END (class 0x5C): a line from START to END into the 2D
+ * surfaces' destination, its last pixel left out (nxdk_pgraph_tests'
+ * 2D_Lines: 400,200 - 400,400 covers rows 200 .. 399), in the colour
+ * format's value widened to the surface's (alpha 0xFF). Over memory, the
+ * images there landed first and the target over it taking the rows after. */
+static void solid_line(const uint32_t *r)
+{
+    const uint32_t *s = g_pb.s2d;
+    const uint32_t sfmt = s[0x300 >> 2] & 0xF, dp = s[0x304 >> 2] >> 16;
+    const uint32_t bpp = sfmt == 0xA || sfmt == 6 || sfmt == 7 ? 4 : sfmt == 4 ? 2 : 0;
+    const uint32_t dbase = (ctx_base(s[0x188 >> 2]) + s[0x30C >> 2]) & 0x07FFFFFFu;
+    const int32_t x0 = (int16_t)(g_pb.line_pt[0] & 0xFFFF), y0 = (int16_t)(g_pb.line_pt[0] >> 16);
+    const int32_t x1 = (int16_t)(g_pb.line_pt[1] & 0xFFFF), y1 = (int16_t)(g_pb.line_pt[1] >> 16);
+    if (!bpp || !dp || x0 < 0 || y0 < 0 || x1 < 0 || y1 < 0 || (x0 == x1 && y0 == y1)) {
+        return;
+    }
+    /* the colour as A8R8G8B8 (1 R5G6B5, 2 X1R5G5B5, else X8R8G8B8) */
+    const uint32_t cv = r[0x304 >> 2], cf = r[0x300 >> 2];
+    uint32_t c;
+    if (cf == 1) {
+        const uint32_t rr = (cv >> 11) & 31, gg = (cv >> 5) & 63, bb = cv & 31;
+        c = (rr << 3 | rr >> 2) << 16 | (gg << 2 | gg >> 4) << 8 | (bb << 3 | bb >> 2);
+    } else if (cf == 2) {
+        const uint32_t rr = (cv >> 10) & 31, gg = (cv >> 5) & 31, bb = cv & 31;
+        c = (rr << 3 | rr >> 2) << 16 | (gg << 3 | gg >> 2) << 8 | (bb << 3 | bb >> 2);
+    } else {
+        c = cv & 0xFFFFFFu;
+    }
+    c |= 0xFF000000u;
+    const uint16_t c16 = (uint16_t)(((c >> 19) & 31) << 11 | ((c >> 10) & 63) << 5 | ((c >> 3) & 31));
+    const int32_t xa = MIN(x0, x1), xb = MAX(x0, x1), ya = MIN(y0, y1), yb = MAX(y0, y1);
+    const uint32_t dlo = dbase + (uint32_t)ya * dp + (uint32_t)xa * bpp;
+    const uint32_t row = (uint32_t)(xb - xa + 1) * bpp, rows = (uint32_t)(yb - ya + 1);
+    if ((uint64_t)dp * rows > (16u << 20)) {
+        return;
+    }
+    hle_pbd_copy_begin(dlo, dp, dlo, dp, row, rows, dbase, true);
+    /* Bresenham, the end left out */
+    const int32_t dx = abs(x1 - x0), dy = -abs(y1 - y0), sx = x0 < x1 ? 1 : -1, sy = y0 < y1 ? 1 : -1;
+    int32_t err = dx + dy, x = x0, y = y0;
+    while (x != x1 || y != y1) {
+        uint8_t *px = hle_pa_ptr(dbase + (uint32_t)y * dp + (uint32_t)x * bpp, bpp);
+        if (px) {
+            if (bpp == 4) {
+                memcpy(px, &c, 4);
+            } else {
+                memcpy(px, &c16, 2);
+            }
+        }
+        const int32_t e2 = 2 * err;
+        if (e2 >= dy) {
+            err += dy;
+            x += sx;
+        }
+        if (e2 <= dx) {
+            err += dx;
+            y += sy;
+        }
+    }
+    for (uint32_t i = 0; i < rows; i++) {
+        hle_mem_mark_written(dlo + i * dp, row);
+    }
+    hle_pbd_copy_done(dlo, dp, row, rows, 0);
+    hle_pbd_blit(dbase, dp, (uint32_t)xa, (uint32_t)ya, (uint32_t)(xb - xa + 1), rows, 0);
 }
 
 /* NV039 BUFFER_NOTIFY: LINE_COUNT lines of LINE_LENGTH_IN bytes, OFFSET_IN
@@ -601,7 +711,7 @@ static void m2mf(const uint32_t *r)
         return;
     }
     /* now, or queued behind the landings of the images it reads */
-    const uint64_t dep = hle_pbd_copy_begin(in, (uint32_t)pin, out, (uint32_t)pout, len, lines, 0);
+    const uint64_t dep = hle_pbd_copy_begin(in, (uint32_t)pin, out, (uint32_t)pout, len, lines, 0, false);
     for (uint32_t y = 0; !dep && y < lines; y++) {
         uint8_t *s = hle_pa_ptr(in + y * pin, len), *d = hle_pa_ptr(out + y * pout, len);
         if (!s || !d) {
@@ -629,7 +739,22 @@ static void method_2d(unsigned subch, uint32_t m, uint32_t v)
         }
         break;
     case NV_CLASS_SURFACES2D:
+    case NV_CLASS_SURF2D_NV4:
         g_pb.s2d[m >> 2] = v;
+        break;
+    case NV_CLASS_CLIPRECT:
+        if (m == 0x300) {
+            g_pb.clip_pt = v;
+        } else if (m == 0x304) {
+            g_pb.clip_sz = v;
+        }
+        break;
+    case NV_CLASS_BETA:
+        if (m == 0x300) {
+            /* a sign and 31 fraction bits: negative is 0, 8 bits kept (xemu's
+             * measure) */
+            g_pb.beta = v & 0x80000000u ? 0 : v & 0x7F800000u;
+        }
         break;
     case NV_CLASS_BLIT:
         if (m == 0x308) {
@@ -928,6 +1053,12 @@ static int count_method(void *opaque, unsigned subch, uint32_t m, uint32_t v)
     }
     if (m < 0x400) {
         method_2d(subch, m, v);
+    } else if (g_pb.obj_class[subch] == NV_CLASS_SOLID_LINE && (m == 0x400 || m == 0x404)) {
+        /* NV04_SOLID_LINE START, END (past the 2D objects' kept methods) */
+        g_pb.line_pt[(m >> 2) & 1] = v;
+        if (m == 0x404) {
+            solid_line(g_pb.sub_r[subch]);
+        }
     }
     return HLE_PB_GO;
 }
