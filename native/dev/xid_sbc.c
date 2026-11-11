@@ -19,6 +19,7 @@
 #include "native/core/irq.h"
 
 #include <pthread.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -79,19 +80,78 @@ static void make_report(uint8_t r[SBC_IN_LEN])
     r[25] = (uint8_t)s.gear;
 }
 
+/* The panel report's fields, in order, two to a byte (low nibble first), from byte 2 (the Xbox dev wiki). */
+static const char *const k_lamp_names[] = {
+    "EmergencyEject", "CockpitHatch", "Ignition", "Start", "OpenClose", "MapZoomInOut", "ModeSelect",
+    "SubMonitorModeSelect", "MainMonitorZoomIn", "MainMonitorZoomOut", "ForecastShootingSystem", "Manipulator",
+    "LineColorChange", "Washing", "Extinguisher", "Chaff", "TankDetach", "Override", "NightScope", "F1", "F2", "F3",
+    "MainWeaponControl", "SubWeaponControl", "MagazineChange", "Comm1", "Comm2", "Comm3", "Comm4", "Comm5",
+    "(17 low)", "GearR", "GearN", "Gear1", "Gear2", "Gear3", "Gear4", "Gear5",
+};
+
+/* The lamps the title lit, when they change (the first 80 times): what it is waiting for. */
+static void log_lamps(const uint8_t *r)
+{
+    static uint8_t last[SBC_OUT_LEN];
+    static unsigned logged;
+    if (!memcmp(last, r, SBC_OUT_LEN) || logged >= 80) {
+        return;
+    }
+    memcpy(last, r, SBC_OUT_LEN);
+    logged++;
+    char line[600];
+    int n = snprintf(line, sizeof(line), "steel battalion controller: lamps lit:");
+    for (int i = 0; i < 38 && n < (int)sizeof(line) - 40; i++) {
+        const unsigned v = (r[2 + i / 2] >> (i & 1 ? 4 : 0)) & 0xf;
+        if (v) {
+            n += snprintf(line + n, sizeof(line) - (size_t)n, " %s=%u", k_lamp_names[i], v);
+        }
+    }
+    if (n == (int)strlen("steel battalion controller: lamps lit:")) {
+        snprintf(line + n, sizeof(line) - (size_t)n, " none");
+    }
+    nc_log("hakuX-native-usb", "%s", line);
+}
+
 static void take_lamps(const uint8_t *r, int len)
 {
     if (len < 4) {
         return;
     }
+    uint8_t l[SBC_OUT_LEN] = {0};
+    memcpy(l, r, MIN(len, SBC_OUT_LEN));
     pthread_mutex_lock(&g_lock);
-    memset(g_lamps, 0, sizeof(g_lamps));
-    memcpy(g_lamps, r, MIN(len, SBC_OUT_LEN));
+    memcpy(g_lamps, l, sizeof(g_lamps));
     const unsigned n = ++g_lamp_reports;
     pthread_mutex_unlock(&g_lock);
     if (n == 1) {
         nc_log("hakuX-native-usb", "steel battalion controller: the title sent its panel report (%d bytes)", len);
     }
+    log_lamps(l);
+}
+
+/* What the title reads changing (the buttons, the switches, the pedals' top nibbles, the tuner, the gear),
+ * the first 300 times: whether the title gets what was pressed. */
+static void log_changes(const uint8_t r[SBC_IN_LEN])
+{
+    static uint8_t last[12];
+    static unsigned logged;
+    uint8_t now[12];
+    memcpy(now, r + 2, 5);
+    now[5] = (uint8_t)(r[20] >> 4);
+    now[6] = (uint8_t)(r[22] >> 4);
+    now[7] = (uint8_t)(r[24] >> 4);
+    now[8] = (uint8_t)(r[24] & 0xf);
+    now[9] = r[25];
+    now[10] = now[11] = 0;
+    if (!memcmp(last, now, sizeof(now)) || logged >= 300) {
+        return;
+    }
+    memcpy(last, now, sizeof(now));
+    logged++;
+    nc_log("hakuX-native-usb",
+           "steel battalion controller: the title reads buttons %02x %02x %02x %02x %02x, pedals %x %x %x, tuner %u, gear %d",
+           now[0], now[1], now[2], now[3], now[4], now[5], now[6], now[7], now[8], (int8_t)now[9]);
 }
 
 static int sbc_control(NcUsbDev *d, const uint8_t *s, uint8_t *data, int len)
@@ -154,6 +214,7 @@ static int sbc_data(NcUsbDev *d, bool in, int ep, uint8_t *buf, int len)
         }
         uint8_t r[SBC_IN_LEN];
         make_report(r);
+        log_changes(r);
         const int n = MIN(len, SBC_IN_LEN);
         memcpy(buf, r, n);
         return n;

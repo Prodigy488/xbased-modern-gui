@@ -1,5 +1,13 @@
 # xbased changelog
 
+## 1.0.76.17 (Modern GUI fork)
+
+- Steel Battalion: from the 1.0.76.15 log, the game found the controller, polled it and sent its panel
+  report, and ran (23 fps at 4x render scale), but the log could not say whether the buttons reached the game
+  or what it was waiting for. The log now has a "the title reads buttons ..." line whenever the buttons,
+  switches, pedals, tuner dial or gear lever the game reads change, and a "lamps lit: ..." line whenever the
+  game changes the panel's lamps (which buttons it is asking for). Nothing else changed.
+
 ## 1.0.76.16 (Modern GUI fork)
 
 - Steel Battalion on a gamepad: the five toggle switches the cockpit start-up has you flip (filter control,

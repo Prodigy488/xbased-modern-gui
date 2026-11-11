@@ -52,8 +52,8 @@ No BIOS, MCPX ROM or hard-disk image is needed.
 
 | Platform | File | |
 |---|---|---|
-| **Windows** 10/11 (x64) | `xbased-modern-gui-1.0.76.16-windows-x64.zip` | Unzip anywhere and run `xbased.exe`. Portable: everything stays in its folder. |
-| **Linux** (x86-64) | `xbased-1.0.76.16-x86_64.AppImage` | `chmod +x` it and run it. Needs a Vulkan driver and glibc 2.38 or newer (Ubuntu 24.04, Fedora 39, Debian 13). |
+| **Windows** 10/11 (x64) | `xbased-modern-gui-1.0.76.17-windows-x64.zip` | Unzip anywhere and run `xbased.exe`. Portable: everything stays in its folder. |
+| **Linux** (x86-64) | `xbased-1.0.76.17-x86_64.AppImage` | `chmod +x` it and run it. Needs a Vulkan driver and glibc 2.38 or newer (Ubuntu 24.04, Fedora 39, Debian 13). |
 
 Get it from **[Releases](https://github.com/Prodigy488/xbased-modern-gui/releases/latest)**.
 The Linux AppImage starts, but it has not been run with a GPU or sound on Linux (it was
@@ -284,7 +284,7 @@ click the extinguisher. The comms, washing and the other buttons are on the keyb
 
 This is the controller as the Xbox dev wiki describes it, tested here only with the controller's own USB
 descriptors and reports in a host test, not with the game: if the game doesn't see it, or a lever or pedal
-reads wrong, the log (`xbased.log`) has the controller's first poll and the panel report the game sent.
+reads wrong, the log (`xbased.log`) has what the game reads from the controller as it changes ("the title reads buttons") and the lamps it lights ("lamps lit").
 
 ## Building from source
 
