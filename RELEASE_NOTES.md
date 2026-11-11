@@ -1,4 +1,4 @@
-# xbased Modern GUI 1.0.76.13: game compatibility fixes, Autofix for stalled games, Linux AppImage
+# xbased Modern GUI 1.0.76.14: game compatibility fixes, Autofix for stalled games, Linux AppImage
 
 ```
 Changes since 1.0.76.2
@@ -10,6 +10,11 @@ Fixes that apply to every game
 - A critical section a game never initialized (all zero) is taken as free instead of waited
   on for ever, as it is on the console. (Marvel vs. Capcom 2 stayed on a black screen.) The
   log says "never initialized" when it happens.
+
+Fixes that apply to every game (continued)
+- A flip stall (the GPU waiting for the display to flip) that Direct3D's vblank handler never ends is
+  ended after 24 vblanks, as the handler's flip would have: Over the Hedge stopped at its cutscenes this
+  way. Not run on that game yet.
 
 New
 - Autofix: a game that stalls (no frame for 25 s, or none at all in 90 s) is run again with the next of nine
@@ -24,7 +29,7 @@ New
 - Settings > System > "Scan games for missing kernel functions": reads every game's default.xbe
   and writes compat_report.txt (the games with the most gaps first, and each missing function with
   how many games need it). "Open the scan report" opens it.
-- Linux: an AppImage (xbased-1.0.76.13-x86_64.AppImage). Needs a Vulkan driver and glibc 2.38 or newer (Ubuntu 24.04, Fedora 39, Debian 13); not run with a GPU or sound yet.
+- Linux: an AppImage (xbased-1.0.76.14-x86_64.AppImage). Needs a Vulkan driver and glibc 2.38 or newer (Ubuntu 24.04, Fedora 39, Debian 13); not run with a GPU or sound yet.
   Settings, saves and states are in ~/.local/share/xbased.
 
 Logs (to find out why a game stops or is silent)
@@ -38,4 +43,4 @@ Known
   missing: the game never asks the audio chip to play them. Not fixed yet.
 ```
 
-Downloads: `xbased-modern-gui-1.0.76.13-windows-x64.zip` (Windows 10/11 x64, Vulkan 1.1) and `xbased-1.0.76.13-x86_64.AppImage` (Linux x86-64). There is no macOS build: the emulator has no macOS port yet.
+Downloads: `xbased-modern-gui-1.0.76.14-windows-x64.zip` (Windows 10/11 x64, Vulkan 1.1) and `xbased-1.0.76.14-x86_64.AppImage` (Linux x86-64). There is no macOS build: the emulator has no macOS port yet.

@@ -125,6 +125,15 @@ int main(void)
     CHECK(p.act == AF_NONE);                                          /* under 90 s: not yet */
     p = af_poll(&t2, 60, 30, 20, 1, false, false, 0, g2, learned, 0);
     CHECK(p.act == AF_TRY && p.failed && !strcmp(p.failed->id, "kernel-locks") && strcmp(p.fix->id, "kernel-locks"));
+    /* a pass ends the chain: the next stall gets a whole new one (the kept fixes stay out of it) */
+    AfRun pc; af_run_init(&pc, true, 0);
+    af_run_set_trial(&pc, "kernel-locks@500#3#0:drive-timing,reads-in-place");
+    p = af_poll(&pc, 200, 0, 1500, 1, false, false, 0, g2, learned, 0);
+    CHECK(p.act == AF_PASS && pc.trials == 0 && pc.tried_n == 0 && !pc.trial_id[0]);
+    p = af_poll(&pc, 400, 30, 9000, 1, false, false, 0, g2, learned, 0);
+    CHECK(p.act == AF_TRY && !p.failed);
+    char pv[200]; af_run_trial_value(&pc, p.fix->id, p.stall_frame, p.sym, pv, sizeof(pv));
+    CHECK(strstr(pv, "#1#") != NULL);                                 /* its first try */
     /* a chain gives up after AF_MAX_TRIALS, and when nothing fits */
     AfRun t3; af_run_init(&t3, true, 0);
     af_run_set_trial(&t3, "kernel-locks@500#4#0:drive-timing,reads-in-place,short-slices");

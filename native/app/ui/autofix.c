@@ -340,6 +340,13 @@ AfPoll af_poll(AfRun *r, double now_s, double hang_s, uint64_t frames, unsigned 
         p.act = AF_PASS;
         p.sym = r->trial_sym;
         p.fix = af_find(r->trial_id);
+        /* that stall is over: the next one is a new chain, with its own tries (the fixes kept stay) */
+        r->trial_id[0] = 0;
+        r->trial_frame = 0;
+        r->trials = 0;
+        r->tried_n = 0;
+        r->judged = false;
+        r->acted = false;
         return p;
     }
     if (!stalled || r->acted) {

@@ -1,5 +1,21 @@
 # xbased changelog
 
+## 1.0.76.14 (Modern GUI fork)
+
+- Over the Hedge's cutscene stalls, from the 1.0.76.13 log (its GPU trace now showed the frames): the
+  stall is a flip stall that nothing ends. At the cutscene's first swap the game's frame ended with the
+  end-of-frame trap, a flip increment and the flip stall, but without the swap trap that tells Direct3D's
+  vblank handler there is a flip to do; the handler ran at every vblank with nothing to flip, the GPU stood
+  at the stall, and the title spun on its fence for ever (the log: "flip stall: read 0 write 0 modulo 3,
+  353 flips so far", every second). A flip stall that lasts 24 vblanks (0.4 s; a swap waits for one to
+  three) is now ended as the handler's flip would have ended it: the read counter moves on ("the read
+  counter moved on" in the log). This is why a fix that changed the timing (locks in the kernel, the
+  drives' timing) got the game past one cutscene and not the next. Not run on the game here: if it
+  stalls again, the log shows whether the limit fired and what came after.
+- Autofix: a fix that got the game past its stall ends that chain, and the next stall starts a new one
+  with four tries of its own. A game that stalled at several cutscenes used up the four tries of one
+  chain on the first of them.
+
 ## 1.0.76.13 (Modern GUI fork)
 
 - Over the Hedge's cutscene stalls, from the 1.0.76.12 log: with "locks in the kernel" kept, the game got

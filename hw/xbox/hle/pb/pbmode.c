@@ -94,6 +94,8 @@ static struct {
     uint64_t reports;
     bool flip_wait;                     /* FLIP_STALL until a flip reads */
     int64_t flip_wait_ns;               /* ... since (a wait over 100 ms dumps the GPU trace) */
+    uint64_t flip_wait_vb;              /* ... the vblank count when it began (hle_pb_vblank's limit) */
+    uint32_t flip_forced;               /* flip stalls the limit ended */
     uint32_t flip_mark;                 /* ... the trace's position as it began */
     bool dumped;                        /* the trace dumped (once a run) */
     bool trap_wait;                     /* a software trap until the ISR clears it */
@@ -179,8 +181,48 @@ void hle_pb_display_fb(uint32_t pa)
     hle_pb_kick();
 }
 
+/* A flip stall the game's vblank handler doesn't end. D3D's handler flips the display and moves the read
+ * counter (NV_PGRAPH_INCREMENT) for a frame its swap callback (a trap) told it of; a stall waits for that. In
+ * Over the Hedge's cutscenes the callback never came (the frame ended with the end-of-frame trap, a flip
+ * increment and the stall, and the handler ran at every vblank with no flip to do), and the console's
+ * display would have gone on without it: the GPU stopped for good, the title spun on its fence, and the
+ * picture stood still. A stall that lasts this many vblanks (0.4 s; a swap waits for one, two, three)
+ * is ended as the handler's flip would have: the read counter moves on. */
+#define FLIP_FORCE_VBLANKS 24
+
+static void surf_field(uint32_t mask, uint32_t v);
+static uint32_t surf_get(uint32_t mask);
+static bool flip_done(void);
+
+static void flip_stall_limit(void)
+{
+    if (!__atomic_load_n(&g_pb.flip_wait, __ATOMIC_ACQUIRE) || flip_done()) {
+        return;
+    }
+    const uint64_t now = hle_host_vblank_count();
+    if (now - g_pb.flip_wait_vb < FLIP_FORCE_VBLANKS) {
+        return;
+    }
+    const uint32_t mod = surf_get(SURF_MODULO), rd = surf_get(SURF_READ);
+    if (!mod) {
+        return;
+    }
+    surf_field(SURF_READ, (rd + 1) % mod);
+    hle_host_gpu_trace(HLE_GTR_INCREMENT, (rd + 1) % mod);
+    g_pb.flip_wait_vb = now;            /* another stall at the next one, if the next flip is lost too */
+    const uint32_t n = ++g_pb.flip_forced;
+    if (n <= 16 || n % 100 == 0) {
+        hle_log("hakuX-hle-pb", "flip stall: the game's vblank handler didn't end it in %d vblanks (read %u write %u "
+                "modulo %u): the read counter moved on (%u so far)", FLIP_FORCE_VBLANKS, rd, surf_get(SURF_WRITE), mod, n);
+    }
+    hle_pb_kick();
+}
+
 void hle_pb_vblank(void)
 {
+    if (g_pb.on) {
+        flip_stall_limit();
+    }
     /* flipping titles present well within the idle time: no kick for them */
     if (g_pb.on && hle_pbd_scan_due()) {
         __atomic_store_n(&g_pb.scan_req, true, __ATOMIC_RELEASE);
@@ -332,6 +374,7 @@ static int kelvin(uint32_t m, uint32_t v)
         if (!flip_done()) {
             hle_host_gpu_trace(HLE_GTR_FLIP_STALL, surf_get(SURF_READ) << 4 | surf_get(SURF_WRITE));
             __atomic_add_fetch(&g_flip_stalls, 1, __ATOMIC_RELEASE);
+            g_pb.flip_wait_vb = hle_host_vblank_count();
             __atomic_store_n(&g_pb.flip_wait, true, __ATOMIC_RELEASE);
             g_pb.flip_wait_ns = hle_now_ns();
             g_pb.flip_mark = hle_host_gpu_trace_mark();
@@ -1508,6 +1551,7 @@ void hle_pb_state_set(const HlePbState *s)
     g_pb.sem_offset = s->sem_offset;
     g_pb.report_inst = s->report_inst;
     g_pb.flip_wait = s->flip_wait;
+    g_pb.flip_wait_vb = hle_host_vblank_count();
     g_pb.flip_wait_ns = hle_now_ns();
     g_pb.trap_wait = s->trap_wait;
     g_trel.pending = false;                 /* the scout syncs again at the next PUT */
