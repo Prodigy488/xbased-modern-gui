@@ -11,10 +11,9 @@ Fixes that apply to every game
   on for ever, as it is on the console. (Marvel vs. Capcom 2 stayed on a black screen.) The
   log says "never initialized" when it happens.
 
-Fixes that apply to every game (continued)
 - A flip stall (the GPU waiting for the display to flip) that Direct3D's vblank handler never ends is
-  ended after 24 vblanks, as the handler's flip would have: Over the Hedge stopped at its cutscenes this
-  way. Not run on that game yet.
+  ended after 24 vblanks (0.4 s), as the handler's flip would have ended it. DreamWorks Over the Hedge
+  froze at its cutscenes this way; it now plays through them (a short pause as each one starts).
 
 New
 - Autofix: a game that stalls (no frame for 25 s, or none at all in 90 s) is run again with the next of nine
@@ -23,8 +22,10 @@ New
   128 MiB of memory). A notice counts down 10 s first (the menu, a pause or minimising cancels it). A run
   that gets 900 frames past the stall keeps its fix in the game's settings file ("fix=" lines). What worked
   is remembered for every game and orders the tries for the next (the same publisher's first). In-game menu:
-  "Reset this game's fixes". The log of the run that stalled is kept as xbased-before-autofix.log. Settings: "Try fixes when a game stalls" (on). Not run on hardware yet; a long
-  loading screen with no frame for 25 s counts as a stall (cancel it from the menu, or turn it off).
+  "Reset this game's fixes". The log of the run that stalled is kept as xbased-before-autofix.log.
+  Settings: "Try fixes when a game stalls" (on). It can only try switches the emulator already has: for
+  Over the Hedge they moved the timing and got past one stall, not the cause. A long loading screen with
+  no frame for 25 s counts as a stall (cancel it from the menu, or turn it off).
 - The log names, at the start, the kernel functions a title imports that this build lacks ("known gaps").
 - Settings > System > "Scan games for missing kernel functions": reads every game's default.xbe
   and writes compat_report.txt (the games with the most gaps first, and each missing function with
