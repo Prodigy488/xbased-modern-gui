@@ -285,10 +285,16 @@ static inline const char *hle_push_glsl(void)
 #define HLE_ZNORM_GLSL(z, out) \
     "  precise float " out " = " z " * pc.zscale + " z " * (pc.zscale == uintBitsToFloat(0x33800000u) ||\n" \
     "      pc.zscale == uintBitsToFloat(0x37800000u) ? pc.zscale * pc.zscale : 0.0);\n"
+/* the integer formats store w truncated (nxdk_pgraph_tests' W_buffering: a
+ * step below ours where w's fraction was over a half) */
+#define HLE_WBUF_TRUNC_GLSL \
+    "  if (pc.zscale == uintBitsToFloat(0x37800000u) || pc.zscale == uintBitsToFloat(0x33800000u))\n" \
+    "    wRaw = floor(wRaw);\n"
 /* first in main (derivatives before any discard), stored last */
 #define HLE_WBUF_CALC_GLSL \
     "  float wRaw = vW + uintBitsToFloat(pc.psc[18]) + uintBitsToFloat(pc.psc[19]) *\n" \
     "      max(abs(dFdx(vW)), abs(dFdy(vW)));\n" \
+    HLE_WBUF_TRUNC_GLSL \
     HLE_ZNORM_GLSL("wRaw", "wN") \
     "  float wDepth = clamp(wN, 0.0, 1.0);\n"
 #define HLE_WBUF_STORE_GLSL "  gl_FragDepth = wDepth;\n"
@@ -333,6 +339,7 @@ static inline const char *hle_push_glsl(void)
     "    }\n" \
     "  }\n" \
     "  float wRaw = vW + uintBitsToFloat(pc.psc[18]) + uintBitsToFloat(pc.psc[19]) * wSl;\n" \
+    HLE_WBUF_TRUNC_GLSL \
     HLE_ZNORM_GLSL("wRaw", "wN") \
     "  float wDepth = clamp(wN, 0.0, 1.0);\n"
 

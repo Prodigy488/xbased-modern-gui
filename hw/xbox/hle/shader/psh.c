@@ -814,7 +814,13 @@ size_t hle_psh_glsl(const HlePshKey *k, char *buf, size_t cap, unsigned *unsuppo
         "    ivec4 r = clamp(dv %s sv, ivec4(-128), ivec4(127));\n"
         "    oColor = vec4(r & 255) / 255.0; }\n", "oColor", k->sblend == 1 ? "+" : "-");
     }
-    put(&b, "%s}\n", k->wbuf ? HLE_WBUF_STORE_GLSL : "");
+    /* the NV2A truncates the depth to the buffer's steps where the GPU here
+     * rounds to the nearest (nxdk_pgraph_tests' W_buffering ZBuf pictures:
+     * a step above the console's on half their rows) */
+    put(&b, "%s}\n", k->wbuf ? HLE_WBUF_STORE_GLSL :
+                     k->vol & HLE_PSH_ZTRUNC ?
+                     "  { float zm = 1.0 / pc.zscale - 1.0;\n"
+                     "    gl_FragDepth = floor(gl_FragCoord.z * zm) / zm; }\n" : "");
     if (unsupported) {
         *unsupported = unsup;
     }

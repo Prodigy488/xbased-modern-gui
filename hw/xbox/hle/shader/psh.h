@@ -128,6 +128,8 @@ typedef struct HlePshKey {
 #define HLE_PSH_RECT4 0x20u             /* HlePshKey.vol: each stage's in pc.scr (programs) */
 #define HLE_PSH_TWO_SIDE 0x40u          /* HlePshKey.vol: SET_TWO_SIDE_LIGHT_EN: a back face's
                                            v0 / v1 are the program's oB0 / oB1 */
+#define HLE_PSH_ZTRUNC 0x80u            /* HlePshKey.vol: an integer depth buffer's depth
+                                           truncated to its steps (a title without D3D) */
 
 /* Key from the render-state array (rs[0..56] = the pixel-shader block). */
 void hle_psh_key(const uint32_t *rs, HlePshKey *k);

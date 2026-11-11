@@ -1,5 +1,14 @@
 # xbased changelog
 
+## 1.0.102 (2026-11)
+
+### Fixes
+- Depth precision as the console stores it: W-buffered surfaces in the
+  16- and 24-bit depth formats, and (homebrew that drives the chip itself)
+  16-bit depth buffers, keep the depth truncated to the buffer's steps
+  instead of rounded. 1017 of the chip test program's 3556 pictures now
+  match the console's exactly (977 in 1.0.101).
+
 ## 1.0.101 (2026-11)
 
 ### Fixes

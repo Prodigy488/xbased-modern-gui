@@ -3787,6 +3787,10 @@ void hle_draw_cmd_draw(const HleCmdDraw *c, VkCommandBuffer cb, uint32_t rt_id, 
         if (s->rs[RS_NV_TWOSIDE]) {
             k.pk.vol |= HLE_PSH_TWO_SIDE;
         }
+        if (g_snap_trunc && ds && s->rs[RS_ZENABLE] == 1 && s->rs[RS_ZWRITEENABLE] &&
+            c->zscale == 1.0f / 65536.0f) {
+            k.pk.vol |= HLE_PSH_ZTRUNC;
+        }
         if (rect) {
             k.pk.vol |= HLE_PSH_RECT;           /* the stage fog.w names, kept to its size */
         }
