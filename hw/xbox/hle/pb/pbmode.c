@@ -126,6 +126,7 @@ static struct {
     bool gamma_set;                     /* ... once at least (a savestate applies it again) */
     uint64_t traps;
     bool runs_ok;                       /* run records done here (run_record) */
+    bool put_sync;                      /* a title without D3D: each PUT waits for the decoder */
     uint64_t runs;                      /* ... done */
     struct { uint32_t v, n; } trapk[32]; /* traps by code (the log line's top 8) */
     uint32_t trap_other;
@@ -1949,6 +1950,16 @@ void hle_pb_put(void)
     }
     hle_pb_kick();
     fl_hold();                          /* the decoder kicked first: it works meanwhile */
+    /* A title without D3D (nxdk's tests, homebrew) writes the memory a draw
+     * it just pushed reads, with no wait for the GPU: the console's, close
+     * behind the push, has read it by then. nxdk_pgraph_tests' Texture_border
+     * 2D generates nine textures in one buffer, each after the draw of the one
+     * before: the decoder, behind, read the last one's texels for all. The
+     * guest's thread waits at its PUT until the decoder has read up to it
+     * (catch_up: the decoder's own waits on the guest end it). */
+    if (g_pb.put_sync) {
+        catch_up();
+    }
 }
 
 void hle_pb_start(void)
@@ -1963,6 +1974,8 @@ void hle_pb_start(void)
         const HleXbeLib *lib = hle_xbe_d3d_lib(&g_hle.title.xbe);
         const char *e = getenv("HAKUX_HLE_PB_RUNS");
         g_pb.runs_ok = lib && lib->build == 4928 && !(e && !strcmp(e, "0"));
+        const char *ps = getenv("HAKUX_HLE_PB_PUTSYNC");     /* debug: =0, none (A/B) */
+        g_pb.put_sync = !lib && !(ps && !strcmp(ps, "0"));
     }
     hle_pbd_start();
     hle_host_gpu_reg_set(NV_PGRAPH_FIFO, 1);        /* methods go to PGRAPH until D3D says not */

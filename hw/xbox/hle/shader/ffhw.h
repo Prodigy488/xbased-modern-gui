@@ -46,7 +46,8 @@ typedef struct HleFfhwKey {
     uint8_t points;                     /* SET_POINT_PARAMS_ENABLE */
     uint8_t texgen_inf;                 /* SET_TEXGEN_VIEW_MODEL: the infinite viewer (where a
                                            stage makes a sphere or a reflection map) */
-    uint8_t pad[5];
+    uint8_t two_side;                   /* SET_LIGHT_TWO_SIDE_ENABLE: the back colours lit */
+    uint8_t bsrc[4];                    /* SET_COLOR_MATERIAL's back sources (bits 8..15), as src */
 } HleFfhwKey;                           /* 48 bytes: three program slots */
 
 #define HLE_FFHW_SLOTS (sizeof(HleFfhwKey) / 16)
@@ -68,7 +69,11 @@ enum {
     HLE_FFHW_C_POINT = 74,              /* SET_POINT_PARAMS (8) */
     HLE_FFHW_C_LIGHTS = 76,             /* per light HLE_FFHW_LIGHT_VEC4: */
     HLE_FFHW_C_SPEC = 156,              /* SET_SPECULAR_PARAMS' first three (L, M, N) */
-    HLE_FFHW_COUNT = 157,
+    HLE_FFHW_C_BACK_AMBIENT = 157,      /* SET_BACK_SCENE_AMBIENT_COLOR (0x17A0), BACK_MATERIAL_ALPHA */
+    HLE_FFHW_C_BACK_EMISSION = 158,     /* the back material emission (0x17B0) */
+    HLE_FFHW_C_BACK_SPEC = 159,         /* SET_BACK_SPECULAR_PARAMS' first three (0x1E28) */
+    HLE_FFHW_C_BACK_LIGHTS = 160,       /* per light its back ambient, diffuse, specular (0x0C00) */
+    HLE_FFHW_COUNT = 184,
 };
 enum {
     HLE_FFHW_L_AMBIENT, HLE_FFHW_L_DIFFUSE, HLE_FFHW_L_SPECULAR,

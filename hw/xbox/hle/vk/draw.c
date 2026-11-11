@@ -307,6 +307,13 @@ static bool tex_format(uint32_t x, TexFmt *o)
         VkComponentMapping m = SW(ONE, G, R, ONE);
         o->fmt = VK_FORMAT_R8G8_UNORM; o->sw = m; return true;
     }
+    /* R16B16 (D3D's V16U16): the high half red and alpha, the low half
+     * green and blue (nxdk_pgraph_tests' Texture_format R16B16 on the
+     * console: a 32-bit gradient's R:G and B:A words as (hi, lo, lo, hi)) */
+    case HLE_XFMT_V16U16: case HLE_XFMT_LIN_V16U16: {
+        VkComponentMapping m = SW(G, R, R, G);
+        o->fmt = VK_FORMAT_R16G16_UNORM; o->sw = m; return true;
+    }
     case HLE_XFMT_DXT1: o->fmt = VK_FORMAT_BC1_RGBA_UNORM_BLOCK; return true;
     case HLE_XFMT_DXT3: o->fmt = VK_FORMAT_BC2_UNORM_BLOCK; return true;
     case HLE_XFMT_DXT5: o->fmt = VK_FORMAT_BC3_UNORM_BLOCK; return true;
@@ -1200,14 +1207,24 @@ static unsigned shadow_fmt(uint32_t id)
     }
 }
 
+static bool g_bare_title;               /* a title without D3D (refreshed with g_snap_trunc) */
+
 /* The draw blends with a signed equation the shader does (sblend): 1
  * ADDSIGNED, 2 REVSUBTRACTSIGNED; 0 none (or factors other than ONE / ONE,
- * drawn unsigned). */
+ * drawn unsigned). A title without D3D: 3 and 4, whatever the factors, as
+ * the console's (nxdk_pgraph_tests' Blend_tests spot pictures: the target's
+ * byte plus or minus the output's as a two's-complement one, from 0 to 255,
+ * the same with every source and destination factor). */
 static unsigned signed_blend(const HleCmdState *s)
 {
     uint32_t op = s->rs[RS_BLENDOP];
-    if (!g_hvk.caps.fbfetch || !s->rs[RS_ALPHABLENDENABLE] || (op != 0xF005 && op != 0xF006) ||
-        s->rs[RS_SRCBLEND] != 1 || s->rs[RS_DESTBLEND] != 1) {
+    if (!g_hvk.caps.fbfetch || !s->rs[RS_ALPHABLENDENABLE] || (op != 0xF005 && op != 0xF006)) {
+        return 0;
+    }
+    if (g_bare_title) {
+        return op == 0xF006 ? 3 : 4;
+    }
+    if (s->rs[RS_SRCBLEND] != 1 || s->rs[RS_DESTBLEND] != 1) {
         return 0;
     }
     return op == 0xF006 ? 1 : 2;
@@ -3141,6 +3158,7 @@ void hle_draw_psframe_poll(uint64_t swap)
     v[0] = 0;
     hle_prop_get("debug.hakux.snap", v);
     const bool trunc = !strcmp(v, "trunc") || (strcmp(v, "bias") && !hle_xbe_d3d_lib(&g_hle.title.xbe));
+    g_bare_title = !hle_xbe_d3d_lib(&g_hle.title.xbe);
     if (g_snap_trunc != trunc) {
         g_snap_trunc = trunc;
         hle_log("hakuX-hle-pipe", "vertex positions: %s",
@@ -3644,6 +3662,10 @@ void hle_draw_cmd_draw(const HleCmdDraw *c, VkCommandBuffer cb, uint32_t rt_id, 
         uint32_t slot = shadow_fmt(c->tex[st]) ? 0 : stage_slot(c, st, rt_id, &lin);
         pc.flags |= (lin >> st & 1) << ki | (lin >> (st + 8) & 1) << (ki + 8);
         fs->texture = c->tex[st] != 0;
+        if (fs->texture && prog && (c->tex_border[st] & 1u)) {
+            fs->texture |= 2;
+            memcpy(&pc.scr[ki], &c->tex_border[st], 4);
+        }
         fs->unset = c->tex_unset >> st & 1;
         fs->alpha_kill = fs->texture && t[TSS_ALPHAKILL] != 0;
         pc.tex[ki] = slot | sampler_index(t, stage_lod_down(c, st, rt_id)) << 16;
@@ -3786,6 +3808,12 @@ void hle_draw_cmd_draw(const HleCmdDraw *c, VkCommandBuffer cb, uint32_t rt_id, 
         }
         if (s->rs[RS_NV_TWOSIDE]) {
             k.pk.vol |= HLE_PSH_TWO_SIDE;
+        }
+        for (unsigned st = 0; prog && st < 4; st++) {   /* textures with their own border */
+            if ((c->tex_border[st] & 1u) && pc.tex[st]) {
+                memcpy(&pc.scr[st], &c->tex_border[st], 4);
+                k.pk.compare |= HLE_PSH_BORDER_BIT(st);
+            }
         }
         if (g_snap_trunc && ds && s->rs[RS_ZENABLE] == 1 && s->rs[RS_ZWRITEENABLE] &&
             c->zscale == 1.0f / 65536.0f) {
@@ -4150,6 +4178,7 @@ void hle_draw_cmd_draw(const HleCmdDraw *c, VkCommandBuffer cb, uint32_t rt_id, 
         cull = 0;                       /* debug: culling off */
     }
     const uint32_t cullv = cull == 0 ? VK_CULL_MODE_NONE :
+                           cull == 0x408 ? VK_CULL_MODE_FRONT_AND_BACK :   /* (kelvin.c) */
                            cull == ff ? VK_CULL_MODE_FRONT_BIT : VK_CULL_MODE_BACK_BIT;
     const uint32_t ffv = ff == 0x901 ? VK_FRONT_FACE_COUNTER_CLOCKWISE : VK_FRONT_FACE_CLOCKWISE;
     const uint32_t zwv = zt && s->rs[RS_ZWRITEENABLE];
@@ -4305,7 +4334,8 @@ void hle_draw_cmd_draw(const HleCmdDraw *c, VkCommandBuffer cb, uint32_t rt_id, 
     /* the target's scale (point sizes, texel edges) and the scaled linear
      * surfaces' (stage_slot); antialiased: texel edges as they are (ff.h) */
     pc.flags |= MIN(rs, 255u) << 16 | MIN(g_hle_rscale, 255u) << 24 |
-                (aax > 1.0f || aay > 1.0f ? HLE_TEXEL_EDGE_FLAG : 0u) | (g_snap_trunc ? HLE_SNAP_TRUNC_FLAG : 0u);
+                (aax > 1.0f || aay > 1.0f ? HLE_TEXEL_EDGE_FLAG : 0u) | (g_snap_trunc ? HLE_SNAP_TRUNC_FLAG : 0u) |
+                (g_snap_trunc && c->quads ? HLE_QUAD_TIE_FLAG : 0u);
     if (!g_hvk.caps.bindless) {
         fixed_bind(cb, &pc);            /* the textures a set of the draw's own */
     }

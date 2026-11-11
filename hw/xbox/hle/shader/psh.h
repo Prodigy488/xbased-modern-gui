@@ -124,6 +124,9 @@ typedef struct HlePshKey {
  * cube under PROJECT2D. */
 #define HLE_PSH_TKIND(k, s) (((k)->compare >> (16 + (s))) & 1u)
 #define HLE_PSH_TKIND_BIT(s) (1u << (16 + (s)))
+/* HlePshKey.compare bits 20-23: the stage's texture has its own border
+ * (cmd.h tex_border, its word in pc.scr: programs only) */
+#define HLE_PSH_BORDER_BIT(s) (1u << (20 + (s)))
 #define HLE_PSH_RECT 0x10u              /* HlePshKey.vol: a linear texture kept to its size */
 #define HLE_PSH_RECT4 0x20u             /* HlePshKey.vol: each stage's in pc.scr (programs) */
 #define HLE_PSH_TWO_SIDE 0x40u          /* HlePshKey.vol: SET_TWO_SIDE_LIGHT_EN: a back face's

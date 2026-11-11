@@ -106,15 +106,22 @@ static void texgen(Buf *b, const HleFfhwKey *k)
     }
 }
 
-static void lighting(Buf *b, const HleFfhwKey *k)
+/* One side's colours: the front's in oD0 / oD1 from the front material and
+ * lights; with two-sided lighting (SET_LIGHT_TWO_SIDE_ENABLE) the back's in
+ * oB0 / oB1, the normal turned round, from the back registers (the back
+ * scene ambient + emission, alpha, emission, specular numbers, the lights'
+ * back colours and SET_COLOR_MATERIAL's back sources): nxdk_pgraph_tests'
+ * Specular_back, the back faces lit in the back lights' colours. */
+static void light_side(Buf *b, const HleFfhwKey *k, bool back)
 {
-    if (!k->lighting) {
-        put(b, "    oD0 = v3;\n    oD1 = v4;\n");
-        return;
-    }
-    const char *alpha = k->src[2] == 1 ? "v3.a" : k->src[2] == 2 ? "v4.a" : "c[%u].w";
+    const uint8_t *src = back ? k->bsrc : k->src;
+    const char *N = back ? "(-tN)" : "tN", *d0 = back ? "oB0" : "oD0", *d1 = back ? "oB1" : "oD1";
+    const unsigned amb = back ? HLE_FFHW_C_BACK_AMBIENT : HLE_FFHW_C_AMBIENT;
+    const unsigned emi = back ? HLE_FFHW_C_BACK_EMISSION : HLE_FFHW_C_EMISSION;
+    const unsigned spc = back ? HLE_FFHW_C_BACK_SPEC : HLE_FFHW_C_SPEC;
+    const char *alpha = src[2] == 1 ? "v3.a" : src[2] == 2 ? "v4.a" : "c[%u].w";
     char a[32];
-    snprintf(a, sizeof(a), alpha, HLE_FFHW_C_AMBIENT);
+    snprintf(a, sizeof(a), alpha, amb);
     /* the ambient source scaled by the emission register, plus the
      * emission source (the scene ambient register for the material: D3D
      * folds ambient * material ambient + emissive into it) */
@@ -126,40 +133,33 @@ static void lighting(Buf *b, const HleFfhwKey *k)
      * register was added to the emission source whatever they were:
      * nxdk_pgraph_tests' Material_color_source, every case with an emission
      * off the console's.) */
-    if (k->src[0] == 0 || k->src[1] == 0) {
-        put(b, "    oD0 = vec4(c[%u].rgb, %s);\n", HLE_FFHW_C_AMBIENT, a);
-        const unsigned add = k->src[0] != 0 ? k->src[0] : k->src[1];
+    if (src[0] == 0 || src[1] == 0) {
+        put(b, "    %s = vec4(c[%u].rgb, %s);\n", d0, amb, a);
+        const unsigned add = src[0] != 0 ? src[0] : src[1];
         if (add) {
-            put(b, "    oD0.rgb += %s * c[%u].rgb;\n", src_rgb(add), HLE_FFHW_C_EMISSION);
+            put(b, "    %s.rgb += %s * c[%u].rgb;\n", d0, src_rgb(add), emi);
         }
     } else {
-        put(b, "    oD0 = vec4(%s + %s * c[%u].rgb, %s);\n", src_rgb(k->src[0]), src_rgb(k->src[1]),
-            HLE_FFHW_C_EMISSION, a);
+        put(b, "    %s = vec4(%s + %s * c[%u].rgb, %s);\n", d0, src_rgb(src[0]), src_rgb(src[1]), emi, a);
     }
-    put(b, "    oD1 = vec4(0.0, 0.0, 0.0, v4.a);\n");
-    /* the direction to the eye: the eye position for a local viewer, else
-     * along -z (D3D's eye space looks down +z) */
-    if (k->local_eye) {
-        put(b, "    vec3 eyeV = normalize(c[%u].xyz / c[%u].w - tPos.xyz / tPos.w);\n",
-            HLE_FFHW_C_EYE, HLE_FFHW_C_EYE);
-    } else {
-        put(b, "    vec3 eyeV = vec3(0.0, 0.0, -1.0);\n");
-    }
+    put(b, "    %s = vec4(0.0, 0.0, 0.0, v4.a);\n", d1);
     for (unsigned i = 0; i < 8; i++) {
         const unsigned t = k->light[i], L = HLE_FFHW_C_LIGHTS + HLE_FFHW_LIGHT_VEC4 * i;
         if (!t) {
             continue;
         }
+        /* its colours: the front's, or the back's (SET_BACK_LIGHT_*_COLOR) */
+        const unsigned lc = back ? HLE_FFHW_C_BACK_LIGHTS + 3 * i : L + HLE_FFHW_L_AMBIENT;
         put(b, "    { /* light %u */\n"
                "      float att = 1.0, nl, nh;\n"
                "      bool lit = true;\n", i);
         if (t == 1) {
             put(b, "      vec3 Ld = normalize(c[%u].xyz);\n"
-                   "      nl = max(dot(tN, Ld), 0.0);\n", L + HLE_FFHW_L_DIRECTION);
+                   "      nl = max(dot(%s, Ld), 0.0);\n", L + HLE_FFHW_L_DIRECTION, N);
             if (k->local_eye) {
-                put(b, "      nh = max(dot(tN, normalize(Ld + eyeV)), 0.0);\n");
+                put(b, "      nh = max(dot(%s, normalize(Ld + eyeV)), 0.0);\n", N);
             } else {
-                put(b, "      nh = max(dot(tN, c[%u].xyz), 0.0);\n", L + HLE_FFHW_L_HALF);
+                put(b, "      nh = max(dot(%s, c[%u].xyz), 0.0);\n", N, L + HLE_FFHW_L_HALF);
             }
         } else {
             put(b, "      vec3 VP = c[%u].xyz - tPos.xyz / tPos.w;\n"
@@ -168,9 +168,9 @@ static void lighting(Buf *b, const HleFfhwKey *k)
                    "      VP = normalize(VP);\n"
                    "      vec3 at = c[%u].xyz;\n"
                    "      att = 1.0 / (at.x + at.y * d + at.z * d * d);\n"
-                   "      nl = max(dot(tN, VP), 0.0);\n"
-                   "      nh = max(dot(tN, normalize(VP + eyeV)), 0.0);\n",
-                L + HLE_FFHW_L_POSITION, L + HLE_FFHW_L_RANGE, L + HLE_FFHW_L_ATTENUATION);
+                   "      nl = max(dot(%s, VP), 0.0);\n"
+                   "      nh = max(dot(%s, normalize(VP + eyeV)), 0.0);\n",
+                L + HLE_FFHW_L_POSITION, L + HLE_FFHW_L_RANGE, L + HLE_FFHW_L_ATTENUATION, N, N);
             if (t == 3) {
                 /* The spot: its direction comes scaled by 1 / (cos(theta/2)
                  * - cos(phi/2)) with w = -cos(phi/2) times that, so s below
@@ -206,13 +206,32 @@ static void lighting(Buf *b, const HleFfhwKey *k)
                "        float dn = sc.y * nh + sc.z;\n"
                "        float pf = nl <= 0.0 || nh <= -sc.x ? 0.0 : dn == 0.0 ? 10000.0 :\n"
                "                   dn > 0.0 ? clamp((nh + sc.x) / dn, 0.0, 10000.0) : 0.0;\n"
-               "        oD0.rgb += %s * c[%u].rgb * att;\n"
-               "        oD0.rgb += %s * c[%u].rgb * (att * nl);\n"
-               "        oD1.rgb += %s * c[%u].rgb * (att * pf);\n"
+               "        %s.rgb += %s * c[%u].rgb * att;\n"
+               "        %s.rgb += %s * c[%u].rgb * (att * nl);\n"
+               "        %s.rgb += %s * c[%u].rgb * (att * pf);\n"
                "      }\n"
                "    }\n",
-            HLE_FFHW_C_SPEC, src_rgb(k->src[1]), L + HLE_FFHW_L_AMBIENT, src_rgb(k->src[2]), L + HLE_FFHW_L_DIFFUSE,
-            src_rgb(k->src[3]), L + HLE_FFHW_L_SPECULAR);
+            spc, d0, src_rgb(src[1]), lc + 0, d0, src_rgb(src[2]), lc + 1, d1, src_rgb(src[3]), lc + 2);
+    }
+}
+
+static void lighting(Buf *b, const HleFfhwKey *k)
+{
+    if (!k->lighting) {
+        put(b, "    oD0 = v3;\n    oD1 = v4;\n");
+        return;
+    }
+    /* the direction to the eye: the eye position for a local viewer, else
+     * along -z (D3D's eye space looks down +z) */
+    if (k->local_eye) {
+        put(b, "    vec3 eyeV = normalize(c[%u].xyz / c[%u].w - tPos.xyz / tPos.w);\n",
+            HLE_FFHW_C_EYE, HLE_FFHW_C_EYE);
+    } else {
+        put(b, "    vec3 eyeV = vec3(0.0, 0.0, -1.0);\n");
+    }
+    light_side(b, k, false);
+    if (k->two_side) {
+        light_side(b, k, true);
     }
 }
 
@@ -239,18 +258,23 @@ size_t hle_ffhw_glsl(const uint32_t *tokens, unsigned nslots, const HleVshKey *v
     lighting(&b, &k);
     /* the back colours (two-sided lighting's back faces, psh.c HLE_PSH_TWO_SIDE):
      * unlit, none (nxdk_pgraph_tests' Specular_back: back faces black with
-     * lighting off, whatever colours the vertices carry); lit, the front
-     * ones for now (the back material's lighting isn't made) */
-    put(&b, k.lighting ? "    oB0 = oD0;\n    oB1 = oD1;\n" :
-                         "    oB0 = vec4(0.0, 0.0, 0.0, 1.0);\n    oB1 = vec4(0.0, 0.0, 0.0, 1.0);\n");
+     * lighting off, whatever colours the vertices carry); lit two-sided,
+     * the back's own (light_side); lit one-sided, the front ones */
+    if (!k.lighting || !k.two_side) {
+        put(&b, k.lighting ? "    oB0 = oD0;\n    oB1 = oD1;\n" :
+                             "    oB0 = vec4(0.0, 0.0, 0.0, 1.0);\n    oB1 = vec4(0.0, 0.0, 0.0, 1.0);\n");
+    }
+    /* SEPARATE_SPECULAR off: the lights' specular in the diffuse colour,
+     * SPECULAR_ENABLE or not (nxdk_pgraph_tests' Lighting_control NoSpec
+     * pictures: the highlights on the console with it off) */
+    if (!k.separate_spec && k.lighting) {
+        put(&b, k.two_side ? "    oD0.rgb += oD1.rgb;\n    oB0.rgb += oB1.rgb;\n" : "    oD0.rgb += oD1.rgb;\n");
+    }
     if (!k.specular) {
         put(&b, "    oD1 = vec4(0.0, 0.0, 0.0, 1.0);\n    oB1 = vec4(0.0, 0.0, 0.0, 1.0);\n");
     } else {
         if (!k.separate_spec) {
-            if (k.lighting) {
-                put(&b, "    oD0.rgb += oD1.rgb;\n");
-            }
-            put(&b, "    oD1 = v4;\n");
+            put(&b, k.lighting && k.two_side ? "    oD1 = v4;\n    oB1 = v4;\n" : "    oD1 = v4;\n");
         }
         if (!k.alpha_mat_spec) {
             put(&b, "    oD1.a = 1.0;\n    oB1.a = 1.0;\n");

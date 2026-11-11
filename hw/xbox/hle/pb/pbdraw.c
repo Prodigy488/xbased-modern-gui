@@ -2264,7 +2264,9 @@ static uint64_t ff_program(void)
     uint32_t cm = R(0x0298);
     for (unsigned i = 0; i < 4; i++) {
         k.src[i] = (cm >> (2 * i)) & 3;
+        k.bsrc[i] = (cm >> (8 + 2 * i)) & 3;
     }
+    k.two_side = k.lighting && (R(0x17C4) & 1);
     uint32_t le = R(0x03BC);
     for (unsigned i = 0; i < 8; i++) {
         k.light[i] = (le >> (2 * i)) & 3;
@@ -2301,6 +2303,15 @@ static void ff_consts(float (*c)[4])
     regs_f(&c[HLE_FFHW_C_AMBIENT][3], 0x03B4, 1);
     regs_f(c[HLE_FFHW_C_EMISSION], 0x03A8, 3);
     regs_f(c[HLE_FFHW_C_SPEC], 0x09E0, 3);      /* SET_SPECULAR_PARAMS: L, M, N */
+    regs_f(c[HLE_FFHW_C_BACK_AMBIENT], 0x17A0, 3);
+    regs_f(&c[HLE_FFHW_C_BACK_AMBIENT][3], 0x17AC, 1);
+    regs_f(c[HLE_FFHW_C_BACK_EMISSION], 0x17B0, 3);
+    regs_f(c[HLE_FFHW_C_BACK_SPEC], 0x1E28, 3);
+    for (unsigned i = 0; i < 8; i++) {
+        regs_f(c[HLE_FFHW_C_BACK_LIGHTS + 3 * i], 0x0C00 + 64 * i, 3);
+        regs_f(c[HLE_FFHW_C_BACK_LIGHTS + 3 * i + 1], 0x0C0C + 64 * i, 3);
+        regs_f(c[HLE_FFHW_C_BACK_LIGHTS + 3 * i + 2], 0x0C18 + 64 * i, 3);
+    }
     c[HLE_FFHW_C_PARAMS][2] = (R(0x043C) & 0x1FF) / 8.0f;
     regs_f(c[HLE_FFHW_C_POINT], 0x0A30, 8);
     for (unsigned i = 0; i < 8; i++) {
@@ -2919,6 +2930,36 @@ static uint32_t target_part(uint32_t pa, uint32_t code, const HleFmtInfo *fi, ui
     return dst->id;
 }
 
+/* A swizzled texture whose border is its own (SET_TEXTURE_FORMAT's
+ * BORDER_SOURCE clear, a title without D3D; not a cube): the image in memory
+ * is twice the reported size, at least 16, the reported one 4 texels in
+ * (xemu's, from the console; nxdk_pgraph_tests' Texture_border). The format
+ * with those sizes, decoded whole (BORDER_SOURCE set: the decoder's own
+ * border reading, xdk_res.c hle_res_level, keeps only the image inside); the
+ * stage's coordinates move into it (draw tex_border, psh.c samp), so the
+ * border's texels are what a coordinate past the edge reads. Others as they
+ * are. */
+static bool tex_border_of(uint32_t fmt, const HleFmtInfo *fi)
+{
+    return g_pd.bare && !(fmt & 8u) && !(fmt & 4u) && fi && (fi->flags & HLE_FI_SWZ) &&
+           !(fi->flags & HLE_FI_DXT);
+}
+
+static uint32_t tex_border_fmt(uint32_t fmt, const HleFmtInfo *fi)
+{
+    if (!tex_border_of(fmt, fi)) {
+        return fmt;
+    }
+    for (unsigned sh = 20; sh <= 28; sh += 4) {
+        const uint32_t l = (fmt >> sh) & 15u;
+        if (sh == 28 && ((fmt >> 4) & 0xFu) != 3u) {
+            continue;                   /* (a 2D texture: no p) */
+        }
+        fmt = (fmt & ~(15u << sh)) | (MAX(l + 1, 4u) << sh);
+    }
+    return fmt | 8u;
+}
+
 /* The texture stage s samples: the object id, 0 if it can't be drawn;
  * *unset when the stage has none (CONTROL0 disabled), *lin when its format
  * is linear (sampled by texel coordinates). */
@@ -2934,6 +2975,8 @@ static uint32_t texture(unsigned s, bool *unset, bool *lin)
     uint32_t off = R(NV097_SET_TEXTURE_OFFSET + b), fmt = R(NV097_SET_TEXTURE_FORMAT + b);
     uint32_t code = HLE_FMT_CODE(fmt), size = 0, pa = off & 0x0FFFFFFFu;
     const HleFmtInfo *fi = hle_fmt_info(code);
+    const uint32_t fmt_reg = fmt;           /* (the cache's key: bordered sizes 1 .. 8 decode alike) */
+    fmt = tex_border_fmt(fmt, fi);
     *lin = fi && (fi->flags & HLE_FI_LIN);
     if (*lin) {
         uint32_t rect = R(NV097_SET_TEXTURE_IMAGE_RECT + b), pitch = R(NV097_SET_TEXTURE_CONTROL1 + b) >> 16;
@@ -2973,7 +3016,8 @@ static uint32_t texture(unsigned s, bool *unset, bool *lin)
      * DXT5 picture in the memory its menus' depth buffer and a 1280 x 240
      * colour pass used; sampled as that target, the CPU's DXT bytes uploaded
      * into it as colour, the picture was the clear colour (teal). */
-    const bool dxt = fi && (fi->flags & HLE_FI_DXT);
+    /* (nor one with its own border: its memory is the bordered image) */
+    const bool dxt = (fi && (fi->flags & HLE_FI_DXT)) || tex_border_of(R(NV097_SET_TEXTURE_FORMAT + b), fi);
     PbObj *best = NULL;
     /* nor a colour target whose memory is newer than its image
      * (coh_mem_newer: a copy into it, its twin's image landed there, the
@@ -3013,7 +3057,7 @@ static uint32_t texture(unsigned s, bool *unset, bool *lin)
     unsigned eff;
     const uint32_t sx = nosign ? 0 : hle_tex_sign_xor(code, (R(NV097_SET_TEXTURE_OFFSET + b + 0x14) >> 28) & 15,
                                                       &eff);
-    uint32_t key[5] = { off, fmt, size, pal_reg, sx };
+    uint32_t key[5] = { off, fmt_reg, size, pal_reg, sx };
     uint32_t h = hash32(key, sizeof(key)) % TEX_SLOTS;
     PbTex *t = &g_pd.tex[h];
     while (t->id && memcmp(t->key, key, sizeof(key))) {
@@ -3615,8 +3659,15 @@ static void emit(HleCmdDraw *d)
         d->tex_lin |= (uint32_t)lin << s;
         /* per draw: the state cache isn't rebuilt when only a texture changes */
         d->tex_rect[s] = lin ? R(NV097_SET_TEXTURE_IMAGE_RECT + 64 * s) : 0;
+        {
+            const uint32_t tf = R(NV097_SET_TEXTURE_FORMAT + 64 * s);
+            d->tex_border[s] = d->tex[s] && tex_border_of(tf, hle_fmt_info(HLE_FMT_CODE(tf))) ?
+                               1u | ((tf >> 20) & 15u) << 4 | ((tf >> 24) & 15u) << 8 |
+                               ((tf >> 28) & 15u) << 12 : 0;
+        }
         d->tex_ord |= tex_order(s, d->tex[s]) << 2 * s;
     }
+    d->quads = g_pd.prim == NV2A_PRIM_QUADS;
     state();
     uint32_t zf = (R(NV097_SET_SURFACE_FORMAT) >> 4) & 0xF;
     d->vsh = ff ? ff_program() : program();

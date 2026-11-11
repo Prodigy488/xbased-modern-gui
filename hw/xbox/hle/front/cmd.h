@@ -299,6 +299,12 @@ typedef struct HleCmdDraw {
                                    samples an A8R8G8B8 target of another (HLE_DRAW_ORD_*) */
     uint32_t tex_rect[HLE_TSS_STAGES];  /* a linear stage's own size, its IMAGE_RECT
                                            (width 28:16, height 12:0); 0 for the others */
+    uint32_t quads;             /* 1: a quad list, two triangles a quad ((0, 1, 2), (0, 2, 3),
+                                   pbres.c hle_draw_prim_indices, the NV2A's split) */
+    uint32_t tex_border[HLE_TSS_STAGES];    /* a swizzled stage whose border is its texture's
+                                               (SET_TEXTURE_FORMAT bit 3 clear): 1 | the
+                                               reported log2 sizes u << 4, v << 8, p << 12;
+                                               its image the bordered one (pbdraw.c) */
     /* vertex programs and declarations (P4, pulled forward) */
     uint64_t vsh;               /* program hash (HLE_OP_VSH); 0 = fixed function */
     uint32_t consts_off;        /* program draws: arena, 192 vec4 constants */

@@ -260,7 +260,7 @@ static void test_bumpenv(void)
     HT_CHECK(strstr(buf, "uvec4 bump;") != NULL);
     HT_CHECK(strstr(buf, "vec2 d = mat2(unpackHalf2x16(pc.bump.x), unpackHalf2x16(pc.bump.y)) * "
                          "sgn8(t0.bg);") != NULL);
-    HT_CHECK(strstr(buf, "t1 = samp(1u, nvproj(vTex1).xy + d);") != NULL);
+    HT_CHECK(strstr(buf, "t1 = sampx(1u, nvproj(vTex1).xy + d, true);") != NULL);
     HT_CHECK(strstr(buf, "vec4 t2 = samp(2u, nvproj(vTex2).xy);") != NULL);
     k.vol = 2;                          /* t1 a volume: r passes through */
     HT_CHECK(hle_psh_glsl(&k, buf, sizeof(buf), &un) > 0);

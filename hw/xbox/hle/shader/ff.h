@@ -120,7 +120,9 @@ typedef struct HleFfStage {
     uint32_t colorop, colorarg0, colorarg1, colorarg2;
     uint32_t alphaop, alphaarg0, alphaarg1, alphaarg2;
     uint32_t resultarg;
-    uint8_t texture;                  /* a texture is bound to this stage */
+    uint8_t texture;                  /* a texture is bound to this stage; bit 1: one with its
+                                         own border (its reported size in pc.scr[stage],
+                                         cmd.h tex_border; programs only) */
     uint8_t tex_dim;                  /* 2 = 2D, 3 = cube, 4 = volume */
     uint8_t alpha_kill;               /* D3DTSS_ALPHAKILL: texel alpha 0 discards */
     uint8_t unset;                    /* no texture set (D3D's Textures[stage] NULL): an
@@ -144,7 +146,10 @@ typedef struct HleFfPsKey {
                                          fixed-function blend is off): the output and
                                          the target's pixel (uFb, set 2) as two's-
                                          complement bytes, 1 dst + src (ADDSIGNED), 2
-                                         dst - src (REVSUBTRACTSIGNED), saturated */
+                                         dst - src (REVSUBTRACTSIGNED), saturated; 3 and
+                                         4 those of a title without D3D, any factors: the
+                                         target's byte as it is, 0 to 255 (draw.c
+                                         signed_blend) */
     uint8_t fbfetch;                  /* stages (bits) whose texture is the colour target:
                                          its pixel as the earlier draws left it (uFb),
                                          as the NV2A's texture unit reads the memory
@@ -385,6 +390,14 @@ static inline const char *hle_push_glsl(void)
  * covers, Dead or Alive 2's eaves shadows). debug.hakux.snap=trunc: the
  * truncation (HLE_SNAP_TRUNC_FLAG), for A/B. */
 #define HLE_SNAP_TRUNC_FLAG 8192u
+/* pc.flags: a quad list's triangles, under HLE_SNAP_TRUNC_FLAG (a title
+ * without D3D): a bump stage's coordinate on a texel edge (within 1/4096)
+ * takes the texel before it in a quad's first triangle (0, 1, 2), the one
+ * after in its second (0, 2, 3), as the console's do (nxdk_pgraph_tests'
+ * Bump_map rows, the first triangle the one above the quad's 0 - 2
+ * diagonal; psh.c sampx). Other stages' ties as the flag above says: as
+ * a rule for all, Blend_surface and Pixel_shader's lost theirs. */
+#define HLE_QUAD_TIE_FLAG 16384u
 #define HLE_SUBPIXEL_GLSL(v) \
     "  " v " = (pc.flags & 8192u) != 0u ? trunc(" v " * 16.0) / 16.0 : " v " - 0.03125;\n"
 

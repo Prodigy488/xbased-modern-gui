@@ -392,7 +392,7 @@ size_t hle_psh_glsl(const HlePshKey *k, char *buf, size_t cap, unsigned *unsuppo
             snprintf(sfun, sizeof(sfun),
                 "vec4 sgn4(vec4 c) {\n"
                 "  vec4 v = floor(c * 255.0 + 0.5);\n"
-                "  return max(mix(v, v - 256.0, greaterThanEqual(v, vec4(128.0))) / 127.0, -1.0);\n"
+                "  return max(mix(v, v - 256.0, greaterThanEqual(v, vec4(128.0))) / ((pc.flags & 8192u) != 0u ? 127.5 : 127.0), -1.0);\n"
                 "}\n"
                 "float bil(vec4 c, vec2 w) { return mix(mix(c.w, c.z, w.x), mix(c.x, c.y, w.x), w.y); }\n"
                 "vec4 samps(uint s, vec2 uv, vec4 f, bvec4 m, bool pt) {\n"
@@ -426,6 +426,21 @@ size_t hle_psh_glsl(const HlePshKey *k, char *buf, size_t cap, unsigned *unsuppo
     } else {
         put(&b, "#define HLE_V0 vDiffuse\n#define HLE_V1 vSpecular\n");
     }
+    /* a texture with its own border (pbdraw.c tex_border_fmt): the reported
+     * size's coordinates 4 texels into the bordered image (xemu's) */
+    if ((k->compare >> 20) & 0xFu) {
+        put(&b, "#define HLE_BORDER2(s, uv) if (((%uu >> (s)) & 1u) != 0u) { "
+                "uint bw = floatBitsToUint(pc.scr[s]); "
+                "uv = (uv * vec2(uvec2(1u) << uvec2((bw >> 4) & 15u, (bw >> 8) & 15u)) + 4.0) / "
+                "vec2(textureSize(sampler2D(uTex2D[nonuniformEXT(ti)], uSmp[0]), 0)); }\n"
+                "#define HLE_BORDER3(s, uvw) if (((%uu >> (s)) & 1u) != 0u) { "
+                "uint bw = floatBitsToUint(pc.scr[s]); "
+                "uvw = (uvw * vec3(uvec3(1u) << uvec3((bw >> 4) & 15u, (bw >> 8) & 15u, (bw >> 12) & 15u)) + 4.0) / "
+                "vec3(textureSize(sampler3D(uTex3D[nonuniformEXT(ti)], uSmp[0]), 0)); }\n",
+            (k->compare >> 20) & 0xFu, (k->compare >> 20) & 0xFu);
+    } else {
+        put(&b, "#define HLE_BORDER2(s, uv)\n#define HLE_BORDER3(s, uvw)\n");
+    }
     put(&b, "layout(set = 0, binding = 0) uniform texture2D uTex2D[];\n"
             "layout(set = 0, binding = 1) uniform sampler uSmp[];\n"
             "layout(set = 0, binding = 2) uniform textureCube uTexCube[];\n"
@@ -443,7 +458,7 @@ size_t hle_psh_glsl(const HlePshKey *k, char *buf, size_t cap, unsigned *unsuppo
             HLE_NVPROJ_GLSL
             "%s"
             /* Xbox linear (non-swizzled) textures use texel coordinates */
-            "vec4 samp(uint s, vec2 uv) {\n"
+            "vec4 sampx(uint s, vec2 uv, bool bump) {\n"
             "  uint ti = pc.tex[s] & 0xFFFFu, si = pc.tex[s] >> 16;\n"
             "%s"
             "  if ((pc.flags & (1u << s)) != 0u)\n"
@@ -455,15 +470,20 @@ size_t hle_psh_glsl(const HlePshKey *k, char *buf, size_t cap, unsigned *unsuppo
              * a hair short: nxdk_pgraph_tests' checkerboard rows 75, 150 ...
              * took the texel before the console's; under perspective the
              * console's own ties go the other way, Shade_model) */
+            "  HLE_BORDER2(s, uv);\n"
             "  if ((pc.flags & 8192u) != 0u && dFdx(gl_FragCoord.w) == 0.0 && dFdy(gl_FragCoord.w) == 0.0) {\n"
             "    vec2 qs = vec2(textureSize(sampler2D(uTex2D[nonuniformEXT(ti)], uSmp[0]), 0));\n"
             "    vec2 qt = uv * qs, qr = floor(qt + 0.5);\n"
-            "    uv = mix(uv, qr / qs, lessThan(abs(qt - qr), vec2(1.0 / 65536.0)));\n"
+            "    bool qd = bump && (pc.flags & 16384u) != 0u;\n"
+            "    vec2 qe = qd ? qr + ((gl_PrimitiveID & 1) == 0 ? -1.0 / 256.0 : 1.0 / 256.0) : qr;\n"
+            "    uv = mix(uv, qe / qs, lessThan(abs(qt - qr), vec2(qd ? 1.0 / 4096.0 : 1.0 / 65536.0)));\n"
             "  }\n"
             "  return texture(sampler2D(uTex2D[nonuniformEXT(ti)], uSmp[nonuniformEXT(si)]), uv);\n"
             "}\n"
+            "#define samp(s, uv) sampx(s, uv, false)\n"
             "vec4 samp3(uint s, vec3 uvw) {\n"
             "  uint ti = pc.tex[s] & 0xFFFFu, si = pc.tex[s] >> 16;\n"
+            "  HLE_BORDER3(s, uvw);\n"
             "  return texture(sampler3D(uTex3D[nonuniformEXT(ti)], uSmp[nonuniformEXT(si)]), "
             "uvw);\n"
             "}\n"
@@ -669,7 +689,7 @@ size_t hle_psh_glsl(const HlePshKey *k, char *buf, size_t cap, unsigned *unsuppo
                 put(&b, "    t%u = samp3(%uu, vec3(nvproj(vTex%u).xy + d, vTex%u.z));\n",
                     s, s, s, s);
             } else {
-                put(&b, "    t%u = samp(%uu, nvproj(vTex%u).xy + d);\n", s, s, s);
+                put(&b, "    t%u = sampx(%uu, nvproj(vTex%u).xy + d, true);\n", s, s, s);
             }
             if (m == HLE_PST_BUMPENVMAP_LUM) {
                 put(&b, "    vec2 l = unpackHalf2x16(pc.bumpl[%u]);\n"
@@ -742,7 +762,10 @@ size_t hle_psh_glsl(const HlePshKey *k, char *buf, size_t cap, unsigned *unsuppo
         }
         if (signed_stage(k, s)) {
             /* the signed channels (samps, sgn4), the texel as sampled kept
-             * for the stages that address by it (tr) */
+             * for the stages that address by it (tr). A title without D3D
+             * (pc.flags 8192): over 127.5, as the console's (nxdk_pgraph_tests'
+             * Texture_signed_component: 0x7F comes out 254, not 255); D3D
+             * titles keep 127 */
             const unsigned g = (HLE_PSH_TSIGN(k) >> (4 * s)) & 15;
             char mask[64];
             snprintf(mask, sizeof(mask), "bvec4(%s, %s, %s, %s)", g & 2 ? "true" : "false",
@@ -751,7 +774,7 @@ size_t hle_psh_glsl(const HlePshKey *k, char *buf, size_t cap, unsigned *unsuppo
                 /* its bytes flipped at definition (hle_tex_sign_xor), filtered
                  * as signed by the sampler: centred on 0x80 */
                 put(&b, "  vec4 tr%u = mix(t%u, mod(floor(t%u * 255.0 + 0.5) + 128.0, 256.0) / 255.0, %s);\n"
-                        "  t%u = mix(t%u, clamp((t%u * 255.0 - 128.0) / 127.0, -1.0, 1.0), %s);\n",
+                        "  t%u = mix(t%u, clamp((t%u * 255.0 - 128.0) / ((pc.flags & 8192u) != 0u ? 127.5 : 127.0), -1.0, 1.0), %s);\n",
                     s, s, s, mask, s, s, s, mask);
             } else {
                 put(&b, "  vec4 tr%u = t%u;\n", s, s);
@@ -807,7 +830,14 @@ size_t hle_psh_glsl(const HlePshKey *k, char *buf, size_t cap, unsigned *unsuppo
                                        "any(isinf(vTex2)) ? 1.0 : 0.0, 0.0, 1.0)" :
                       k->debug == 24 ? "sampc(2u, vec3(0.3, 0.5, 0.8))" : "outc";
     put(&b, "  oColor = %s;\n%s", dbg, k->out_bgra ? "  oColor = oColor.bgra;\n" : "");
-    if (k->sblend) {
+    if (k->sblend >= 3) {
+        /* a title without D3D's (draw.c signed_blend): the target's byte as it
+         * is, the output's two's complement, from 0 to 255 */
+        put(&b, "  { ivec4 sv = ivec4(floor(clamp(oColor, 0.0, 1.0) * 255.0 + 0.5));\n"
+        "    ivec4 dv = ivec4(floor(clamp(subpassLoad(uFb), 0.0, 1.0) * 255.0 + 0.5));\n"
+        "    sv -= 256 * (sv >> 7);\n"
+        "    oColor = vec4(clamp(dv %s sv, ivec4(0), ivec4(255))) / 255.0; }\n", k->sblend == 3 ? "+" : "-");
+    } else if (k->sblend) {
         put(&b, "  { ivec4 sv = ivec4(floor(clamp(%s, 0.0, 1.0) * 255.0 + 0.5));\n"
         "    ivec4 dv = ivec4(floor(clamp(subpassLoad(uFb), 0.0, 1.0) * 255.0 + 0.5));\n"
         "    sv -= 256 * (sv >> 7); dv -= 256 * (dv >> 7);\n"

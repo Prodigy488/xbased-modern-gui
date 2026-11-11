@@ -229,7 +229,8 @@ void hle_kelvin_state(HleCmdState *st)
          * winding never reaches the register: kvfmt.h) */
         uint32_t ff = W(0x03A0) && R(0x03A0) ? R(0x03A0) : 0x900;
         rs[RS_FRONTFACE] = ff;
-        rs[RS_CULLMODE] = !R(0x0308) ? 0 : R(0x039C) == 0x404 ? ff : (ff ^ 1);
+        rs[RS_CULLMODE] = !R(0x0308) ? 0 : R(0x039C) == 0x404 ? ff :
+                          R(0x039C) == 0x408 ? 0x408 : (ff ^ 1);   /* 0x408: both (FRONT_AND_BACK) */
     }
     if (W(0x029C)) {                    /* 0x100: an _ABS mode (0x802 .. 0x804) */
         uint32_t m = R(0x029C);

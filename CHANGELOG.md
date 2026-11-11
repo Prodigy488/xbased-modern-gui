@@ -1,5 +1,22 @@
 # xbased changelog
 
+## 1.0.103 (2026-11)
+
+### Fixes
+- Graphics chip accuracy, from the chip test program (nxdk_pgraph_tests):
+  1091 of its 3556 pictures now match the console's exactly (1017 in
+  1.0.102). What games can see of it:
+  - V16U16 (R16B16) textures are drawn; they were white.
+  - Two-sided fixed-function lighting lights the back faces with the back
+    material and lights' colours.
+  - With separate specular off, the lights' highlights go into the diffuse
+    colour even when specular is disabled, as on the console.
+  - Culling both faces draws nothing (it culled the back ones alone).
+- Homebrew that drives the chip itself: textures with their own border,
+  the signed blend equations, signed texture channels and bump-mapped
+  texel edges now come out as on the console, and a texture rewritten
+  right after a draw that used it no longer shows up in that draw.
+
 ## 1.0.102 (2026-11)
 
 ### Fixes

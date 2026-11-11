@@ -539,6 +539,14 @@ size_t hle_ff_ps_glsl(const HleFfPsKey *k, char *buf, size_t cap)
                         "uTex2D[nonuniformEXT(pc.tex[%u] & 0xFFFFu)], uSmp[0]), 0)) /\n"
                         "      ((pc.flags & %uu) != 0u ? float(pc.flags >> 24) : 1.0);\n",
                     s, s, 1u << s, s, s, 256u << s);
+                if (st->texture & 2) {
+                    /* its own border: the reported size's coordinates 4 texels
+                     * into the bordered image (pbdraw.c tex_border_fmt) */
+                    put(&b, "  { uint bw = floatBitsToUint(pc.scr[%u]);\n"
+                            "    uv%u = (uv%u * vec2(uvec2(1u) << uvec2((bw >> 4) & 15u, (bw >> 8) & 15u)) + 4.0) /\n"
+                            "        vec2(textureSize(sampler2D(uTex2D[nonuniformEXT(pc.tex[%u] & 0xFFFFu)], uSmp[0]), 0)); }\n",
+                        s, s, s, s);
+                }
             }
             put(&b, "  vec4 t%u = texture(sampler2D(uTex2D[nonuniformEXT(pc.tex[%u] & 0xFFFFu)], "
                     "uSmp[nonuniformEXT(pc.tex[%u] >> 16)]), uv%u);\n",
@@ -600,7 +608,14 @@ size_t hle_ff_ps_glsl(const HleFfPsKey *k, char *buf, size_t cap)
         put(&b, "%s", HLE_ZEQ_TEST_GLSL(k->fbfetch));
     }
     put(&b, "  oColor = %s;\n", k->out_bgra ? "cur.bgra" : "cur");
-    if (k->sblend) {
+    if (k->sblend >= 3) {
+        /* a title without D3D's (draw.c signed_blend): the target's byte as it
+         * is, the output's two's complement, from 0 to 255 */
+        put(&b, "  { ivec4 sv = ivec4(floor(clamp(oColor, 0.0, 1.0) * 255.0 + 0.5));\n"
+        "    ivec4 dv = ivec4(floor(clamp(subpassLoad(uFb), 0.0, 1.0) * 255.0 + 0.5));\n"
+        "    sv -= 256 * (sv >> 7);\n"
+        "    oColor = vec4(clamp(dv %s sv, ivec4(0), ivec4(255))) / 255.0; }\n", k->sblend == 3 ? "+" : "-");
+    } else if (k->sblend) {
         put(&b, "  { ivec4 sv = ivec4(floor(clamp(%s, 0.0, 1.0) * 255.0 + 0.5));\n"
         "    ivec4 dv = ivec4(floor(clamp(subpassLoad(uFb), 0.0, 1.0) * 255.0 + 0.5));\n"
         "    sv -= 256 * (sv >> 7); dv -= 256 * (dv >> 7);\n"
