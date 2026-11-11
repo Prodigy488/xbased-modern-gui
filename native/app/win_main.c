@@ -36,6 +36,7 @@
 #include "native/app/ui/dash.h"
 #include "native/app/ui/i18n.h"
 #include "native/app/ui/input_map.h"
+#include "native/app/ui/sbc_map.h"
 #include "native/app/ui/ui.h"
 #include "hw/xbox/hle/hitch.h"
 #include "hw/xbox/hle/vk/swapchain.h"
@@ -102,6 +103,8 @@ static int g_ncfg_args;            /* how many of them xbased.ini gave */
 static ImMap g_map;     /* the controls: the game's file over xbased.ini (input_map.h) */
 static char g_key[24];  /* the game's "<TITLE ID>.<version>" */
 static uint32_t g_title_id;  /* ... its title id */
+static int g_sbc_opt = -1;   /* sbc=1/0: the Steel Battalion controller on/off; -1: on for Steel Battalion */
+static bool g_sbc_on;        /* player 1 has it, not a gamepad */
 
 /* ------------------------------------------------------------ helpers */
 
@@ -765,6 +768,12 @@ static void update_pads(bool focused)
         memset(&s, 0, sizeof(s));
         const bool all = g_map.device[i] == -3;         /* the keyboard, the mouse and every controller */
         SDL_Gamepad *pad = player_pad((int)i);
+        if (i == 0 && g_sbc_on) {
+            /* the Steel Battalion controller: its controls from the keys and the pad (sbc_map.c) */
+            NcSbcState sb;
+            sbc_read(focused ? keys : NULL, pad, &sb);
+            nc_sbc_set(&sb);
+        }
         /* the keyboard: player 1 on auto, any player set to it */
         const bool kb = focused && (g_map.device[i] == -1 || all || (i == 0 && g_map.device[i] == 0));
         ImPad m;
@@ -816,7 +825,9 @@ static void update_pads(bool focused)
             g_rumble[i][1] = r;
         }
     }
-    quick_buttons();
+    if (!g_sbc_on) {
+        quick_buttons();                    /* Back is the Steel Battalion panel's */
+    }
 }
 
 /* ------------------------------------------------------------ states */
@@ -1506,7 +1517,7 @@ static const char *pick_disc(void)
 }
 
 #ifndef XBASED_VERSION
-#define XBASED_VERSION "1.0.76.14"
+#define XBASED_VERSION "1.0.76.15"
 #endif
 
 static void rm_tree(const char *path)
@@ -1776,6 +1787,8 @@ int main(int argc, char *argv[])
             g_pause_bg = atoi(a + 8) != 0;
         } else if (!strncmp(a, "autosave=", 9)) {
             g_autosave = atoi(a + 9) != 0;
+        } else if (!strncmp(a, "sbc=", 4)) {
+            g_sbc_opt = atoi(a + 4) != 0;
         } else if (!strncmp(a, "autofix=", 8)) {
             g_af_on = atoi(a + 8) != 0;
         } else if (!strncmp(a, "fix=", 4)) {
@@ -1791,6 +1804,11 @@ int main(int argc, char *argv[])
                 nc_log("hakuX-app", "autofix: unreadable trial %s", a + 9);
             }
         }
+    }
+    g_sbc_on = g_sbc_opt > 0 || (g_sbc_opt < 0 && g_title_id == SBC_TITLE_STEEL_BATTALION && !xbox_dash);
+    nc_dev_ohci_use_sbc(g_sbc_on);
+    if (g_sbc_on) {
+        nc_log("hakuX-app", "the Steel Battalion controller is player 1's: %s", sbc_layout_text());
     }
     g_af.enabled = g_af_on && !xbox_dash && g_key[0] && g_disc_fd >= 0;
     g_af.started_s = (double)SDL_GetTicks() / 1000.0;

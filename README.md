@@ -52,8 +52,8 @@ No BIOS, MCPX ROM or hard-disk image is needed.
 
 | Platform | File | |
 |---|---|---|
-| **Windows** 10/11 (x64) | `xbased-modern-gui-1.0.76.14-windows-x64.zip` | Unzip anywhere and run `xbased.exe`. Portable: everything stays in its folder. |
-| **Linux** (x86-64) | `xbased-1.0.76.14-x86_64.AppImage` | `chmod +x` it and run it. Needs a Vulkan driver and glibc 2.38 or newer (Ubuntu 24.04, Fedora 39, Debian 13). |
+| **Windows** 10/11 (x64) | `xbased-modern-gui-1.0.76.15-windows-x64.zip` | Unzip anywhere and run `xbased.exe`. Portable: everything stays in its folder. |
+| **Linux** (x86-64) | `xbased-1.0.76.15-x86_64.AppImage` | `chmod +x` it and run it. Needs a Vulkan driver and glibc 2.38 or newer (Ubuntu 24.04, Fedora 39, Debian 13). |
 
 Get it from **[Releases](https://github.com/Prodigy488/xbased-modern-gui/releases/latest)**.
 The Linux AppImage starts, but it has not been run with a GPU or sound on Linux (it was
@@ -167,6 +167,8 @@ xbased doesn't include any copyrighted Xbox software.
 <td valign="top">
 
 ### Controls, online, languages
+- **Steel Battalion's controller**: for Steel Battalion the first port gets the game's big controller (levers,
+  pedals, 40 buttons, gear lever, tuner dial) and your keyboard and gamepad drive it (see below).
 - **4 controller ports**: Automatic, any gamepad or the keyboard; remap every
   button, per game too; dead zone and vibration.
 - **Sticks like the Xbox controller's**: a modern stick's circle reaches the
@@ -248,6 +250,39 @@ Windows, in `~/.local/share/xbased/` on Linux.
 **Shortcuts:** F1 menu, F5 quick save, F8 quick load (Shift: slot 2), Tab fast
 forward (hold), F2 pause, F12 screenshot, F11 full screen. On a gamepad,
 Back + Start or the Guide button opens the menu.
+
+### Steel Battalion
+
+Steel Battalion (title 43430002) only plays with its own controller: 40-odd buttons, two levers, a sight
+stick, three pedals, a tuner dial and a gear lever. xbased gives the game that controller on port 1
+(automatically for that title; `sbc=1` or `sbc=0` in the game's `games\<TITLE ID>.ini` forces it on or off,
+for Line of Contact for one) and drives it from your keyboard and gamepad. The panel lamps the game lights
+are not shown anywhere yet.
+
+**Gamepad:** right stick aims, left stick left/right turns (the rotation lever), left stick down is the
+middle pedal, LT / RT the left / right pedal, D-pad the sight stick, LB / RB gear down / up, A fire,
+X main weapon, Y lock on, B sight change, Start start. **Hold Back** and the pad works the cockpit panel:
+A ignition, B cockpit hatch, X mode select, Y monitor open/close, D-pad comm 1-4, LB / RB tuner dial,
+stick clicks washing / extinguisher. (The quick-save combo on Back is off for this game: F5 / F8 save and load.)
+
+**Keyboard (all of the controller):**
+
+| Control | Key | Control | Key |
+|---|---|---|---|
+| Aiming lever | Arrow keys | Rotation lever | A / D |
+| Sight change stick | I J K L | Sight change button | F |
+| Left / middle / right pedal | Z / X / C | Gear lever up / down | Q / E |
+| Tuner dial down / up | , / . | Fire / main weapon / lock on | Space / Left Shift / Left Ctrl |
+| Cockpit hatch / ignition / start | R / T / Enter | Eject | Delete |
+| Monitor open, map zoom, mode, sub monitor | 1 2 3 4 | Main zoom in / out | = / - |
+| FSS, manipulator, line color | 5 6 7 | Washing, extinguisher, chaff | 8 9 0 |
+| Tank detach, override, night scope | Insert, Home, Page Up | F1, F2, F3 | End, Page Down, ' |
+| Weapon: main, sub, magazine | Y U O | Comm 1-5 | V B N M ; |
+| Toggle switches (a press flips one) | P [ ] \ / | | |
+
+This is the controller as the Xbox dev wiki describes it, tested here only with the controller's own USB
+descriptors and reports in a host test, not with the game: if the game doesn't see it, or a lever or pedal
+reads wrong, the log (`xbased.log`) has the controller's first poll and the panel report the game sent.
 
 ## Building from source
 

@@ -137,6 +137,7 @@ static const unsigned k_port_map[4] = {3, 4, 1, 2};
 static NcUsbDev *g_pad_hub[4];
 static bool g_front_hub;
 static bool g_ready;                    /* nc_dev_ohci_init done */
+static bool g_sbc;                      /* player 1's controller: the Steel Battalion one */
 static int g_early_mask = -1;           /* nc_dev_ohci_set_pads before it: the boot's */
 
 static uint64_t now_ns(void)
@@ -686,6 +687,9 @@ void nc_dev_ohci_init(struct NcVm *vm)
     if (g_early_mask >= 0) {
         mask = (unsigned)g_early_mask;      /* the controllers changed while the core started */
     }
+    if (g_sbc) {
+        mask |= 1;                          /* the Steel Battalion controller is always in */
+    }
     unsigned players = 0;
     for (unsigned p = 0; p < 4; p++) {
         players += (mask >> p) & 1;
@@ -700,7 +704,7 @@ void nc_dev_ohci_init(struct NcVm *vm)
     NcUsbDev *front = front_hub && players ? nc_usb_hub_new(4) : NULL;
     for (unsigned p = 0; p < 4; p++) {
         g_pad_hub[p] = nc_usb_hub_new(3);
-        nc_usb_hub_attach(g_pad_hub[p], 1, nc_xid_gamepad_new(p));
+        nc_usb_hub_attach(g_pad_hub[p], 1, p == 0 && g_sbc ? nc_xid_sbc_new() : nc_xid_gamepad_new(p));
         if (!((mask >> p) & 1)) {
             continue;
         }
@@ -735,6 +739,11 @@ void nc_dev_ohci_init(struct NcVm *vm)
     nc_log("hakuX-native-usb", "ohci: %u controller(s) (players %s%s%s%s)%s", players, mask & 1 ? "1" : "",
            mask & 2 ? "2" : "", mask & 4 ? "3" : "", mask & 8 ? "4" : "",
            front_hub ? " behind the front panel hub" : "");
+}
+
+void nc_dev_ohci_use_sbc(bool on)
+{
+    g_sbc = on;
 }
 
 /* A controller plugged in or pulled out, as on the console: its root port

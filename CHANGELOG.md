@@ -1,5 +1,18 @@
 # xbased changelog
 
+## 1.0.76.15 (Modern GUI fork)
+
+- Steel Battalion's controller. The game only plays with its own controller (levers, pedals, 40 buttons,
+  gear lever, tuner dial), which is a USB device of its own, not a gamepad. xbased now has that device: for
+  Steel Battalion (title 43430002) player 1's port gets it, and the keyboard and gamepad drive it (a gamepad
+  layout for the controls a pad can reach, with Back held for the cockpit panel; every control on the
+  keyboard: see README, "Steel Battalion"). `sbc=1` / `sbc=0` in the game's file forces it on or off, for
+  Line of Contact or another title. Built from the Xbox dev wiki's description of the controller's reports
+  and checked in a host test (tests/sbc), not run with the game here. The wiki's right pedal overlaps the
+  tuner dial's byte, so that pedal's value is carried in the high nibble and the tuner in the low one; if a
+  pedal or the dial reads wrong in the game, that is the first place to look. The log has the controller's
+  first poll and the panel report (lamps) the game sends.
+
 ## 1.0.76.14 (Modern GUI fork)
 
 - Over the Hedge's cutscene stalls, from the 1.0.76.13 log (its GPU trace now showed the frames): the

@@ -101,6 +101,22 @@ void nc_pad_set(unsigned player, const NcPadState *s);
 /* The last rumble strengths the title sent. */
 void nc_pad_rumble(unsigned player, uint16_t *left, uint16_t *right);
 
+/* xid_sbc.c: the Steel Battalion controller (player 1's port, in place of the gamepad), and its
+ * controls as the app's mapping (app/ui/sbc_map.c) leaves them: the 26-byte report's. */
+NcUsbDev *nc_xid_sbc_new(void);
+typedef struct NcSbcState {
+    uint8_t buttons[5];     /* report bytes 2-6, bit for bit (NC_SBC_* below: byte << 8 | mask) */
+    uint16_t aim_x, aim_y;  /* the aiming lever: 0 left / top .. 0xffff, 0x8000 centred */
+    int16_t rotation;       /* the rotation lever: -0x7fff left .. 0x7fff right */
+    int16_t sight_x, sight_y;   /* the sight change stick: -0x7fff left / top .. 0x7fff */
+    uint16_t pedal[3];      /* left, middle, right: 0 up .. 0xffff down */
+    uint8_t tuner;          /* the tuner dial: 0 (9 o'clock) .. 12 (6 o'clock) */
+    int8_t gear;            /* the gear lever: -2 R, -1 N, 1-5, 0 between gears */
+} NcSbcState;
+void nc_sbc_set(const NcSbcState *s);
+void nc_sbc_lamps(uint8_t out[22]);                 /* the last panel report the title sent */
+void nc_sbc_report(const NcSbcState *s, uint8_t r[26]);
+
 /* ohci.c: the Xbox's first USB controller (0xFED00000, IRQ 1), with gamepads
  * for the players in NC_PAD_MASK (or NC_PADS from player 1; default 1). */
 struct NcVm;
@@ -108,6 +124,8 @@ void nc_dev_ohci_init(struct NcVm *vm);
 /* The players with a controller now (bit n: player n + 1): the others'
  * controllers pulled out, theirs plugged in, as the title would see it. */
 void nc_dev_ohci_set_pads(unsigned mask);
+/* Before the core starts: player 1's controller is the Steel Battalion one. */
+void nc_dev_ohci_use_sbc(bool on);
 
 #ifdef __cplusplus
 }
