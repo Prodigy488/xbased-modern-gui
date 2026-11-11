@@ -1,5 +1,13 @@
 # xbased changelog
 
+## 1.0.76.16 (Modern GUI fork)
+
+- Steel Battalion on a gamepad: the five toggle switches the cockpit start-up has you flip (filter control,
+  oxygen supply, fuel flow rate, buffer material, VT location) had no button on the pad, so the mech could
+  not be started with one. With Back held, the D-pad (up, right, down, left) and the left stick click now
+  flip them in that order (comms and washing are keyboard only). Reported: the game ran but the mech
+  would not start or walk with the pad. Not run on the game here.
+
 ## 1.0.76.15 (Modern GUI fork)
 
 - Steel Battalion's controller. The game only plays with its own controller (levers, pedals, 40 buttons,

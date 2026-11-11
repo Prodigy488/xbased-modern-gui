@@ -52,8 +52,8 @@ No BIOS, MCPX ROM or hard-disk image is needed.
 
 | Platform | File | |
 |---|---|---|
-| **Windows** 10/11 (x64) | `xbased-modern-gui-1.0.76.15-windows-x64.zip` | Unzip anywhere and run `xbased.exe`. Portable: everything stays in its folder. |
-| **Linux** (x86-64) | `xbased-1.0.76.15-x86_64.AppImage` | `chmod +x` it and run it. Needs a Vulkan driver and glibc 2.38 or newer (Ubuntu 24.04, Fedora 39, Debian 13). |
+| **Windows** 10/11 (x64) | `xbased-modern-gui-1.0.76.16-windows-x64.zip` | Unzip anywhere and run `xbased.exe`. Portable: everything stays in its folder. |
+| **Linux** (x86-64) | `xbased-1.0.76.16-x86_64.AppImage` | `chmod +x` it and run it. Needs a Vulkan driver and glibc 2.38 or newer (Ubuntu 24.04, Fedora 39, Debian 13). |
 
 Get it from **[Releases](https://github.com/Prodigy488/xbased-modern-gui/releases/latest)**.
 The Linux AppImage starts, but it has not been run with a GPU or sound on Linux (it was
@@ -262,8 +262,10 @@ are not shown anywhere yet.
 **Gamepad:** right stick aims, left stick left/right turns (the rotation lever), left stick down is the
 middle pedal, LT / RT the left / right pedal, D-pad the sight stick, LB / RB gear down / up, A fire,
 X main weapon, Y lock on, B sight change, Start start. **Hold Back** and the pad works the cockpit panel:
-A ignition, B cockpit hatch, X mode select, Y monitor open/close, D-pad comm 1-4, LB / RB tuner dial,
-stick clicks washing / extinguisher. (The quick-save combo on Back is off for this game: F5 / F8 save and load.)
+A ignition, B cockpit hatch, X mode select, Y monitor open/close, LB / RB tuner dial, and the five toggle
+switches (a press flips one; the start-up has them flipped in this order): D-pad up, right, down, left, then
+left stick click (filter control, oxygen supply, fuel flow rate, buffer material, VT location); right stick
+click the extinguisher. The comms, washing and the other buttons are on the keyboard. (The quick-save combo on Back is off for this game: F5 / F8 save and load.)
 
 **Keyboard (all of the controller):**
 

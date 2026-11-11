@@ -109,6 +109,24 @@ int main(void)
     sbc_read(NULL, PAD, &s);
     CHECK(s.buttons[0] == 0x20);
 
+    /* Back held: the D-pad flips the toggle switches (a press each, they stay), the left stick click the fifth */
+    g_btn[SDL_GAMEPAD_BUTTON_START] = false;
+    g_btn[SDL_GAMEPAD_BUTTON_SOUTH] = false;
+    g_btn[SDL_GAMEPAD_BUTTON_DPAD_UP] = true;
+    sbc_read(NULL, PAD, &s);
+    CHECK(s.buttons[4] == 0x04);
+    g_btn[SDL_GAMEPAD_BUTTON_DPAD_UP] = false;
+    sbc_read(NULL, PAD, &s);
+    CHECK(s.buttons[4] == 0x04);
+    g_btn[SDL_GAMEPAD_BUTTON_LEFT_STICK] = true;
+    sbc_read(NULL, PAD, &s);
+    CHECK(s.buttons[4] == 0x44);
+    g_btn[SDL_GAMEPAD_BUTTON_LEFT_STICK] = false;
+    g_btn[SDL_GAMEPAD_BUTTON_DPAD_UP] = true;
+    sbc_read(NULL, PAD, &s);
+    CHECK(s.buttons[4] == 0x40);        /* flipped back */
+    g_btn[SDL_GAMEPAD_BUTTON_DPAD_UP] = false;
+
     printf(fails ? "%d failed\n" : "all ok\n", fails);
     return fails != 0;
 }

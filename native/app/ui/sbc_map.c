@@ -96,7 +96,7 @@ void sbc_read(const bool *keys, SDL_Gamepad *pad, NcSbcState *out)
     static int gear = 1;            /* index: R N 1 2 3 4 5 */
     static int tuner;
     static uint8_t toggles[5];      /* the switches' positions */
-    static bool prev_keys[NTOGGLES], prev_pad[4];
+    static bool prev_keys[NTOGGLES], prev_pad[4], prev_ptog[NTOGGLES];
     static uint16_t pedals[3];
 
     NcSbcState s;
@@ -109,6 +109,7 @@ void sbc_read(const bool *keys, SDL_Gamepad *pad, NcSbcState *out)
     int sy = axis_key(keys, SDL_SCANCODE_I, SDL_SCANCODE_K);
     int ped[3] = {0, 0, 0};
     bool gear_up = false, gear_down = false, tuner_up = false, tuner_down = false;
+    bool ptog[NTOGGLES] = {false};     /* the pad's presses of the toggle switches */
 
     if (keys) {
         for (int i = 0; i < NKEYS; i++) {
@@ -156,11 +157,12 @@ void sbc_read(const bool *keys, SDL_Gamepad *pad, NcSbcState *out)
             if (PB(EAST)) press(&s, B_HATCH);
             if (PB(WEST)) press(&s, B_MODE);
             if (PB(NORTH)) press(&s, B_MON_OPEN);
-            if (PB(DPAD_UP)) press(&s, B_COMM1);
-            if (PB(DPAD_RIGHT)) press(&s, B_COMM2);
-            if (PB(DPAD_DOWN)) press(&s, B_COMM3);
-            if (PB(DPAD_LEFT)) press(&s, B_COMM4);
-            if (PB(LEFT_STICK)) press(&s, B_WASHING);
+            /* the five toggle switches, in the order the start-up has them flipped */
+            ptog[0] = PB(DPAD_UP);
+            ptog[1] = PB(DPAD_RIGHT);
+            ptog[2] = PB(DPAD_DOWN);
+            ptog[3] = PB(DPAD_LEFT);
+            ptog[4] = PB(LEFT_STICK);
             if (PB(RIGHT_STICK)) press(&s, B_EXTING);
             tuner_down |= PB(LEFT_SHOULDER);
             tuner_up |= PB(RIGHT_SHOULDER);
@@ -177,10 +179,11 @@ void sbc_read(const bool *keys, SDL_Gamepad *pad, NcSbcState *out)
     memcpy(prev_pad, now_keys, sizeof(prev_pad));
     for (int i = 0; i < NTOGGLES; i++) {
         const bool k = keys && keys[k_toggles[i].key];
-        if (k && !prev_keys[i]) {
+        if ((k && !prev_keys[i]) || (ptog[i] && !prev_ptog[i])) {
             toggles[i] ^= 1;
         }
         prev_keys[i] = k;
+        prev_ptog[i] = ptog[i];
         if (toggles[i]) {
             press(&s, k_toggles[i].btn);
         }
@@ -208,5 +211,5 @@ const char *sbc_layout_text(void)
            "Y/U/O weapon control, V B N M ; comms, F sight change button, P [ ] \\ / toggle switches. "
            "Gamepad: right stick aim, left stick X rotation, D-pad sight change, LT/RT left/right pedal, "
            "left stick down middle pedal, LB/RB gear, A fire, X main weapon, Y lock on, B sight change, "
-           "Start start; hold Back: A ignition, B hatch, X mode, Y monitor, D-pad comms, LB/RB tuner.";
+           "Start start; hold Back: A ignition, B hatch, X mode, Y monitor, D-pad up/right/down/left and left stick click the five toggle switches, LB/RB tuner.";
 }
