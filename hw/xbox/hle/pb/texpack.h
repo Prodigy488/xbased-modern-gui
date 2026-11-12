@@ -21,7 +21,12 @@ bool hle_texpack_has(uint64_t hash);
 /* The pack's picture for hash: bytes R, G, B, A, *w x *h (hle_texpack_free); NULL without one. *from_auto: it is
  * the upscaler's (auto/), which the caller checks against the game's texture (hle_texpack_reject if unlike). */
 uint8_t *hle_texpack_load(uint64_t hash, uint32_t *w, uint32_t *h, bool *from_auto);
-void hle_texpack_reject(uint64_t hash, uint32_t w, uint32_t h);
+void hle_texpack_reject(uint64_t hash, uint32_t w, uint32_t h, uint32_t ow, uint32_t oh, uint32_t fmt, bool decoded,
+                        float colour, float alpha);
+/* A picture went up in the texture's place (the log, the counts). */
+void hle_texpack_used(uint64_t hash, uint32_t w, uint32_t h, bool from_auto);
+/* How many pictures were used and how many of the upscaler's refused, this run. */
+void hle_texpack_counts(unsigned *used, unsigned *rejected);
 void hle_texpack_free(uint8_t *rgba);
 /* True the first time for a hash this run: the caller decodes the texture and hands it to hle_texpack_dump. */
 bool hle_texpack_dump_wanted(uint64_t hash);

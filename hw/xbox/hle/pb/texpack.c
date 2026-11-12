@@ -73,7 +73,7 @@ static void set_add(Set *s, uint64_t k)
 }
 
 static Set g_absent, g_present, g_dumped;
-static unsigned g_nloaded, g_ndumped, g_nrejected;
+static unsigned g_nloaded, g_ndumped, g_nrejected, g_nused;
 
 /* <base>textures/<title id>/ (and its dump/), made at first use */
 static char *dir;
@@ -132,14 +132,33 @@ bool hle_texpack_has(uint64_t hash)
     return there;
 }
 
-void hle_texpack_reject(uint64_t hash, uint32_t w, uint32_t h)
+void hle_texpack_reject(uint64_t hash, uint32_t w, uint32_t h, uint32_t ow, uint32_t oh, uint32_t fmt, bool decoded,
+                        float colour, float alpha)
 {
     set_add(&g_absent, hash);
-    if (g_nrejected++ < 16) {
-        hle_log("hakuX-hle-front", "texture packs: auto/%016llx.png (%ux%u) not used: averaged down it doesn't "
-                "look like the game's texture, or isn't a whole number of times its size (#%u of 16 logged)",
-                (unsigned long long)hash, w, h, g_nrejected);
+    if (g_nrejected++ < 24) {
+        /* the numbers say why: sizes that don't divide, a format this can't decode, or how far (of 255) the
+         * picture averaged down is from the texture in colour and in alpha (28 is the most allowed) */
+        hle_log("hakuX-hle-front", "texture packs: auto/%016llx.png (%ux%u) not used: the game's texture is %ux%u "
+                "format 0x%02X%s, colour off by %.1f, alpha off by %.1f (#%u of 24 logged)",
+                (unsigned long long)hash, w, h, ow, oh, fmt, decoded ? "" : " (not decoded)", (double)colour,
+                (double)alpha, g_nrejected);
     }
+}
+
+void hle_texpack_used(uint64_t hash, uint32_t w, uint32_t h, bool from_auto)
+{
+    g_nused++;
+    if (g_nloaded++ < 16) {
+        hle_log("hakuX-hle-front", "texture packs: %s%016llx.png %ux%u in use (#%u of 16 logged)",
+                from_auto ? "auto/" : "", (unsigned long long)hash, w, h, g_nloaded);
+    }
+}
+
+void hle_texpack_counts(unsigned *used, unsigned *rejected)
+{
+    *used = g_nused;
+    *rejected = g_nrejected;
 }
 
 uint8_t *hle_texpack_load(uint64_t hash, uint32_t *w, uint32_t *h, bool *from_auto)
@@ -175,10 +194,6 @@ uint8_t *hle_texpack_load(uint64_t hash, uint32_t *w, uint32_t *h, bool *from_au
         }
         set_add(&g_absent, hash);
         return NULL;
-    }
-    if (g_nloaded++ < 16) {
-        hle_log("hakuX-hle-front", "texture packs: %016llx.png %dx%d in use (#%u of 16 logged)",
-                (unsigned long long)hash, iw, ih, g_nloaded);
     }
     *w = (uint32_t)iw;
     *h = (uint32_t)ih;

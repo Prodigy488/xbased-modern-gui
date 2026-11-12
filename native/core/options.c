@@ -74,7 +74,8 @@ bool nc_option(NcOptions *o, const char *arg)
         nc_log("hakuX-app", "anisotropic filtering %sx", v);
     } else if ((v = value(arg, "mvstat="))) {
         /* a measurement for motion vectors (hw/xbox/hle/pb/pbdraw.c mv_note): read at the first draw */
-        setenv("HAKUX_HLE_MVSTAT", atoi(v) ? "1" : "0", 1);
+        nc_hle_set_mvstat(atoi(v) != 0);
+        nc_log("hakuX-app", "motion statistics %s", atoi(v) ? "on" : "off");
     } else if ((v = value(arg, "texpack="))) {
         nc_hle_set_texpack(1, atoi(v) != 0);
         nc_log("hakuX-app", "texture packs %s", atoi(v) ? "on" : "off");

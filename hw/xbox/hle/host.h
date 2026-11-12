@@ -155,6 +155,8 @@ int hle_host_anisotropy(void);
 int hle_host_texpack(void);
 /* The largest side, in pixels, a texture pack's picture is drawn at (0: the most, 2048). */
 int hle_host_texpack_cap(void);
+/* The motion statistics (pb/pbdraw.c mv_note) are asked for. */
+int hle_host_mvstat(void);
 /* vkGetInstanceProcAddr of the Vulkan driver to use (a custom driver's or
  * the system's), as a void pointer; NULL if none. */
 void *hle_host_vk_loader(void);

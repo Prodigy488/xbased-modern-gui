@@ -3254,7 +3254,7 @@ static void mv_note(const HleCmdDraw *d, bool ff)
 {
     if (g_mv.on < 0) {
         const char *e = getenv("HAKUX_HLE_MVSTAT");
-        g_mv.on = e && atoi(e) > 0;
+        g_mv.on = hle_host_mvstat() || (e && atoi(e) > 0);
         if (g_mv.on) {
             g_mv.cur = g_malloc0(MV_CAP * sizeof(MvEnt));
             g_mv.prev = g_malloc0(MV_CAP * sizeof(MvEnt));

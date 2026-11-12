@@ -351,6 +351,9 @@ static _Noreturn void exit_now(int code)
         if (n || note[0]) {
             nc_log("hakuX-app", "texture upscaling: %s", note[0] ? note : "nothing new");
         }
+        unsigned used = 0, refused = 0;
+        hle_texpack_counts(&used, &refused);
+        nc_log("hakuX-app", "texture upscaling: this run drew %u upscaled textures and refused %u", used, refused);
     }
     fflush(NULL);
 #ifdef _WIN32
@@ -1546,7 +1549,7 @@ static const char *pick_disc(void)
 }
 
 #ifndef XBASED_VERSION
-#define XBASED_VERSION "1.0.76.25"
+#define XBASED_VERSION "1.0.76.26"
 #endif
 
 static void rm_tree(const char *path)

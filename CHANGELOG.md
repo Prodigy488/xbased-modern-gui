@@ -1,5 +1,22 @@
 # xbased changelog
 
+## 1.0.76.26 (Modern GUI fork)
+
+- Real-ESRGAN comes with xbased: realesrgan-ncnn-vulkan (release v0.2.5.0, 20220424) and its
+  realesrgan-x4plus model, unmodified, in a "realesrgan" folder beside the program (in the AppImage, beside
+  the binary), where automatic texture upscaling looks first. The download grows from 5 to about 42 MB. Their
+  licences (Real-ESRGAN and the model BSD 3-Clause, the program MIT, ncnn BSD 3-Clause and its parts') are in
+  licenses/realesrgan.license.txt and in the folder. The files are not in the repository:
+  tools/release/fetch_realesrgan.sh fetches them for packaging.
+- The log tells an upscaled texture's story truly. "in use" was written when a picture was read, before the
+  check against the game's texture, so a refused picture was logged as in use and then as not used (a log of
+  1.0.76.25 has 16 such pairs). It is now written when the picture goes up. A refusal says why: the two sizes,
+  the texture's format, and how far the picture averaged down is from it in colour and in alpha (of 255; 28
+  is the most allowed). At exit: "this run drew N upscaled textures and refused M".
+- mvstat=1 did nothing on Windows in 1.0.76.24 and .25 (that log has no "motion stats" line): the option set
+  an environment variable the draw code then didn't see. It is a setting passed like the others now, and the
+  log says "motion statistics on" when it is read.
+
 ## 1.0.76.25 (Modern GUI fork)
 
 - Texture packs and automatic upscaling garbled many games (reported on 1.0.76.24 with screenshots: black

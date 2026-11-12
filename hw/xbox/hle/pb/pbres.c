@@ -345,8 +345,10 @@ static uint8_t *tex_rgba(const HleResDesc *d, const HleFmtInfo *fi, const uint8_
 /* An upscaler's picture against the game's own texture: it must be a whole number of times its size and, averaged
  * back down, look like it (colour where the texture isn't transparent, and its alpha). A picture that fails (an
  * upscaler's black or garbled output, a file of another texture) is not used. */
-static bool texpack_like(const uint8_t *px, uint32_t w, uint32_t h, const uint8_t *own, uint32_t ow, uint32_t oh)
+static bool texpack_like(const uint8_t *px, uint32_t w, uint32_t h, const uint8_t *own, uint32_t ow, uint32_t oh,
+                         float *colour, float *alpha)
 {
+    *colour = *alpha = -1.0f;           /* not compared */
     if (!ow || !oh || w % ow || h % oh || w / ow != h / oh) {
         return false;
     }
@@ -374,7 +376,9 @@ static bool texpack_like(const uint8_t *px, uint32_t w, uint32_t h, const uint8_
             n += 1.0;
         }
     }
-    return (wc < 1.0 || dc / wc < 28.0) && da / n < 28.0;
+    *colour = wc < 1.0 ? 0.0f : (float)(dc / wc);
+    *alpha = (float)(da / n);
+    return *colour < 28.0f && *alpha < 28.0f;
 }
 
 static bool g_pack_deferred;
@@ -425,12 +429,14 @@ static int texpack_define(uint32_t id, uint64_t hash, bool mips, const HleResDes
     }
     if (made) {
         g_autofree uint8_t *own = tex_rgba(d, fi, src, pal);
-        if (!own || !texpack_like(px, w, h, own, d->w, d->h)) {
-            hle_texpack_reject(hash, w, h);
+        float dc = -1.0f, da = -1.0f;
+        if (!own || !texpack_like(px, w, h, own, d->w, d->h, &dc, &da)) {
+            hle_texpack_reject(hash, w, h, d->w, d->h, d->fmt, own != NULL, dc, da);
             hle_texpack_free(px);
             return 0;
         }
     }
+    hle_texpack_used(hash, w, h, made);
     /* its levels, each the average of four texels of the one above, on the heap (the arena's memory reads
      * slowly); the first of at most `cap` a side is the one that goes up, with those under it if the game's
      * texture has levels (an upscaler's 4x of a large texture is taken at half or a quarter) */
