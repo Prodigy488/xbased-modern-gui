@@ -275,6 +275,26 @@ static void wait_next_frame(uint32_t seen)
 }
 #endif
 
+/* An in-between frame is up (frame interpolation) and the frame itself is due at `due`: wait until then, or
+ * (desktop) until another frame comes. */
+static void wait_due(uint32_t seen, int64_t due)
+{
+    const int64_t left = due - (int64_t)now_ns();
+    if (left <= 0) {
+        return;
+    }
+#ifdef NC_DESKTOP
+    if (left >= 1000000) {
+        hle_disp_wait_front(seen, (int)(left / 1000000));   /* whole milliseconds; the rest the next time round */
+        return;
+    }
+#else
+    (void)seen;
+#endif
+    const struct timespec ts = {(time_t)(due / 1000000000ll), (long)(due % 1000000000ll)};
+    clock_nanosleep(CLOCK_MONOTONIC, TIMER_ABSTIME, &ts, NULL);
+}
+
 bool nc_present_frame(struct ANativeWindow *win)
 {
 #ifdef NC_DESKTOP
@@ -297,7 +317,10 @@ bool nc_present_frame(struct ANativeWindow *win)
     const bool as_they_come = false;
 #endif
     if (!g_tween_t0 && hle_present_unchanged(win, key)) {
-        if (as_they_come) {
+        const int64_t due = hle_present_due_ns();
+        if (due) {
+            wait_due(fronts, due);
+        } else if (as_they_come) {
             wait_next_frame(fronts);
         } else {
             nc_dev_nv2a_display_pickup(now_ns()); /* it looked: the vblank keeps clear of it */

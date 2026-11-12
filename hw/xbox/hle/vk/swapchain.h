@@ -22,6 +22,12 @@ enum { HLE_UPSCALE_BILINEAR, HLE_UPSCALE_FSR, HLE_UPSCALE_NEAREST, HLE_UPSCALE_N
  * submitted and presented each frame four times. */
 bool hle_present_unchanged(struct ANativeWindow *win, uint64_t key);
 
+/* Frame interpolation: with an in-between frame on the display, the time (the monotonic clock's, ns) the frame
+ * itself is due, when hle_present_unchanged stops saying so; 0 with none. The caller waits no longer than that.
+ * (Without it the in-between frame was presented again and again until then: under V-Sync a queue of them,
+ * two refreshes of delay; without V-Sync a present loop as fast as the GPU went.) */
+int64_t hle_present_due_ns(void);
+
 /* Each display refresh, on the window's thread, these three in order.
  * begin: an image of win's swapchain (made or remade as the window comes,
  * goes or changes size), waiting for one: the panel's pace. *w, *h: the

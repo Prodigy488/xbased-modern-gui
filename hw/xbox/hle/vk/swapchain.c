@@ -137,6 +137,7 @@ static struct {
      * in-between frame (il_mid); the in-between is shown for half a frame's time (il_due), then the frame */
     PsImg il_pv, il_mv, il_mid;
     bool il_tried, il_pending, il_logged;
+    bool il_shown;              /* the in-between frame is on the display: nothing more to show until il_due */
     uint64_t il_serial;         /* the frame it last took in */
     int64_t il_t_new, il_due;
     /* the display's gamma ramp */
@@ -1337,7 +1338,9 @@ static bool ov_on(void);
 
 bool hle_present_unchanged(struct ANativeWindow *win, uint64_t key)
 {
-    if (ov_on() || g_ps.shot_want || g_ps.il_pending || !g_ps.shown || !win || win != g_ps.win || g_ps.stale || !g_ps.sc || key != g_ps.shown_key ||
+    /* an in-between frame is shown once, then nothing until the frame's own time (hle_present_due_ns) */
+    const bool il_wait = g_ps.il_pending && (!g_ps.il_shown || hle_now_ns() >= g_ps.il_due);
+    if (ov_on() || g_ps.shot_want || il_wait || !g_ps.shown || !win || win != g_ps.win || g_ps.stale || !g_ps.sc || key != g_ps.shown_key ||
         (uint32_t)ANativeWindow_getWidth(win) != g_ps.wsize.width ||
         (uint32_t)ANativeWindow_getHeight(win) != g_ps.wsize.height || hle_disp_gamma_seq() != g_ps.ramp_gen) {
         return false;
@@ -1348,6 +1351,11 @@ bool hle_present_unchanged(struct ANativeWindow *win, uint64_t key)
         return false;
     }
     return !front || (gen == g_ps.f.gen && swap_id == g_ps.f.swap_id);
+}
+
+int64_t hle_present_due_ns(void)
+{
+    return g_ps.il_pending && g_ps.il_shown ? g_ps.il_due : 0;
 }
 
 bool hle_present_begin(struct ANativeWindow *win, uint32_t *w, uint32_t *h)
@@ -2506,6 +2514,7 @@ void hle_present_end(float sx, float sy, bool fxaa, int upscale, bool average, u
                            mix);
                     g_ps.il_mid.serial = g_ps.serial;
                     g_ps.il_pending = true;
+                    g_ps.il_shown = false;
                     g_ps.il_due = now + dt / 2 - 3000000ll;
                     if (!g_ps.il_logged) {
                         g_ps.il_logged = true;
@@ -2697,6 +2706,7 @@ void hle_present_end(float sx, float sy, bool fxaa, int upscale, bool average, u
     if (pr == VK_SUCCESS || pr == VK_SUBOPTIMAL_KHR) {
         g_ps.shown = true;
         g_ps.shown_key = key;
+        g_ps.il_shown = il_mid;
         g_ov.presented++;
     }
     if (pr == VK_ERROR_OUT_OF_DATE_KHR || (pr == VK_SUBOPTIMAL_KHR && g_ps.follows)) {

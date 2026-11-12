@@ -1,5 +1,16 @@
 # xbased changelog
 
+## 1.0.76.21 (Modern GUI fork)
+
+- Frame interpolation: the in-between frame is presented once. While it was up, the window's loop took every
+  turn as something new to show and presented it again, until the frame's own time came. Under V-Sync those
+  presents queue behind each other (a swapchain of three images holds two), so the picture ran about two
+  refreshes late on top of the half frame interpolation costs by design; without V-Sync the loop presented
+  the same picture as fast as the GPU went for half of every frame. Now the loop waits until the frame is
+  due (or another comes) and presents that. A model of the queue (60 Hz, a 30 fps game, three images) puts
+  the frame on the display 18 to 32 ms after it arrives, from 52 to 66 ms; the same two presents a frame.
+  Modelled, not measured: not run on a GPU.
+
 ## 1.0.76.20 (Modern GUI fork)
 
 - Frame interpolation smeared low-contrast content that moves fast (a dim scene, fog, sky, distant ground in
