@@ -54,6 +54,7 @@ static void rows_video(List *l)
     const char *on[] = {"-10%", "-5%", "-3%", T(S_OFF), "3%", "5%", "7%", "10%", "15%"};
     opt_choice(l, S_OVERSCAN, "overscan", ov, on, 9, "0");
     opt_bool(l, S_FXAA, "fxaa", false, false);
+    opt_bool(l, S_SMAA, "smaa", false, false);
     static const char *anv[] = {"0", "2", "4", "8", "16"};
     const char *ann[] = {T(S_OFF), "2x", "4x", "8x", "16x"};
     opt_choice(l, S_ANISO, "aniso", anv, ann, 5, "0");
@@ -64,6 +65,7 @@ static void rows_video(List *l)
     static const char *cv[] = {"0", "1", "2", "3"};
     const char *cn[] = {T(S_OFF), T(S_CRT_SOFT), T(S_CRT_TV), T(S_CRT_ARCADE)};
     opt_choice(l, S_CRT, "crt", cv, cn, 4, "0");
+    opt_bool(l, S_INTERP, "interp", false, false);
 }
 
 /* PAL games at 60 Hz, as a PAL console with PAL-60 on runs them, or 50 Hz */

@@ -52,8 +52,8 @@ No BIOS, MCPX ROM or hard-disk image is needed.
 
 | Platform | File | |
 |---|---|---|
-| **Windows** 10/11 (x64) | `xbased-modern-gui-1.0.76.17-windows-x64.zip` | Unzip anywhere and run `xbased.exe`. Portable: everything stays in its folder. |
-| **Linux** (x86-64) | `xbased-1.0.76.17-x86_64.AppImage` | `chmod +x` it and run it. Needs a Vulkan driver and glibc 2.38 or newer (Ubuntu 24.04, Fedora 39, Debian 13). |
+| **Windows** 10/11 (x64) | `xbased-modern-gui-1.0.76.18-windows-x64.zip` | Unzip anywhere and run `xbased.exe`. Portable: everything stays in its folder. |
+| **Linux** (x86-64) | `xbased-1.0.76.18-x86_64.AppImage` | `chmod +x` it and run it. Needs a Vulkan driver and glibc 2.38 or newer (Ubuntu 24.04, Fedora 39, Debian 13). |
 
 Get it from **[Releases](https://github.com/Prodigy488/xbased-modern-gui/releases/latest)**.
 The Linux AppImage starts, but it has not been run with a GPU or sound on Linux (it was
@@ -127,7 +127,9 @@ xbased doesn't include any copyrighted Xbox software.
 
 ### Picture
 - **Internal resolution** up to 8x, aspect ratio, widescreen and video modes.
-- **FXAA** and **anisotropic filtering** up to 16x.
+- **FXAA**, **SMAA** (a sharper anti-aliasing for the higher render scales) and **anisotropic filtering** up to 16x.
+- **Frame interpolation** (Settings > Video, off): for a game that runs at 30 fps, a frame between each two, from the motion
+  between them, so the picture moves at the refresh rate. It delays the picture by half a frame (about 17 ms).
 - **Upscaling**: bilinear or AMD FSR 1.
 - **CRT filters**: soft scanlines, a classic TV, an arcade monitor.
 - Every setting **global or per game**.
@@ -366,7 +368,9 @@ More options (link-time optimization, the dependencies' location) are in
 - **xbased Modern GUI** is a fork by **[Prodigy488](https://github.com/Prodigy488)**, made
   with Claude (Anthropic). It adds the dashboard styles, Insignia and Homebrew tabs, NVIDIA
   NIS upscaling (a port of [NVIDIA Image Scaling](https://github.com/NVIDIAGameWorks/NVIDIAImageScaling),
-  MIT licence in [licenses/](licenses/)), the input settings and the other changes
+  MIT licence in [licenses/](licenses/)), SMAA anti-aliasing (the
+  [reference implementation](https://github.com/iryoku/smaa) by Jimenez et al., MIT licence in
+  [licenses/](licenses/)), frame interpolation, the input settings and the other changes
   listed [above](#download). Everything else is upstream's work, credited below.
 - **xbased** by **[crazyriddler](https://github.com/crazyriddler)**, its creator
   and maintainer: the emulator for x86-64 Windows and Linux, the

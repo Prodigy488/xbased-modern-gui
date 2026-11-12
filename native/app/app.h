@@ -31,6 +31,8 @@ void nc_present_set_widescreen(bool on);
 void nc_present_set_overscan(int pct);
 /* FXAA over each frame before it's scaled to the window. */
 void nc_present_set_fxaa(bool on);
+void nc_present_set_smaa(bool on);     /* SMAA in place of FXAA */
+void nc_present_set_interp(bool on);   /* an in-between frame for games slower than the refresh */
 /* The frame rate in the window's corner. */
 void nc_present_set_show_fps(bool on);
 /* A frame smaller than its place in the window: scaled up bilinearly, or by

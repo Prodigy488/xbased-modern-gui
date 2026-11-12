@@ -33,7 +33,9 @@ bool hle_present_begin(struct ANativeWindow *win, uint32_t *w, uint32_t *h);
 bool hle_present_frame(uint32_t *w, uint32_t *h);
 /* end: the frame drawn into the window's middle (sx, sy: its half size in
  * clip space, 1 the whole window), the rest black, through the display's
- * gamma ramp, and presented. fxaa: FXAA over each new frame first; average:
+ * gamma ramp, and presented. fxaa: FXAA over each new frame first (upscale: its low byte the
+ * upscaling, bits 8-15 NIS's sharpness, bit 16 SMAA in place of FXAA, bit 17 an in-between frame
+ * for games slower than the refresh); average:
  * false samples a frame larger than its place bilinearly too (comparisons).
  * key: what hle_present_unchanged compares next. */
 void hle_present_end(float sx, float sy, bool fxaa, int upscale, bool average, uint64_t key);

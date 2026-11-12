@@ -1160,6 +1160,12 @@ static void apply_cfg(const Config *global, const Config *game, bool sound)
         if ((v = cfg_get(c, "fxaa"))) {
             nc_present_set_fxaa(atoi(v) != 0);
         }
+        if ((v = cfg_get(c, "smaa"))) {
+            nc_present_set_smaa(atoi(v) != 0);
+        }
+        if ((v = cfg_get(c, "interp"))) {
+            nc_present_set_interp(atoi(v) != 0);
+        }
         if ((v = cfg_get(c, "upscale"))) {
             nc_present_set_upscale(nc_upscale_from_name(v));
         }
@@ -1517,7 +1523,7 @@ static const char *pick_disc(void)
 }
 
 #ifndef XBASED_VERSION
-#define XBASED_VERSION "1.0.76.17"
+#define XBASED_VERSION "1.0.76.18"
 #endif
 
 static void rm_tree(const char *path)
@@ -1768,6 +1774,10 @@ int main(int argc, char *argv[])
             nc_present_set_overscan(atoi(a + 9));
         } else if (!strncmp(a, "fxaa=", 5)) {
             nc_present_set_fxaa(atoi(a + 5) != 0);
+        } else if (!strncmp(a, "smaa=", 5)) {
+            nc_present_set_smaa(atoi(a + 5) != 0);
+        } else if (!strncmp(a, "interp=", 7)) {
+            nc_present_set_interp(atoi(a + 7) != 0);
         } else if (!strncmp(a, "upscale=", 8)) {
             nc_present_set_upscale(nc_upscale_from_name(a + 8));
         } else if (!strncmp(a, "nis.sharp=", 10)) {

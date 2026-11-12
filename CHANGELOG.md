@@ -1,5 +1,26 @@
 # xbased changelog
 
+## 1.0.76.18 (Modern GUI fork)
+
+- SMAA: Settings > Video > "Anti-aliasing: SMAA" (off). The presenter's FXAA is a blur of the frame's
+  edges; SMAA finds the edges and blends along their shape (the reference implementation by Jimenez et al.,
+  MIT, with its two lookup tables, "High" preset), which keeps the picture sharper and smooths the long
+  slanted edges FXAA leaves. It replaces FXAA when both are on, runs on each new frame at the render scale's
+  size (the cost grows with it: three passes over the frame), and works with FSR, NIS and the downscale. The
+  log says "SMAA ready" (or "unavailable ...: FXAA instead"). `smaa=1` in the game's file.
+- Frame interpolation: Settings > Video > "Frame interpolation" (off). A game that runs at 30 fps on the 60 Hz
+  refresh gets a frame between each two: when a new frame comes, the presenter finds how each 8-pixel block
+  (8 x the render scale) moved since the frame before (a search of 17 x 17 shifts), draws the picture half-way
+  along that motion, shows it, and half a frame's time later shows the frame itself. Where the two don't
+  agree (a wrong motion, a cut, a flash) it shows the frame itself rather than a double image. The price is
+  half a frame of delay (about 17 ms at 30 fps). It acts only on frames 24 to 100 ms apart (so not on a game
+  at 60 fps), not under the in-game menu, and its cost is a search per block per new frame (heavier at
+  higher render scales). It is not FSR 3's frame generation: it has no motion vectors from the game, so it
+  can be wrong where the picture changes in ways a block can't follow. `interp=1` in the game's file.
+- Neither could be run with a GPU here: the shaders compile (checked with the project's compiler), the
+  motion search was checked on a CPU against a synthetic moving picture, and the code builds. How they look
+  and what they cost on a real GPU is for the first run to say.
+
 ## 1.0.76.17 (Modern GUI fork)
 
 - Steel Battalion: from the 1.0.76.15 log, the game found the controller, polled it and sent its panel
