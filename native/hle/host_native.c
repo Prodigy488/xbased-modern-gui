@@ -197,6 +197,18 @@ int hle_host_texpack(void)
     return g_texpack;
 }
 
+static int g_texpack_cap;
+
+void nc_hle_set_texpack_cap(int px)
+{
+    g_texpack_cap = px < 0 ? 0 : px;
+}
+
+int hle_host_texpack_cap(void)
+{
+    return g_texpack_cap;
+}
+
 /* A custom Vulkan driver's entry point (the app loads Turnip through
  * adrenotools), or the system driver's. */
 static PFN_vkGetInstanceProcAddr g_custom_gipa;

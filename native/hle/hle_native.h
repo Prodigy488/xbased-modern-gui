@@ -43,6 +43,7 @@ void nc_hle_set_anisotropy(int level);
 /* Texture packs: bits 1 (use the packs), 2 (write the game's textures out) and 4 (both, and an upscaler
  * after the game) on or off. */
 void nc_hle_set_texpack(int bits, bool on);
+void nc_hle_set_texpack_cap(int px);    /* a pack picture's largest side (0: 2048) */
 /* Before boot: the app's "Asynchronous shader compilation" and "Build cached
  * shaders before starting" settings (hw/xbox/hle/vk/pipeasync.h). */
 void nc_hle_set_pipeline_options(bool async, bool prebuild);

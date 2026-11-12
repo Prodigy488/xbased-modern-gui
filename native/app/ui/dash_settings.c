@@ -73,6 +73,7 @@ static void rows_video(List *l)
     opt_choice(l, S_CRT, "crt", cv, cn, 4, "0");
     opt_bool(l, S_INTERP, "interp", false, false);
     opt_bool(l, S_INTEGER, "integer", false, false);
+    opt_bool(l, S_HW_AUTO, "hw.auto", false, false);
 }
 
 /* PAL games at 60 Hz, as a PAL console with PAL-60 on runs them, or 50 Hz */

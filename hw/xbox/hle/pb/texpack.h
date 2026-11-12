@@ -16,8 +16,12 @@
 const char *hle_texpack_dir(void);
 uint64_t hle_texpack_hash(const void *data, size_t len, uint32_t fmt, uint32_t w, uint32_t h, const uint32_t *pal,
                           uint32_t npal);
-/* The pack's picture for hash: bytes R, G, B, A, *w x *h (hle_texpack_free); NULL without one. */
-uint8_t *hle_texpack_load(uint64_t hash, uint32_t *w, uint32_t *h);
+/* Whether there is a picture for hash, your own or the upscaler's (the file looked for once a run). */
+bool hle_texpack_has(uint64_t hash);
+/* The pack's picture for hash: bytes R, G, B, A, *w x *h (hle_texpack_free); NULL without one. *from_auto: it is
+ * the upscaler's (auto/), which the caller checks against the game's texture (hle_texpack_reject if unlike). */
+uint8_t *hle_texpack_load(uint64_t hash, uint32_t *w, uint32_t *h, bool *from_auto);
+void hle_texpack_reject(uint64_t hash, uint32_t w, uint32_t h);
 void hle_texpack_free(uint8_t *rgba);
 /* True the first time for a hash this run: the caller decodes the texture and hands it to hle_texpack_dump. */
 bool hle_texpack_dump_wanted(uint64_t hash);

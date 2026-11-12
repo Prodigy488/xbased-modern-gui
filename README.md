@@ -52,8 +52,8 @@ No BIOS, MCPX ROM or hard-disk image is needed.
 
 | Platform | File | |
 |---|---|---|
-| **Windows** 10/11 (x64) | `xbased-modern-gui-1.0.76.24-windows-x64.zip` | Unzip anywhere and run `xbased.exe`. Portable: everything stays in its folder. |
-| **Linux** (x86-64) | `xbased-1.0.76.24-x86_64.AppImage` | `chmod +x` it and run it. Needs a Vulkan driver and glibc 2.38 or newer (Ubuntu 24.04, Fedora 39, Debian 13). |
+| **Windows** 10/11 (x64) | `xbased-modern-gui-1.0.76.25-windows-x64.zip` | Unzip anywhere and run `xbased.exe`. Portable: everything stays in its folder. |
+| **Linux** (x86-64) | `xbased-1.0.76.25-x86_64.AppImage` | `chmod +x` it and run it. Needs a Vulkan driver and glibc 2.38 or newer (Ubuntu 24.04, Fedora 39, Debian 13). |
 
 Get it from **[Releases](https://github.com/Prodigy488/xbased-modern-gui/releases/latest)**.
 The Linux AppImage starts, but it has not been run with a GPU or sound on Linux (it was
@@ -144,6 +144,8 @@ xbased doesn't include any copyrighted Xbox software.
   background, and drawn the next time you play. The first sessions of a game look as before; it sharpens as
   the folder fills. It takes GPU time while it runs, and video memory in the game.
 - **CRT filters**: soft scanlines, a classic TV, an arcade monitor.
+- **Settings chosen for your PC**: the first start looks at the GPU and the display and sets the render scale,
+  the filtering and the anti-aliasing to match (Settings > Video has a switch to choose them again).
 - Every setting **global or per game**.
 
 </td>

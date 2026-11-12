@@ -8,6 +8,7 @@
 #include "native/app/ui/console_cfg.h"
 #include "native/app/ui/dash_int.h"
 #include "native/app/ui/homebrew.h"
+#include "native/app/ui/hwtune.h"
 #include "native/app/ui/shortcut.h"
 #include "native/app/ui/playtime.h"
 #include "native/app/ui/xemu_import.h"
@@ -27,7 +28,7 @@
 #endif
 
 #ifndef XBASED_VERSION
-#define XBASED_VERSION "1.0.76.24"
+#define XBASED_VERSION "1.0.76.25"
 #endif
 
 Dash D;
@@ -2257,6 +2258,14 @@ int dash_run(SDL_Window *win, const char *exe)
         /* the frame rate is each game's now (Mods & patches): no global one left unseen */
         cfg_unset(&D.global, "uncap");
         cfg_save(&D.global);
+    }
+    {
+        /* the picture settings this PC is good for: once, and again when asked (hwtune.c) */
+        char note[700];
+        if (hwtune_apply(&D.global, win, note, sizeof(note))) {
+            cfg_save(&D.global);
+            SDL_Log("xbased: %s", note);
+        }
     }
     i18n_set(cfg_get(&D.global, "ui.lang"));
     cc_sync(&D.global);     /* the EEPROM changed by hand or by a title meanwhile */

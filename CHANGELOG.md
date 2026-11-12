@@ -1,5 +1,36 @@
 # xbased changelog
 
+## 1.0.76.25 (Modern GUI fork)
+
+- Texture packs and automatic upscaling garbled many games (reported on 1.0.76.24 with screenshots: black
+  scenes with a few objects left, coloured noise over walls, a texture drawn where another belongs). The
+  pictures went up through the upload arena, a 32 MiB ring the draws' vertices and constants share. A picture
+  is megabytes (a 2048 one with its levels 22), so the arena was full at almost every one, and the wait for
+  room there ends the submission being built: the draw in the middle of which the texture was being defined
+  had its own vertices and constants in that submission, and once the GPU finished it the next allocation
+  could land on them. The draw then ran with another's data. (The same wait exists for the game's own
+  textures, which are small enough that it nearly never falls inside a draw.) Now:
+  - a pack's picture never waits for room: it goes up only into what is free at that moment, with a quarter
+    of the arena left for the draws; otherwise the game's own texture is drawn and the picture is tried
+    again a frame later, so a scene's textures sharpen over its first frames;
+  - with packs or the upscaler on, the arena is 256 MiB (the usual size if the GPU won't give that);
+  - an upscaler's picture is checked against the game's texture before it is used: a whole number of times
+    its size and, averaged back down, like it in colour (where the texture isn't transparent) and in alpha.
+    One that fails (a black or garbled output, an alpha channel lost) is left unused and the log says so.
+    Your own files in the title's folder are not checked;
+  - "texcap" (xbased.ini; set by the hardware pick below) is the largest side a pack's picture is drawn at.
+  The cause is read from the code and the fix follows it; the check was tested on a CPU. Neither was run in a
+  game: the screenshots' games are the test.
+- Picture settings chosen for the PC. The first time the dashboard starts it reads the GPU (through Vulkan:
+  discrete or integrated, its largest memory heap) and the display's height, and writes to xbased.ini the
+  settings that depend on them, those you haven't set: the render scale (the first to reach the display's
+  height, 480 lines a step, up to 4x on a discrete GPU of 6 GB, 3x of 3 GB, 2x on a smaller or integrated one),
+  anisotropic filtering (16x or 8x), the anti-aliasing (SMAA, or FXAA on the small ones), FSR where the scale
+  doesn't reach the display, and texcap (2048 from 10 GB, 1024 from 6, 512 from 3, else 256). Settings > Video >
+  "Choose picture settings for this PC again" sets all of them afresh at the next start. A table of memory
+  sizes, not a benchmark: a game that runs slowly still wants a lower scale. The table was checked on a CPU;
+  the reading of the GPU was not run.
+
 ## 1.0.76.24 (Modern GUI fork)
 
 - Sharpening without an upscaler (Settings > Video, "sharpen" 0 to 3 in the settings files; off). FSR 1 and

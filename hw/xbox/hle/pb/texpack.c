@@ -72,8 +72,8 @@ static void set_add(Set *s, uint64_t k)
     s->n++;
 }
 
-static Set g_absent, g_dumped;
-static unsigned g_nloaded, g_ndumped;
+static Set g_absent, g_present, g_dumped;
+static unsigned g_nloaded, g_ndumped, g_nrejected;
 
 /* <base>textures/<title id>/ (and its dump/), made at first use */
 static char *dir;
@@ -108,8 +108,43 @@ uint64_t hle_texpack_hash(const void *data, size_t len, uint32_t fmt, uint32_t w
     return x ^ (XXH3_64bits(tail, sizeof(tail)) * 0xC2B2AE3D27D4EB4Full);
 }
 
-uint8_t *hle_texpack_load(uint64_t hash, uint32_t *w, uint32_t *h)
+static bool file_there(const char *path)
 {
+    FILE *f = fopen(path, "rb");
+    if (f) {
+        fclose(f);
+    }
+    return f != NULL;
+}
+
+bool hle_texpack_has(uint64_t hash)
+{
+    if (set_has(&g_absent, hash)) {
+        return false;
+    }
+    if (set_has(&g_present, hash)) {
+        return true;
+    }
+    g_autofree char *own = g_strdup_printf("%s%016llx.png", pack_dir(), (unsigned long long)hash);
+    g_autofree char *aut = g_strdup_printf("%sauto/%016llx.png", pack_dir(), (unsigned long long)hash);
+    const bool there = file_there(own) || file_there(aut);
+    set_add(there ? &g_present : &g_absent, hash);
+    return there;
+}
+
+void hle_texpack_reject(uint64_t hash, uint32_t w, uint32_t h)
+{
+    set_add(&g_absent, hash);
+    if (g_nrejected++ < 16) {
+        hle_log("hakuX-hle-front", "texture packs: auto/%016llx.png (%ux%u) not used: averaged down it doesn't "
+                "look like the game's texture, or isn't a whole number of times its size (#%u of 16 logged)",
+                (unsigned long long)hash, w, h, g_nrejected);
+    }
+}
+
+uint8_t *hle_texpack_load(uint64_t hash, uint32_t *w, uint32_t *h, bool *from_auto)
+{
+    *from_auto = false;
     if (set_has(&g_absent, hash)) {
         return NULL;
     }
@@ -147,6 +182,7 @@ uint8_t *hle_texpack_load(uint64_t hash, uint32_t *w, uint32_t *h)
     }
     *w = (uint32_t)iw;
     *h = (uint32_t)ih;
+    *from_auto = made;
     return px;
 }
 

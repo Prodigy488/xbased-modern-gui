@@ -156,6 +156,8 @@ typedef struct PbTex {
     uint32_t w0, wl;                    /* ... to its first and last pages, when last found
                                            unchanged there */
     bool ok;                            /* defined (else it can't be: not again) */
+    uint32_t pack_retry;                /* a texture pack's picture is waiting for room: the frame (+ 1) it
+                                           was last tried in; defined again in a later one */
 } PbTex;
 
 static struct {
@@ -2773,6 +2775,9 @@ static uint32_t texture(unsigned s, bool *unset, bool *lin)
         t->checked = g_pd.epoch;
         coh_pend_wait(t->pa, t->bytes);             /* a copy queued into it lands first */
         redefine = tex_written(t);
+        if (t->pack_retry && t->pack_retry != g_pd.swap_ids + 1) {
+            redefine = true;
+        }
     }
     static uint32_t pal[256];
     uint32_t npal = 0, pal_hash = 0;
@@ -2816,6 +2821,7 @@ static uint32_t texture(unsigned s, bool *unset, bool *lin)
         uint32_t bytes = 0;
         coh_pend_wait(pa, hle_draw_tex_bytes(h5));  /* a copy queued into its texels lands first */
         t->ok = hle_draw_tex_define(t->id, h5, pal, npal, &bytes) != 0;
+        t->pack_retry = hle_draw_tex_pack_deferred() ? g_pd.swap_ids + 1 : 0;
         t->pa = pa;
         t->bytes = bytes;
         t->pal_hash = pal_hash;

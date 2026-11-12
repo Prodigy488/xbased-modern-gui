@@ -153,6 +153,8 @@ int hle_host_anisotropy(void);
 /* Texture packs (pb/texpack.h): bit 0 use them, bit 1 write the game's textures out, bit 2 both (for the
  * upscaler run after the game). */
 int hle_host_texpack(void);
+/* The largest side, in pixels, a texture pack's picture is drawn at (0: the most, 2048). */
+int hle_host_texpack_cap(void);
 /* vkGetInstanceProcAddr of the Vulkan driver to use (a custom driver's or
  * the system's), as a void pointer; NULL if none. */
 void *hle_host_vk_loader(void);
