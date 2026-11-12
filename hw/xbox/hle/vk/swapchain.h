@@ -55,6 +55,8 @@ void hle_present_shot_full(const char *path);   /* at the game's own (render sca
 void hle_present_set_crt(int kind);
 /* V-Sync on (the default) or off (tearing): applied at the next frame */
 void hle_present_set_vsync(bool on);
+/* The display's refresh rate (0: unknown, taken as 60): which games frame interpolation is for. */
+void hle_present_set_refresh(float hz);
 /* The frame rate shown in the window's corner, 0 none (any thread). */
 void hle_present_set_osd(float fps);
 

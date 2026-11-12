@@ -11,7 +11,9 @@
 #include "native/dev/dev.h"
 #include "hw/xbox/hle/vk/display.h"
 #include "hw/xbox/hle/vk/swapchain.h"
+#include "hw/xbox/hle/host.h"
 
+#include <math.h>
 #include <string.h>
 #include <sys/system_properties.h>
 #include "hw/xbox/hle/prop.h"
@@ -20,7 +22,7 @@
 static int g_aspect = NC_ASPECT_AUTO;
 static bool g_widescreen;
 static int g_overscan;          /* percent: > 0 the edges cut off, < 0 a border */
-static bool g_fxaa, g_smaa, g_interp;
+static bool g_fxaa, g_smaa, g_interp, g_integer;
 static int g_upscale = NC_UPSCALE_BILINEAR;
 static int g_nis_sharp = 50;
 static bool g_shown;
@@ -74,6 +76,16 @@ void nc_present_set_smaa(bool on)
 void nc_present_set_interp(bool on)
 {
     g_interp = on;
+}
+
+void nc_present_set_integer(bool on)
+{
+    g_integer = on;
+}
+
+void nc_present_set_refresh(float hz)
+{
+    hle_present_set_refresh(hz);
 }
 
 void nc_present_set_upscale(int mode)
@@ -204,6 +216,19 @@ static void place(uint32_t fw, uint32_t fh, uint32_t ww, uint32_t wh, float *sx,
     const float k = g_overscan > 0 ? 100.0f / (100.0f - (float)g_overscan) : 1.0f + (float)g_overscan / 100.0f;
     *sx *= k;
     *sy *= k;
+    /* Integer scaling: the picture's height a whole number of times the console's lines (the frame's over the
+     * render scale), the largest that fits, its shape kept; a window lower than the console's picture is left
+     * as it is. Each line is then as many window rows as every other. */
+    if (g_integer) {
+        const int rs = hle_host_render_scale();
+        const float lines = (float)fh / (float)(rs > 0 ? rs : 1), tall = *sy * (float)wh;
+        const float n = floorf((float)wh / lines + 0.001f);
+        if (lines >= 1.0f && n >= 1.0f && tall > 0.0f) {
+            const float m = n * lines / tall;
+            *sx *= m;
+            *sy *= m;
+        }
+    }
 }
 
 /* A change of the shape chosen (Settings, the in-game menu's over the
@@ -310,7 +335,8 @@ bool nc_present_frame(struct ANativeWindow *win)
     const uint64_t key = (uint64_t)fxaa | (uint64_t)upscale << 1 | (uint64_t)g_dbg.average << 4 |
                          (uint64_t)g_widescreen << 5 | (uint64_t)(uint32_t)g_aspect << 8 |
                          (uint64_t)(uint32_t)(g_overscan + 64) << 16 | (uint64_t)(uint32_t)g_nis_sharp << 32 |
-                         (uint64_t)g_smaa << 40 | (uint64_t)g_interp << 41;
+                         (uint64_t)g_smaa << 40 | (uint64_t)g_interp << 41 |
+                         (uint64_t)g_integer << 42;
 #ifdef NC_DESKTOP
     const bool as_they_come = !nc_dev_nv2a_vblank_locked();
 #else

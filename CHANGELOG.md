@@ -1,5 +1,43 @@
 # xbased changelog
 
+## 1.0.76.22 (Modern GUI fork)
+
+Four additions, none of them run on a GPU here (the shaders compile for Vulkan 1.1 and 1.3; the parts that are
+plain arithmetic were modelled or tested on a CPU, as said with each).
+
+- Frame interpolation for 60 fps games on fast displays. It was for frames 24 to 100 ms apart, which is 30 fps
+  on any display. The window's front end now tells the presenter the display's refresh rate
+  (SDL's, again when the window changes display), and a frame counts as slow when it comes 1.6 refreshes or
+  more after the last: 60 fps on 120 Hz and up as well. 24 ms still counts on any display, 12 ms is the least.
+  The setting reads "games slower than the display".
+- Frame interpolation follows faster and finer motion. The search compared 16 point samples of each block on
+  the full picture at shifts 2 pixels apart, up to 16 console pixels a frame. Fine texture defeated it (a
+  shift of an odd number of pixels matched nowhere, so the block got another motion or none), and anything
+  faster than 16 pixels fell back to the real frame. It now goes from coarse to fine: the frame and the one
+  before are kept at a half and a quarter of the console's size (averaged, so a texel's step still matches);
+  the quarter-size level is searched 10 texels each way (40 console pixels), the half-size level 2 texels
+  around that answer, then the two refinements on the full picture as before. The motion images hold pixels
+  as 16-bit floats (8 bits could not hold 40 pixels to the half pixel). On a CPU model with pictures of a
+  natural spectrum, blocks within a pixel of the true motion: 5 px 80 % -> 95 %, 15 px 41 % -> 96 %,
+  24 px 0 -> 88 %, 33 px 0 -> 88 %, 40 px 0 -> 68 %; on busier pictures 15 px 7 % -> 67 %. A still picture
+  with dither noise still gets no motion. About the same number of texture reads as before, most of them now
+  on the small pictures.
+- Integer scaling (Settings > Video, "integer" in the settings files; off). The picture's height becomes the
+  largest whole number of times the console's lines (the frame's height over the render scale) that fits the
+  window, the shape kept, borders around it. With the Nearest upscaler each console pixel is a square of
+  window pixels. A window lower than the console's picture is left as it is.
+- Texture packs (Settings > Video: "Texture packs" and "Write the game's textures out"; "texpack" and
+  "texdump" in the settings files; both off). A texture is known by a hash (XXH3-64) of its largest level
+  as the game holds it, with its palette, format and size. With packs on, hle/textures/<title id>/<hash>.png
+  in the data folder is drawn in its place: any size up to 4096 a side, with smaller levels made from it when
+  the game's texture has them. With the dump on, each texture the game uploads is written once to that
+  folder's dump/ under the same name, so a pack is made by editing or upscaling a dumped file and putting it
+  one folder up. Plain textures only: no cube maps, volumes, video or signed (bump) formats, and the dump
+  reads the 8888, 565, 1555, 4444, L8, A8, AL8, A8L8, P8 and DXT1/3/5 formats. A game that changes a texture
+  every frame gets a file per version of it in the dump. The log names the folder at first use and the first
+  pack files used. A host test wrote a texture out, read it back identical as a pack file and checked the
+  hashes; decoding the game's formats and the replaced textures in a scene are not tested.
+
 ## 1.0.76.21 (Modern GUI fork)
 
 - Frame interpolation: the in-between frame is presented once. While it was up, the window's loop took every

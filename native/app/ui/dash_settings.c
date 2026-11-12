@@ -58,6 +58,8 @@ static void rows_video(List *l)
     static const char *anv[] = {"0", "2", "4", "8", "16"};
     const char *ann[] = {T(S_OFF), "2x", "4x", "8x", "16x"};
     opt_choice(l, S_ANISO, "aniso", anv, ann, 5, "0");
+    opt_bool(l, S_TEXPACK, "texpack", false, false);
+    opt_bool(l, S_TEXDUMP, "texdump", false, false);
     static const char *uv[] = {"bilinear", "fsr", "nis", "nearest"};
     const char *un[] = {T(S_BILINEAR), "AMD FSR 1", "NVIDIA NIS", T(S_NEAREST)};
     opt_choice(l, S_UPSCALE, "upscale", uv, un, 4, "bilinear");
@@ -66,6 +68,7 @@ static void rows_video(List *l)
     const char *cn[] = {T(S_OFF), T(S_CRT_SOFT), T(S_CRT_TV), T(S_CRT_ARCADE)};
     opt_choice(l, S_CRT, "crt", cv, cn, 4, "0");
     opt_bool(l, S_INTERP, "interp", false, false);
+    opt_bool(l, S_INTEGER, "integer", false, false);
 }
 
 /* PAL games at 60 Hz, as a PAL console with PAL-60 on runs them, or 50 Hz */

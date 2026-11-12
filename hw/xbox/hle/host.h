@@ -150,6 +150,8 @@ const char *hle_host_base_path(void);
 int hle_host_render_scale(void);
 /* Anisotropic filtering forced on the game's textures, 0 (the game's) or 2-16. */
 int hle_host_anisotropy(void);
+/* Texture packs (pb/texpack.h): bit 0 use them, bit 1 write the game's textures out. */
+int hle_host_texpack(void);
 /* vkGetInstanceProcAddr of the Vulkan driver to use (a custom driver's or
  * the system's), as a void pointer; NULL if none. */
 void *hle_host_vk_loader(void);

@@ -47,12 +47,14 @@
 #define PS_FRAMES 3             /* the presenter's submits in flight */
 /* a frame's descriptor sets: the first five of the plain layout, the rest (SMAA's weights and blend, the
  * interpolation's motion and mix) of the one with the extra samplers, made at first use (x_init) */
-enum { SET_WINDOW, SET_FXAA, SET_EASU, SET_OSD, SET_COPY, SET_X0, SET_X1, SET_X2, SET_X3, PS_SETS };
+enum { SET_WINDOW, SET_FXAA, SET_EASU, SET_OSD, SET_COPY, SET_X0, SET_X1, SET_X2, SET_X3, SET_X4, SET_X5, SET_X6, SET_X7,
+       PS_SETS };
 #define PS_RAMP 1024            /* a frame's share of the ramp buffer (768 used) */
 
 /* the window's pipelines, then those into images of ours (R8G8B8A8) */
 enum { P_BILINEAR, P_AREA, P_RCAS, P_CRT, P_OSD, P_KDOWN, P_KUP, P_FXAA, P_EASU, P_NIS,
-       P_SM_EDGE, P_SM_WT, P_SM_BLEND, P_IL_ME, P_IL_MIX, P_COPY, P_COUNT };   /* the last six: made at first use */
+       P_SM_EDGE, P_SM_WT, P_SM_BLEND, P_IL_ME, P_IL_MIX, P_COPY, P_IL_DOWN, P_IL_HALF, P_IL_LV,
+       P_COUNT };   /* from P_SM_EDGE on: made at first use */
 
 /* An image of ours a pass draws into and the window's pass samples. */
 typedef struct PsImg {
@@ -133,6 +135,12 @@ static struct {
     VkDeviceMemory sm_stage_mem;
     uint8_t *sm_stage_map;
     VkDeviceSize sm_stage_size;
+    /* frame interpolation's motion search goes from coarse to fine: the frame and the one before at a half and
+     * a quarter of the console's size (il_l1, il_l2; [il_k] the frame's, the other the one before's), and the
+     * motion found on the quarter (il_mva) and then the half (il_mvb) */
+    PsImg il_l1[2], il_l2[2], il_mva, il_mvb;
+    unsigned il_k;
+    int64_t refresh_ns;             /* the display's refresh period (hle_present_set_refresh); 0 unknown */
     /* frame interpolation: the frame before the one shown (il_pv, a copy), the blocks' motion (il_mv), the
      * in-between frame (il_mid); the in-between is shown for half a frame's time (il_due), then the frame */
     PsImg il_pv, il_mv, il_mid;
@@ -707,39 +715,68 @@ static const char k_fs_copy[] =
     "void main() {\n"
     "  o = vec4(texture(u_tex, v_uv).rgb, 1.0);\n"
     "}\n";
-/* Motion by block matching, one block (extra.x frame pixels square) a pixel of the image drawn: how the
- * content of the previous frame (u_tex2) moved into the frame (u_tex). First the best of 17 x 17 shifts a step
- * (extra.y pixels) apart, judged on 16 samples of the block's luma with a small lean to the still (a share of
- * the difference, so it weighs the same on a dim picture as on a bright one: a fixed 0.12 a step outweighed
- * the whole difference of low-contrast content, which then got no motion and came out doubled); then
- * two refinements on 64 samples, a pixel's step over 5 x 5 shifts and half a pixel's over 3 x 3 (the centre
- * kept unless another is better), for the shift to the half pixel the in-between frame needs. Written as the
- * shift over 10 steps, 0.5 the none. */
+/* Frame interpolation's motion search, coarse to fine, one block (8 console pixels square) a pixel of the motion
+ * images. A search on the full picture alone reached 16 console pixels a frame, and its 2-pixel steps on point
+ * samples lost fine texture (a shift of an odd number of pixels matched nowhere); on smaller, averaged pictures a
+ * step is a texel and the reach is 40.
+ *
+ * The frame at 1 / extra.x of its size, each pixel the average of that many across (16 bilinear samples). */
+static const char k_fs_ildown[] =
+    "void main() {\n"
+    "  vec2 size = vec2(textureSize(u_tex, 0));\n"
+    "  vec3 s = vec3(0.0);\n"
+    "  for (int k = 0; k < 16; k++) {\n"
+    "    vec2 t = (vec2(float(k & 3), float(k >> 2)) + 0.5) * 0.25 - 0.5;\n"
+    "    s += textureLod(u_tex, v_uv + t * pc.extra.x / size, 0.0).rgb;\n"
+    "  }\n"
+    "  o = vec4(s * 0.0625, 1.0);\n"
+    "}\n";
+/* The motion of each block on one level: the frame (u_tex) and the one before (u_tex2) at 1 / extra.y of the
+ * frame's size, a block extra.x frame pixels. The best of the shifts of whole texels up to extra.z each way,
+ * around the level above's answer (u_tex3, with extra.w set; else around none), judged on 4 x 4 texels' luma
+ * with a small lean to the still (a share of the difference, so a dim picture is searched as a bright one).
+ * Written in frame pixels. */
+static const char k_fs_illv[] =
+    "float lum(sampler2D t, vec2 p, vec2 size) { return dot(textureLod(t, p / size, 0.0).rgb, vec3(0.299, 0.587, 0.114)); }\n"
+    "void main() {\n"
+    "  vec2 size = vec2(textureSize(u_tex, 0));\n"
+    "  float B = pc.extra.x, cell = pc.extra.y;\n"
+    "  int R = int(pc.extra.z);\n"
+    "  vec2 c = (floor(gl_FragCoord.xy) + 0.5) * B / cell;\n"
+    "  vec2 v0 = vec2(0.0);\n"
+    "  if (pc.extra.w > 0.5) { v0 = texelFetch(u_tex3, ivec2(gl_FragCoord.xy), 0).rg; }\n"
+    "  float cur[16];\n"
+    "  for (int k = 0; k < 16; k++) {\n"
+    "    cur[k] = lum(u_tex, c + vec2(float(k & 3), float(k >> 2)) - 1.5, size);\n"
+    "  }\n"
+    "  float px = 8.0 / B;\n"
+    "  float best = 1e9;\n"
+    "  vec2 bv = v0;\n"
+    "  for (int j = -R; j <= R; j++) {\n"
+    "    for (int i = -R; i <= R; i++) {\n"
+    "      vec2 d = v0 + vec2(float(i), float(j)) * cell;\n"
+    "      float sad = 0.0;\n"
+    "      for (int k = 0; k < 16; k++) {\n"
+    "        sad += abs(cur[k] - lum(u_tex2, c + vec2(float(k & 3), float(k >> 2)) - 1.5 - d / cell, size));\n"
+    "      }\n"
+    "      float far = (abs(d.x) + abs(d.y)) * px;\n"
+    "      sad = sad * (1.0 + 0.004 * far) + 0.001 * far;\n"
+    "      if (sad < best) { best = sad; bv = d; }\n"
+    "    }\n"
+    "  }\n"
+    "  o = vec4(bv, 0.0, 1.0);\n"
+    "}\n";
+/* The last step, on the frame (u_tex) and the one before (u_tex2) themselves: around the half-size level's answer
+ * (u_tex3), two refinements on 64 samples of the block (extra.x pixels), a pixel's step (half of extra.y) over
+ * 5 x 5 shifts and half a pixel's over 3 x 3 (the centre kept unless another is better), for the shift to the
+ * half pixel the in-between frame needs. Written in frame pixels. */
 static const char k_fs_ilme[] =
     "float lum(vec2 p, sampler2D t, vec2 size) { return dot(textureLod(t, p / size, 0.0).rgb, vec3(0.299, 0.587, 0.114)); }\n"
     "void main() {\n"
     "  vec2 size = vec2(textureSize(u_tex, 0));\n"
     "  float B = pc.extra.x, stp = pc.extra.y;\n"
     "  vec2 c = (floor(gl_FragCoord.xy) + 0.5) * B;\n"
-    "  float cur[16];\n"
-    "  for (int k = 0; k < 16; k++) {\n"
-    "    cur[k] = lum(c + (vec2(float(k & 3), float(k >> 2)) - 1.5) * (B * 0.25), u_tex, size);\n"
-    "  }\n"
-    "  float best = 1e9;\n"
-    "  vec2 bv = vec2(0.0);\n"
-    "  for (int j = -8; j <= 8; j++) {\n"
-    "    for (int i = -8; i <= 8; i++) {\n"
-    "      vec2 d = vec2(float(i), float(j)) * stp;\n"
-    "      float sad = 0.0;\n"
-    "      for (int k = 0; k < 16; k++) {\n"
-    "        vec2 p = c + (vec2(float(k & 3), float(k >> 2)) - 1.5) * (B * 0.25) - d;\n"
-    "        sad += abs(cur[k] - lum(p, u_tex2, size));\n"
-    "      }\n"
-    "      float far = float(abs(i) + abs(j));\n"
-    "      sad = sad * (1.0 + 0.03 * far) + 0.004 * far;\n"
-    "      if (sad < best) { best = sad; bv = d; }\n"
-    "    }\n"
-    "  }\n"
+    "  vec2 bv = texelFetch(u_tex3, ivec2(gl_FragCoord.xy), 0).rg;\n"
     "  float c8[64];\n"
     "  for (int k = 0; k < 64; k++) {\n"
     "    c8[k] = lum(c + (vec2(float(k & 7), float(k >> 3)) - 3.5) * (B * 0.125), u_tex, size);\n"
@@ -760,10 +797,10 @@ static const char k_fs_ilme[] =
     "      if (sad < bs - 0.0001) { bs = sad; bv = d; }\n"
     "    }\n"
     "  }\n"
-    "  o = vec4(clamp(bv / (10.0 * stp) * 0.5 + 0.5, 0.0, 1.0), 0.0, 1.0);\n"
+    "  o = vec4(bv, 0.0, 1.0);\n"
     "}\n";
-/* The frame between the previous (u_tex2) and this one (u_tex), from the block motions (u_tex3; extra.x the
- * shift's 10 steps in pixels, extra.y a block's size). Each pixel takes, of the four nearest blocks' motions and
+/* The frame between the previous (u_tex2) and this one (u_tex), from the block motions (u_tex3, in frame
+ * pixels; extra.y a block's size). Each pixel takes, of the four nearest blocks' motions and
  * none, the one on which the two frames agree best around it (so a block's edge doesn't drag its neighbour's
  * motion over it), and is both frames along it, read with a Catmull-Rom filter (bilinear blurs a half-pixel
  * shift). Where they still disagree (around the pixel, or the two samples themselves) it is this frame alone, so
@@ -795,7 +832,7 @@ static const char k_fs_ilmix[] =
     "  vec2 cand[5];\n"
     "  for (int k = 0; k < 4; k++) {\n"
     "    ivec2 bi = clamp(b0 + ivec2(k & 1, k >> 1), ivec2(0), nb - 1);\n"
-    "    cand[k] = (texelFetch(u_tex3, bi, 0).rg * 2.0 - 1.0) * pc.extra.x;\n"
+    "    cand[k] = texelFetch(u_tex3, bi, 0).rg;\n"
     "  }\n"
     "  cand[4] = vec2(0.0);\n"
     "  const vec2 offs[5] = vec2[5](vec2(0.0, 0.0), vec2(1.0, 0.0), vec2(-1.0, 0.0), vec2(0.0, 1.0), vec2(0.0, -1.0));\n"
@@ -1241,6 +1278,11 @@ void hle_present_set_vsync(bool on)
     }
 }
 
+void hle_present_set_refresh(float hz)
+{
+    g_ps.refresh_ns = hz > 20.0f && hz < 1000.0f ? (int64_t)(1e9f / hz) : 0;
+}
+
 void hle_present_set_crt(int kind)
 {
     g_crt = kind < 0 ? 0 : kind > 3 ? 3 : kind;
@@ -1657,7 +1699,10 @@ static bool x_init(void)
         return false;
     }
     for (unsigned i = 0; i < PS_FRAMES; i++) {
-        VkDescriptorSetLayout l[PS_SETS - SET_X0] = { g_ps.dslx, g_ps.dslx, g_ps.dslx, g_ps.dslx };
+        VkDescriptorSetLayout l[PS_SETS - SET_X0];
+        for (unsigned k = 0; k < PS_SETS - SET_X0; k++) {
+            l[k] = g_ps.dslx;
+        }
         VkDescriptorSetAllocateInfo dai = { .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO,
                                             .descriptorPool = g_ps.dp, .descriptorSetCount = PS_SETS - SET_X0,
                                             .pSetLayouts = l };
@@ -1702,14 +1747,23 @@ static bool il_ready(void)
             g_ps.fs[P_IL_ME] = module(HLE_SHADER_FRAGMENT, k_fs_head, b0);
             g_ps.fs[P_IL_MIX] = module(HLE_SHADER_FRAGMENT, k_fs_head, b1);
             g_ps.fs[P_COPY] = module(HLE_SHADER_FRAGMENT, k_fs_head, k_fs_copy);
-            g_ps.pipe[P_IL_ME] = pipeline_l(g_ps.fs[P_IL_ME], VK_FORMAT_R8G8B8A8_UNORM, g_ps.plx);
+            g_autofree char *b2 = g_strdup_printf("%s%s", k_fs_x, k_fs_illv);
+            g_ps.fs[P_IL_DOWN] = module(HLE_SHADER_FRAGMENT, k_fs_head, k_fs_ildown);
+            g_ps.fs[P_IL_LV] = module(HLE_SHADER_FRAGMENT, k_fs_head, b2);
+            /* the motion images hold pixels' shifts as they are (16-bit floats: a format every device renders to) */
+            g_ps.pipe[P_IL_DOWN] = pipeline_l(g_ps.fs[P_IL_DOWN], VK_FORMAT_R8G8B8A8_UNORM, g_ps.plx);
+            g_ps.pipe[P_IL_HALF] = pipeline_l(g_ps.fs[P_COPY], VK_FORMAT_R8G8B8A8_UNORM, g_ps.plx);
+            g_ps.pipe[P_IL_LV] = pipeline_l(g_ps.fs[P_IL_LV], VK_FORMAT_R16G16B16A16_SFLOAT, g_ps.plx);
+            g_ps.pipe[P_IL_ME] = pipeline_l(g_ps.fs[P_IL_ME], VK_FORMAT_R16G16B16A16_SFLOAT, g_ps.plx);
             g_ps.pipe[P_IL_MIX] = pipeline_l(g_ps.fs[P_IL_MIX], VK_FORMAT_R8G8B8A8_UNORM, g_ps.plx);
             g_ps.pipe[P_COPY] = pipeline(g_ps.fs[P_COPY], VK_FORMAT_R8G8B8A8_UNORM);
         }
         hle_log("hakuX-hle-back", "present: frame interpolation %s", g_ps.pipe[P_IL_ME] && g_ps.pipe[P_IL_MIX] &&
-                g_ps.pipe[P_COPY] ? "ready" : "unavailable (shaders or layout failed)");
+                g_ps.pipe[P_COPY] && g_ps.pipe[P_IL_DOWN] && g_ps.pipe[P_IL_HALF] && g_ps.pipe[P_IL_LV] ?
+                "ready" : "unavailable (shaders or layout failed)");
     }
-    return g_ps.pipe[P_IL_ME] && g_ps.pipe[P_IL_MIX] && g_ps.pipe[P_COPY];
+    return g_ps.pipe[P_IL_ME] && g_ps.pipe[P_IL_MIX] && g_ps.pipe[P_COPY] && g_ps.pipe[P_IL_DOWN] &&
+           g_ps.pipe[P_IL_HALF] && g_ps.pipe[P_IL_LV];
 }
 
 static bool host_buf(VkBuffer *b, VkDeviceMemory *m, uint8_t **map, VkDeviceSize *have, VkDeviceSize need,
@@ -2493,33 +2547,62 @@ void hle_present_end(float sx, float sy, bool fxaa, int upscale, bool average, u
     } else {
         const uint32_t fw = g_ps.f.w, fh = g_ps.f.h;
         const unsigned sc = (unsigned)MAX(hle_host_render_scale(), 1), blk = 8 * sc, stp = 2 * sc;
-        if (!img_target(&g_ps.il_pv, fw, fh, VK_FORMAT_R8G8B8A8_UNORM, "interpolation") ||
-            !img_target(&g_ps.il_mid, fw, fh, VK_FORMAT_R8G8B8A8_UNORM, "interpolation") ||
-            !img_target(&g_ps.il_mv, (fw + blk - 1) / blk, (fh + blk - 1) / blk, VK_FORMAT_R8G8B8A8_UNORM,
-                        "interpolation")) {
+        const uint32_t bw = (fw + blk - 1) / blk, bh = (fh + blk - 1) / blk;
+        const uint32_t l1w = MAX(fw / (2 * sc), 1u), l1h = MAX(fh / (2 * sc), 1u);
+        const uint32_t l2w = MAX(l1w / 2, 1u), l2h = MAX(l1h / 2, 1u);
+        const VkFormat c8 = VK_FORMAT_R8G8B8A8_UNORM, mvf = VK_FORMAT_R16G16B16A16_SFLOAT;
+        if (!img_target(&g_ps.il_pv, fw, fh, c8, "interpolation") ||
+            !img_target(&g_ps.il_mid, fw, fh, c8, "interpolation") ||
+            !img_target(&g_ps.il_l1[0], l1w, l1h, c8, "interpolation") ||
+            !img_target(&g_ps.il_l1[1], l1w, l1h, c8, "interpolation") ||
+            !img_target(&g_ps.il_l2[0], l2w, l2h, c8, "interpolation") ||
+            !img_target(&g_ps.il_l2[1], l2w, l2h, c8, "interpolation") ||
+            !img_target(&g_ps.il_mva, bw, bh, mvf, "interpolation") ||
+            !img_target(&g_ps.il_mvb, bw, bh, mvf, "interpolation") ||
+            !img_target(&g_ps.il_mv, bw, bh, mvf, "interpolation")) {
             g_ps.pipe[P_IL_ME] = VK_NULL_HANDLE;        /* no image for it: no interpolation */
             g_ps.il_pending = false;
         } else {
             if (g_ps.serial != g_ps.il_serial) {
                 const int64_t now = hle_now_ns(), dt = now - g_ps.il_t_new;
                 static const float none[4];
+                /* for games slower than the display: a frame 1.6 refreshes or more after the last (30 fps on
+                 * 60 Hz, 60 fps on 120 Hz and up), 24 ms at most to count (as before on 60 Hz) and 12 at least */
+                const int64_t period = g_ps.refresh_ns ? g_ps.refresh_ns : 16666667ll;
+                const int64_t slow = MAX(MIN(24000000ll, period * 8 / 5), 12000000ll);
+                const int64_t early = MIN(3000000ll, period * 3 / 10);
                 g_ps.il_t_new = now;
                 g_ps.il_serial = g_ps.serial;
                 g_ps.il_pending = false;
-                if (g_ps.il_pv.serial && dt >= 24000000ll && dt <= 100000000ll) {
+                /* the frame at a half and a quarter of the console's size (kept: the next frame's "before") */
+                const unsigned k = g_ps.il_k ^= 1u;
+                const float d1[4] = { (float)(2 * sc), 0.0f, 0.0f, 0.0f };
+                /* (these two read one picture; the sets' other samplers are given it too, to hold something) */
+                x_pass(cb, f, SET_X4, &g_ps.il_l1[k], g_ps.pipe[P_IL_DOWN], src, src, src, d1);
+                x_pass(cb, f, SET_X5, &g_ps.il_l2[k], g_ps.pipe[P_IL_HALF], g_ps.il_l1[k].view, g_ps.il_l1[k].view,
+                       g_ps.il_l1[k].view, none);
+                if (g_ps.il_pv.serial && dt >= slow && dt <= 100000000ll) {
+                    const float la[4] = { (float)blk, (float)(4 * sc), 10.0f, 0.0f };
+                    const float lb[4] = { (float)blk, (float)(2 * sc), 2.0f, 1.0f };
                     const float me[4] = { (float)blk, (float)stp, 0.0f, 0.0f };
-                    const float mix[4] = { (float)(10 * stp), (float)blk, 0.0f, 0.0f };
-                    x_pass(cb, f, SET_X2, &g_ps.il_mv, g_ps.pipe[P_IL_ME], src, g_ps.il_pv.view, VK_NULL_HANDLE, me);
+                    const float mix[4] = { 0.0f, (float)blk, 0.0f, 0.0f };
+                    /* the quarter-size level has no level above: its third sampler is bound, not read */
+                    x_pass(cb, f, SET_X6, &g_ps.il_mva, g_ps.pipe[P_IL_LV], g_ps.il_l2[k].view, g_ps.il_l2[k ^ 1u].view,
+                           g_ps.il_l2[k ^ 1u].view, la);
+                    x_pass(cb, f, SET_X7, &g_ps.il_mvb, g_ps.pipe[P_IL_LV], g_ps.il_l1[k].view, g_ps.il_l1[k ^ 1u].view,
+                           g_ps.il_mva.view, lb);
+                    x_pass(cb, f, SET_X2, &g_ps.il_mv, g_ps.pipe[P_IL_ME], src, g_ps.il_pv.view, g_ps.il_mvb.view, me);
                     x_pass(cb, f, SET_X3, &g_ps.il_mid, g_ps.pipe[P_IL_MIX], src, g_ps.il_pv.view, g_ps.il_mv.view,
                            mix);
                     g_ps.il_mid.serial = g_ps.serial;
                     g_ps.il_pending = true;
                     g_ps.il_shown = false;
-                    g_ps.il_due = now + dt / 2 - 3000000ll;
+                    g_ps.il_due = now + dt / 2 - early;
                     if (!g_ps.il_logged) {
                         g_ps.il_logged = true;
-                        hle_log("hakuX-hle-back", "present: frame interpolation on (frames %.1f ms apart, blocks of "
-                                "%u px)", dt / 1e6, blk);
+                        hle_log("hakuX-hle-back", "present: frame interpolation on (frames %.1f ms apart, a refresh "
+                                "%.1f ms, blocks of %u px, motion up to %u px a frame)", dt / 1e6, period / 1e6, blk,
+                                46 * sc);
                     }
                 }
                 img_pass(cb, f, SET_COPY, &g_ps.il_pv, g_ps.pipe[P_COPY], src, none);   /* for the next */

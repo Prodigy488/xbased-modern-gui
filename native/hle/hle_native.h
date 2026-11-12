@@ -40,6 +40,8 @@ void nc_hle_set_vk_loader(void *gipa);
 void nc_hle_set_render_scale(int scale);
 /* Anisotropic filtering forced on the game's textures: 0 (the game's own), 2-16. */
 void nc_hle_set_anisotropy(int level);
+/* Texture packs: bits 1 (use the packs) and 2 (write the game's textures out) on or off. */
+void nc_hle_set_texpack(int bits, bool on);
 /* Before boot: the app's "Asynchronous shader compilation" and "Build cached
  * shaders before starting" settings (hw/xbox/hle/vk/pipeasync.h). */
 void nc_hle_set_pipeline_options(bool async, bool prebuild);

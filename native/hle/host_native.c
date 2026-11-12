@@ -185,6 +185,18 @@ int hle_host_anisotropy(void)
     return g_anisotropy;
 }
 
+static int g_texpack;
+
+void nc_hle_set_texpack(int bits, bool on)
+{
+    g_texpack = on ? g_texpack | bits : g_texpack & ~bits;
+}
+
+int hle_host_texpack(void)
+{
+    return g_texpack;
+}
+
 /* A custom Vulkan driver's entry point (the app loads Turnip through
  * adrenotools), or the system driver's. */
 static PFN_vkGetInstanceProcAddr g_custom_gipa;

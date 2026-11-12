@@ -949,6 +949,13 @@ static char g_notice_file[MAX_PATH + 160];  /* shown once this is written (a pic
 static HANDLE g_ready_ev;       /* the run before this one waits on it (run_again) */
 #endif
 
+/* The refresh rate of the display the window is on, for the presenter (frame interpolation). */
+static void refresh_note(SDL_Window *w)
+{
+    const SDL_DisplayMode *m = w ? SDL_GetCurrentDisplayMode(SDL_GetDisplayForWindow(w)) : NULL;
+    nc_present_set_refresh(m ? m->refresh_rate : 0.0f);
+}
+
 static void ov_present(void)
 {
     if (g_nw.width <= 0 || !nc_present_frame(&g_nw)) {
@@ -1165,6 +1172,9 @@ static void apply_cfg(const Config *global, const Config *game, bool sound)
         }
         if ((v = cfg_get(c, "interp"))) {
             nc_present_set_interp(atoi(v) != 0);
+        }
+        if ((v = cfg_get(c, "integer"))) {
+            nc_present_set_integer(atoi(v) != 0);
         }
         if ((v = cfg_get(c, "upscale"))) {
             nc_present_set_upscale(nc_upscale_from_name(v));
@@ -1523,7 +1533,7 @@ static const char *pick_disc(void)
 }
 
 #ifndef XBASED_VERSION
-#define XBASED_VERSION "1.0.76.21"
+#define XBASED_VERSION "1.0.76.22"
 #endif
 
 static void rm_tree(const char *path)
@@ -1778,6 +1788,8 @@ int main(int argc, char *argv[])
             nc_present_set_smaa(atoi(a + 5) != 0);
         } else if (!strncmp(a, "interp=", 7)) {
             nc_present_set_interp(atoi(a + 7) != 0);
+        } else if (!strncmp(a, "integer=", 8)) {
+            nc_present_set_integer(atoi(a + 8) != 0);
         } else if (!strncmp(a, "upscale=", 8)) {
             nc_present_set_upscale(nc_upscale_from_name(a + 8));
         } else if (!strncmp(a, "nis.sharp=", 10)) {
@@ -1856,6 +1868,7 @@ int main(int argc, char *argv[])
     }
     pointer_hide();     /* the game doesn't use the mouse */
     nc_log("hakuX-app", "pointer: hidden over the game");
+    refresh_note(win);
     {
         /* the run before's window's place (run_again), windowed */
         const char *r = getenv("XBASED_RECT");
@@ -2051,6 +2064,10 @@ int main(int argc, char *argv[])
             case SDL_EVENT_WINDOW_PIXEL_SIZE_CHANGED:
                 g_nw.width = ev.window.data1;
                 g_nw.height = ev.window.data2;
+                refresh_note(win);
+                break;
+            case SDL_EVENT_WINDOW_DISPLAY_CHANGED:
+                refresh_note(win);
                 break;
             case SDL_EVENT_WINDOW_MINIMIZED:
             case SDL_EVENT_WINDOW_RESTORED:
