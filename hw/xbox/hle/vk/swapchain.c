@@ -47,14 +47,14 @@
 #define PS_FRAMES 3             /* the presenter's submits in flight */
 /* a frame's descriptor sets: the first five of the plain layout, the rest (SMAA's weights and blend, the
  * interpolation's motion and mix) of the one with the extra samplers, made at first use (x_init) */
-enum { SET_WINDOW, SET_FXAA, SET_EASU, SET_OSD, SET_COPY, SET_X0, SET_X1, SET_X2, SET_X3, SET_X4, SET_X5, SET_X6, SET_X7,
+enum { SET_WINDOW, SET_FXAA, SET_EASU, SET_OSD, SET_COPY, SET_SHARP, SET_X0, SET_X1, SET_X2, SET_X3, SET_X4, SET_X5, SET_X6, SET_X7,
        PS_SETS };
 #define PS_RAMP 1024            /* a frame's share of the ramp buffer (768 used) */
 
 /* the window's pipelines, then those into images of ours (R8G8B8A8) */
 enum { P_BILINEAR, P_AREA, P_RCAS, P_CRT, P_OSD, P_KDOWN, P_KUP, P_FXAA, P_EASU, P_NIS,
        P_SM_EDGE, P_SM_WT, P_SM_BLEND, P_IL_ME, P_IL_MIX, P_COPY, P_IL_DOWN, P_IL_HALF, P_IL_LV,
-       P_COUNT };   /* from P_SM_EDGE on: made at first use */
+       P_SHARP, P_COUNT };   /* from P_SM_EDGE on: made at first use */
 
 /* An image of ours a pass draws into and the window's pass samples. */
 typedef struct PsImg {
@@ -127,6 +127,7 @@ static struct {
     uint64_t serial;            /* frames taken */
     /* FXAA's image (the frame's size), FSR's (the frame's in the window) */
     PsImg fx, up;
+    PsImg sh;                   /* the frame sharpened (P_SHARP), when no upscaler does it; kind: the strength */
     /* SMAA (smaa.inc): its edges and blend weights (the frame's size) and lookup tables, uploaded once */
     PsImg sm_edge, sm_wt, sm_area, sm_search;
     bool sm_tried, sm_loaded;
@@ -512,6 +513,24 @@ static const char k_fs_rcas[] =
     "  vec3 lobeC = max(-hitMin, hitMax);\n"
     "  float lobe = max(-(0.25 - 1.0 / 16.0), min(max(lobeC.r, max(lobeC.g, lobeC.b)), 0.0)) * pc.extra.x;\n"
     "  o = ramp((lobe * (b + d + h + f) + e) / (4.0 * lobe + 1.0));\n"
+    "}\n";
+
+/* The same sharpening over a frame at its own size, into an image (no gamma ramp: that is the window pass's):
+ * for a picture no upscaler sharpens. extra.x the sharpness, as RCAS's. */
+static const char k_fs_sharp[] =
+    "// Copyright (c) 2021 Advanced Micro Devices, Inc. All rights reserved. (MIT)\n"
+    "vec3 at(ivec2 p, ivec2 top) { return texelFetch(u_tex, clamp(p, ivec2(0), top), 0).rgb; }\n"
+    "void main() {\n"
+    "  ivec2 top = textureSize(u_tex, 0) - 1;\n"
+    "  ivec2 sp = clamp(ivec2(v_uv * vec2(top + 1)), ivec2(0), top);\n"
+    "  vec3 b = at(sp + ivec2(0, -1), top), d = at(sp + ivec2(-1, 0), top), e = at(sp, top);\n"
+    "  vec3 f = at(sp + ivec2(1, 0), top), h = at(sp + ivec2(0, 1), top);\n"
+    "  vec3 mn4 = min(min(b, d), min(f, h)), mx4 = max(max(b, d), max(f, h));\n"
+    "  vec3 hitMin = min(mn4, e) / max(4.0 * mx4, vec3(1e-6));\n"
+    "  vec3 hitMax = (1.0 - max(mx4, e)) / min(4.0 * mn4 - 4.0, vec3(-1e-6));\n"
+    "  vec3 lobeC = max(-hitMin, hitMax);\n"
+    "  float lobe = max(-(0.25 - 1.0 / 16.0), min(max(lobeC.r, max(lobeC.g, lobeC.b)), 0.0)) * pc.extra.x;\n"
+    "  o = vec4(clamp((lobe * (b + d + h + f) + e) / (4.0 * lobe + 1.0), 0.0, 1.0), 1.0);\n"
     "}\n";
 
 #include "hw/xbox/hle/vk/nis_coef.inc"
@@ -994,7 +1013,10 @@ static bool init(void)
                                         .flags = VK_COMMAND_POOL_CREATE_TRANSIENT_BIT,
                                         .queueFamilyIndex = g_hvk.qfam };
         VkSemaphoreCreateInfo si = { .sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO };
-        VkDescriptorSetLayout l[SET_X0] = { g_ps.dsl, g_ps.dsl, g_ps.dsl, g_ps.dsl, g_ps.dsl };
+        VkDescriptorSetLayout l[SET_X0];
+        for (unsigned k = 0; k < SET_X0; k++) {
+            l[k] = g_ps.dsl;
+        }
         VkDescriptorSetAllocateInfo dai = { .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO,
                                             .descriptorPool = g_ps.dp, .descriptorSetCount = SET_X0,
                                             .pSetLayouts = l };
@@ -1026,6 +1048,8 @@ static bool init(void)
     g_ps.pipe[P_FXAA] = pipeline(g_ps.fs[P_FXAA], VK_FORMAT_R8G8B8A8_UNORM);
     g_ps.pipe[P_EASU] = pipeline(g_ps.fs[P_EASU], VK_FORMAT_R8G8B8A8_UNORM);
     g_ps.pipe[P_NIS] = pipeline(g_ps.fs[P_NIS], VK_FORMAT_R8G8B8A8_UNORM);
+    g_ps.fs[P_SHARP] = module(HLE_SHADER_FRAGMENT, k_fs_head, k_fs_sharp);
+    g_ps.pipe[P_SHARP] = pipeline(g_ps.fs[P_SHARP], VK_FORMAT_R8G8B8A8_UNORM);
     hle_log("hakuX-hle-back", "present: ready (shaders: bilinear %d, averaging %d, FSR %d, FXAA %d, NIS %d)",
             g_ps.fs[P_BILINEAR] != VK_NULL_HANDLE, g_ps.fs[P_AREA] != VK_NULL_HANDLE,
             g_ps.fs[P_RCAS] != VK_NULL_HANDLE && g_ps.pipe[P_EASU] != VK_NULL_HANDLE,
@@ -2471,6 +2495,7 @@ void hle_present_end(float sx, float sy, bool fxaa, int upscale, bool average, u
     const int nis_sharp = (upscale >> 8) & 0xFF;     /* NIS's sharpness (percent) rides above the kind */
     const bool smaa = (upscale >> 16) & 1;          /* SMAA in place of FXAA */
     const bool interp = (upscale >> 17) & 1;        /* an in-between frame for a slow game */
+    const unsigned sharpen = (upscale >> 19) & 3;   /* sharpening without an upscaler: 0 off, 1 to 3 */
     upscale &= 0xFF;
     g_ps.shown = false;
     PsFrame *f = &g_ps.fr[g_ps.cur];
@@ -2641,6 +2666,23 @@ void hle_present_end(float sx, float sy, bool fxaa, int upscale, bool average, u
                                     nis ? "NIS" : "FSR")) {
         g_ps.pipe[P_EASU] = g_ps.pipe[P_NIS] = VK_NULL_HANDLE;   /* no image for it: bilinear */
         fsr = nis = false;
+    }
+    /* Sharpening when no upscaler does it (FSR and NIS sharpen their own; a CRT filter has its look): the frame
+     * (anti-aliased, or the in-between one) sharpened at its own size, then placed as it would have been. */
+    if (g_ps.have && sharpen && !fsr && !nis && !g_crt && g_ps.pipe[P_SHARP]) {
+        if (img_target(&g_ps.sh, g_ps.f.w, g_ps.f.h, VK_FORMAT_R8G8B8A8_UNORM, "sharpening")) {
+            if (g_ps.sh.serial != content + 1 || g_ps.sh.fxaa != aa_done || g_ps.sh.kind != sharpen) {
+                /* 2^-stops, as RCAS: 2, 1 and 0 stops */
+                const float k[4] = { sharpen == 1 ? 0.25f : sharpen == 2 ? 0.5f : 1.0f, 0.0f, 0.0f, 0.0f };
+                img_pass(cb, f, SET_SHARP, &g_ps.sh, g_ps.pipe[P_SHARP], src, k);
+                g_ps.sh.serial = content + 1;       /* + 1: 0 is "nothing" */
+                g_ps.sh.fxaa = aa_done;
+                g_ps.sh.kind = sharpen;
+            }
+            src = g_ps.sh.view;
+        } else {
+            g_ps.pipe[P_SHARP] = VK_NULL_HANDLE;    /* no image for it: off */
+        }
     }
     const unsigned up_kind = nis ? 1u + (unsigned)(nis_sharp > 100 ? 100 : nis_sharp) : 0u;
     if ((fsr || nis) && (g_ps.up.serial != content || g_ps.up.fxaa != aa_done || g_ps.up.kind != up_kind)) {

@@ -23,6 +23,7 @@ static int g_aspect = NC_ASPECT_AUTO;
 static bool g_widescreen;
 static int g_overscan;          /* percent: > 0 the edges cut off, < 0 a border */
 static bool g_fxaa, g_smaa, g_interp, g_integer;
+static int g_sharpen;           /* 0 off, 1 to 3: sharpening when no upscaler does it */
 static int g_upscale = NC_UPSCALE_BILINEAR;
 static int g_nis_sharp = 50;
 static bool g_shown;
@@ -76,6 +77,11 @@ void nc_present_set_smaa(bool on)
 void nc_present_set_interp(bool on)
 {
     g_interp = on;
+}
+
+void nc_present_set_sharpen(int level)
+{
+    g_sharpen = level < 0 ? 0 : level > 3 ? 3 : level;
 }
 
 void nc_present_set_integer(bool on)
@@ -336,7 +342,7 @@ bool nc_present_frame(struct ANativeWindow *win)
                          (uint64_t)g_widescreen << 5 | (uint64_t)(uint32_t)g_aspect << 8 |
                          (uint64_t)(uint32_t)(g_overscan + 64) << 16 | (uint64_t)(uint32_t)g_nis_sharp << 32 |
                          (uint64_t)g_smaa << 40 | (uint64_t)g_interp << 41 |
-                         (uint64_t)g_integer << 42;
+                         (uint64_t)g_integer << 42 | (uint64_t)g_sharpen << 43;
 #ifdef NC_DESKTOP
     const bool as_they_come = !nc_dev_nv2a_vblank_locked();
 #else
@@ -368,7 +374,8 @@ bool nc_present_frame(struct ANativeWindow *win)
         __atomic_store_n(&g_shown, true, __ATOMIC_RELAXED);
     }
     hle_present_set_osd(g_show_fps ? (g_fps > 0 ? g_fps : 0.01f) : 0);
-    hle_present_end(sx, sy, fxaa, upscale | (g_nis_sharp << 8) | (g_smaa ? 1 << 16 : 0) | (g_interp ? 1 << 17 : 0),
+    hle_present_end(sx, sy, fxaa, upscale | (g_nis_sharp << 8) | (g_smaa ? 1 << 16 : 0) | (g_interp ? 1 << 17 : 0) |
+                    (g_sharpen << 19),
                     g_dbg.average, key);
     return true;
 }

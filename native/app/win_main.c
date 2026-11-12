@@ -1183,6 +1183,9 @@ static void apply_cfg(const Config *global, const Config *game, bool sound)
         if ((v = cfg_get(c, "interp"))) {
             nc_present_set_interp(atoi(v) != 0);
         }
+        if ((v = cfg_get(c, "sharpen"))) {
+            nc_present_set_sharpen(atoi(v));
+        }
         if ((v = cfg_get(c, "integer"))) {
             nc_present_set_integer(atoi(v) != 0);
         }
@@ -1543,7 +1546,7 @@ static const char *pick_disc(void)
 }
 
 #ifndef XBASED_VERSION
-#define XBASED_VERSION "1.0.76.23"
+#define XBASED_VERSION "1.0.76.24"
 #endif
 
 static void rm_tree(const char *path)
@@ -1798,6 +1801,8 @@ int main(int argc, char *argv[])
             nc_present_set_smaa(atoi(a + 5) != 0);
         } else if (!strncmp(a, "interp=", 7)) {
             nc_present_set_interp(atoi(a + 7) != 0);
+        } else if (!strncmp(a, "sharpen=", 8)) {
+            nc_present_set_sharpen(atoi(a + 8));
         } else if (!strncmp(a, "integer=", 8)) {
             nc_present_set_integer(atoi(a + 8) != 0);
         } else if (!strncmp(a, "upscale=", 8)) {

@@ -1,5 +1,24 @@
 # xbased changelog
 
+## 1.0.76.24 (Modern GUI fork)
+
+- Sharpening without an upscaler (Settings > Video, "sharpen" 0 to 3 in the settings files; off). FSR 1 and
+  NIS sharpen as they scale; with Bilinear or Nearest (or a window the frame's own size) nothing did. It is
+  FSR's RCAS pass (AMD, MIT) over the frame at its own size, after the anti-aliasing and the in-between
+  frame, before the picture is placed: low, medium and high are 2, 1 and 0 stops of its sharpness. Off under
+  a CRT filter, and when FSR or NIS is the upscaler in use. The shader compiles (Vulkan 1.1, 1.3); not run on
+  a GPU.
+- A measurement toward per-pixel motion vectors ("mvstat=1" in xbased.ini or a game's file; nothing is drawn
+  differently). Motion vectors would let frame interpolation use the game's own motion instead of searching
+  for it, and are what temporal upscalers (FSR 2 and its kind) need. Here every draw, fixed function
+  included, is a vertex program with a block of 192 constants, so a draw's position a frame ago is the same
+  program run with the constants its twin had then. That needs each draw paired with its twin, and this
+  counts how often there is one: the same program, primitive, vertex layout and count, textures and
+  (vertices read in place) addresses, the n-th of its kind in the frame. Every 600 frames the log has a
+  "motion stats" line: draws a frame, the share with a twin (and of those, with other constants, which is
+  what moves), the share with none. What it can't tell: whether a twin's vertices are the same (a mesh the
+  game animates on the CPU), and the camera's own jitter, which a temporal upscaler also needs.
+
 ## 1.0.76.23 (Modern GUI fork)
 
 - Frame interpolation flickered on detailed backgrounds (reported on 1.0.76.22). The in-between frame was the

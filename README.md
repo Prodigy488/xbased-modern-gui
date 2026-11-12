@@ -52,8 +52,8 @@ No BIOS, MCPX ROM or hard-disk image is needed.
 
 | Platform | File | |
 |---|---|---|
-| **Windows** 10/11 (x64) | `xbased-modern-gui-1.0.76.23-windows-x64.zip` | Unzip anywhere and run `xbased.exe`. Portable: everything stays in its folder. |
-| **Linux** (x86-64) | `xbased-1.0.76.23-x86_64.AppImage` | `chmod +x` it and run it. Needs a Vulkan driver and glibc 2.38 or newer (Ubuntu 24.04, Fedora 39, Debian 13). |
+| **Windows** 10/11 (x64) | `xbased-modern-gui-1.0.76.24-windows-x64.zip` | Unzip anywhere and run `xbased.exe`. Portable: everything stays in its folder. |
+| **Linux** (x86-64) | `xbased-1.0.76.24-x86_64.AppImage` | `chmod +x` it and run it. Needs a Vulkan driver and glibc 2.38 or newer (Ubuntu 24.04, Fedora 39, Debian 13). |
 
 Get it from **[Releases](https://github.com/Prodigy488/xbased-modern-gui/releases/latest)**.
 The Linux AppImage starts, but it has not been run with a GPU or sound on Linux (it was
@@ -131,6 +131,8 @@ xbased doesn't include any copyrighted Xbox software.
 - **Frame interpolation** (Settings > Video, off): for a game slower than the display (30 fps on 60 Hz, 60 fps on
   120 Hz and up), a frame between each two, from the motion between them. It delays the picture by half a frame.
 - **Upscaling**: bilinear or AMD FSR 1.
+- **Sharpening** (Settings > Video, off): low, medium or high, for a picture no upscaler sharpens (Bilinear or
+  Nearest; FSR and NIS have their own).
 - **Integer scaling** (Settings > Video, off): the picture a whole number of times the console's lines tall, with
   borders; with the Nearest upscaler every pixel is a clean square.
 - **Texture packs** (Settings > Video, off): PNG files in `hle/textures/<title id>/` of your data folder are drawn

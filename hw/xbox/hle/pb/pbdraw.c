@@ -3219,6 +3219,108 @@ void hle_pbd_vis_counts(uint64_t *tests, uint64_t *kicks)
     *kicks = g_pd.vis_kicks;
 }
 
+/* ---- motion statistics ("mvstat=1" in a settings file, or HAKUX_HLE_MVSTAT=1) ----
+ * A measurement for per-pixel motion vectors, which would come from running each draw's vertex program a second
+ * time with the constants its twin had a frame before. This counts how often a draw has such a twin: the same
+ * program, primitive, vertex layout and count, textures and (vertices read in place) addresses, the n-th of
+ * its kind in the frame as in the last. Nothing is drawn differently. */
+#define MV_CAP 32768u               /* a power of two; a frame of more draws than half of it isn't counted on */
+typedef struct MvEnt {
+    uint64_t k, c;                  /* the draw's key with its ordinal (0: free), its constants' hash */
+} MvEnt;
+static struct {
+    int on;                         /* -1 not asked yet */
+    uint32_t frame, n;
+    MvEnt *cur, *prev;
+    uint64_t frames, draws, twin_moved, twin_same, alone, ff, inplace;
+} g_mv = { .on = -1 };
+
+static MvEnt *mv_find(MvEnt *t, uint64_t k)
+{
+    for (uint32_t i = (uint32_t)(k >> 40) & (MV_CAP - 1);; i = (i + 1) & (MV_CAP - 1)) {
+        if (t[i].k == k || !t[i].k) {
+            return &t[i];
+        }
+    }
+}
+
+static void mv_note(const HleCmdDraw *d, bool ff)
+{
+    if (g_mv.on < 0) {
+        const char *e = getenv("HAKUX_HLE_MVSTAT");
+        g_mv.on = e && atoi(e) > 0;
+        if (g_mv.on) {
+            g_mv.cur = g_malloc0(MV_CAP * sizeof(MvEnt));
+            g_mv.prev = g_malloc0(MV_CAP * sizeof(MvEnt));
+            hle_log("hakuX-hle-front", "motion stats: counting the draws that have a twin in the frame before");
+        }
+    }
+    if (!g_mv.on) {
+        return;
+    }
+    if (g_mv.frame != g_pd.swap_ids) {          /* a frame went: this one's draws are the next one's "before" */
+        g_mv.frame = g_pd.swap_ids;
+        MvEnt *t = g_mv.prev;
+        g_mv.prev = g_mv.cur;
+        g_mv.cur = t;
+        memset(g_mv.cur, 0, MV_CAP * sizeof(MvEnt));
+        g_mv.n = 0;
+        if (++g_mv.frames % 600 == 0 && g_mv.draws) {
+            const double n = (double)g_mv.draws;
+            hle_log("hakuX-hle-front", "motion stats: %.0f draws a frame; %.1f%% have a twin in the frame before "
+                    "(%.1f%% with other constants: they moved; %.1f%% the same), %.1f%% have none; %.1f%% fixed "
+                    "function, %.1f%% with vertices read in place",
+                    n / 600.0, 100.0 * (double)(g_mv.twin_moved + g_mv.twin_same) / n,
+                    100.0 * (double)g_mv.twin_moved / n, 100.0 * (double)g_mv.twin_same / n,
+                    100.0 * (double)g_mv.alone / n, 100.0 * (double)g_mv.ff / n, 100.0 * (double)g_mv.inplace / n);
+            g_mv.draws = g_mv.twin_moved = g_mv.twin_same = g_mv.alone = g_mv.ff = g_mv.inplace = 0;
+        }
+    }
+    if (g_mv.n >= MV_CAP / 2) {
+        return;
+    }
+    struct {
+        uint64_t vsh;
+        uint32_t prim, count, stride, fvf, imm, nbind, guest_vb, tex[4], attr[HLE_DRAW_ATTRS], pa[HLE_DRAW_MAX_BIND];
+    } key = { .vsh = d->vsh, .prim = d->prim, .count = d->count, .stride = d->stride, .fvf = d->fvf, .imm = d->imm,
+              .nbind = d->nbind, .guest_vb = d->guest_vb };
+    memcpy(key.tex, d->tex, sizeof(key.tex));
+    memcpy(key.attr, d->attr, sizeof(key.attr));
+    for (unsigned i = 0; i < HLE_DRAW_MAX_BIND; i++) {
+        key.pa[i] = (d->guest_vb >> i & 1) ? d->bind_off[i] : 0;    /* in place: an address; else a copy's place */
+    }
+    const uint64_t base = XXH3_64bits(&key, sizeof(key)) | 1;
+    uint64_t chash;
+    if (ff) {
+        float c[sizeof(g_pd.consts) / 16][4];
+        ff_consts(c);
+        chash = XXH3_64bits(c, sizeof(c));
+    } else {
+        chash = XXH3_64bits(g_pd.consts, sizeof(g_pd.consts));
+    }
+    /* the n-th draw of this kind in the frame */
+    uint64_t k = base;
+    MvEnt *e = mv_find(g_mv.cur, k);
+    for (uint32_t ord = 1; e->k; ord++) {
+        k = (base + ord * 0x9E3779B97F4A7C15ull) | 1;
+        e = mv_find(g_mv.cur, k);
+    }
+    e->k = k;
+    e->c = chash;
+    g_mv.n++;
+    const MvEnt *p = mv_find(g_mv.prev, k);
+    g_mv.draws++;
+    g_mv.ff += ff;
+    g_mv.inplace += d->guest_vb != 0;
+    if (!p->k) {
+        g_mv.alone++;
+    } else if (p->c != chash) {
+        g_mv.twin_moved++;
+    } else {
+        g_mv.twin_same++;
+    }
+}
+
 /* The rest of a draw whose vertices and indices d holds: the stages'
  * textures, the constants (a program's, or the fixed-function stage's from
  * its methods) and the attributes' current values after them, the state
@@ -3282,6 +3384,7 @@ static void emit(HleCmdDraw *d)
     d->zscale = (R(NV097_SET_CONTROL0) & 0x1000u) ? zfloat_scale(zf == 2) : zf == 1 ? 1.0f / 65536.0f
                                                                            : 1.0f / 16777216.0f;
     d->ff_ubo = HLE_DRAW_NO_UBO;
+    mv_note(d, ff);
     drawlog(d, ff);
     HleCmdDraw *c = begin(HLE_OP_DRAW, sizeof(*c));
     *c = *d;

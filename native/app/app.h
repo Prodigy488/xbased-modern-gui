@@ -33,6 +33,7 @@ void nc_present_set_overscan(int pct);
 void nc_present_set_fxaa(bool on);
 void nc_present_set_smaa(bool on);     /* SMAA in place of FXAA */
 void nc_present_set_interp(bool on);   /* an in-between frame for games slower than the refresh */
+void nc_present_set_sharpen(int level); /* 0 off, 1 to 3: sharpening when no upscaler does it */
 void nc_present_set_integer(bool on);  /* the picture a whole number of times the console's lines tall */
 void nc_present_set_refresh(float hz);
 /* Automatic texture upscaling (texauto.c): the textures a game wrote out into `dir` (the title's folder, with its

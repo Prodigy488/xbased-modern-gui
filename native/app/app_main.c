@@ -574,6 +574,9 @@ EXPORT int SDL_main(int argc, char *argv[])
         if (!strncmp(argv[i], "smaa=", 5)) {
             nc_present_set_smaa(atoi(argv[i] + 5) != 0);
         }
+        if (!strncmp(argv[i], "sharpen=", 8)) {
+            nc_present_set_sharpen(atoi(argv[i] + 8));
+        }
         if (!strncmp(argv[i], "integer=", 8)) {
             nc_present_set_integer(atoi(argv[i] + 8) != 0);
         }
