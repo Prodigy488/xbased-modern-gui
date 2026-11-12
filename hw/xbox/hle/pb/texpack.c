@@ -257,16 +257,16 @@ static void out_write(void *ctx, void *data, int size)
     o->n += (size_t)size;
 }
 
-void hle_texpack_dump(uint64_t hash, const uint8_t *rgba, uint32_t w, uint32_t h)
+/* A texture's colour as a three-channel PNG at `path`, unless a file is there. (The upscaler's handling of an
+ * alpha channel is not to be relied on, and the texture's own alpha is what is drawn in any case: pbres.c
+ * texpack_alpha.) False when nothing was written. */
+static bool dump_write(const char *path, const uint8_t *rgba, uint32_t w, uint32_t h)
 {
-    g_autofree char *path = g_strdup_printf("%sdump/%016llx.png", pack_dir(), (unsigned long long)hash);
     FILE *have = fopen(path, "rb");
     if (have) {
         fclose(have);                   /* written by an earlier run */
-        return;
+        return false;
     }
-    /* colour alone, three channels: the upscaler's handling of an alpha channel is not to be relied on, and the
-     * texture's own alpha is what is drawn in any case (pbres.c texpack_alpha) */
     const size_t n = (size_t)w * h;
     g_autofree uint8_t *rgb = g_malloc(n * 3);
     for (size_t i = 0; i < n; i++) {
@@ -275,12 +275,30 @@ void hle_texpack_dump(uint64_t hash, const uint8_t *rgba, uint32_t w, uint32_t h
         rgb[i * 3 + 2] = rgba[i * 4 + 2];
     }
     Out o = { 0 };
-    if (stbi_write_png_to_func(out_write, &o, (int)w, (int)h, 3, rgb, (int)w * 3) && o.n) {
-        g_file_set_contents(path, (const gchar *)o.p, (gssize)o.n, NULL);
+    const bool ok = stbi_write_png_to_func(out_write, &o, (int)w, (int)h, 3, rgb, (int)w * 3) && o.n &&
+                    g_file_set_contents(path, (const gchar *)o.p, (gssize)o.n, NULL);
+    g_free(o.p);
+    return ok;
+}
+
+void hle_texpack_dump(uint64_t hash, const uint8_t *rgba, uint32_t w, uint32_t h)
+{
+    g_autofree char *path = g_strdup_printf("%sdump/%016llx.png", pack_dir(), (unsigned long long)hash);
+    if (dump_write(path, rgba, w, h)) {
         if (g_ndumped++ < 8 || !(g_ndumped & 255)) {
             hle_log("hakuX-hle-front", "texture packs: wrote dump/%016llx.png (%ux%u; %u so far)",
                     (unsigned long long)hash, w, h, g_ndumped);
         }
     }
-    g_free(o.p);
+}
+
+bool hle_texpack_scan_dump(const char *dir, uint64_t hash, const uint8_t *rgba, uint32_t w, uint32_t h)
+{
+    g_autofree char *aut = g_strdup_printf("%sauto/%016llx.png", dir, (unsigned long long)hash);
+    g_autofree char *own = g_strdup_printf("%s%016llx.png", dir, (unsigned long long)hash);
+    g_autofree char *path = g_strdup_printf("%sdump/%016llx.png", dir, (unsigned long long)hash);
+    if (file_there(aut) || file_there(own)) {
+        return false;                   /* has its picture already */
+    }
+    return dump_write(path, rgba, w, h);
 }

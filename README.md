@@ -52,8 +52,8 @@ No BIOS, MCPX ROM or hard-disk image is needed.
 
 | Platform | File | |
 |---|---|---|
-| **Windows** 10/11 (x64) | `xbased-modern-gui-1.0.76.28-windows-x64.zip` | Unzip anywhere and run `xbased.exe`. Portable: everything stays in its folder. |
-| **Linux** (x86-64) | `xbased-1.0.76.28-x86_64.AppImage` | `chmod +x` it and run it. Needs a Vulkan driver and glibc 2.38 or newer (Ubuntu 24.04, Fedora 39, Debian 13). |
+| **Windows** 10/11 (x64) | `xbased-modern-gui-1.0.76.29-windows-x64.zip` | Unzip anywhere and run `xbased.exe`. Portable: everything stays in its folder. |
+| **Linux** (x86-64) | `xbased-1.0.76.29-x86_64.AppImage` | `chmod +x` it and run it. Needs a Vulkan driver and glibc 2.38 or newer (Ubuntu 24.04, Fedora 39, Debian 13). |
 
 Get it from **[Releases](https://github.com/Prodigy488/xbased-modern-gui/releases/latest)**.
 The Linux AppImage starts, but it has not been run with a GPU or sound on Linux (it was
@@ -142,7 +142,12 @@ xbased doesn't include any copyrighted Xbox software.
   [Real-ESRGAN](https://github.com/xinntao/Real-ESRGAN) after you leave it, in the background, and drawn the next
   time you play. Real-ESRGAN comes with xbased (the `realesrgan` folder; its licences are in it). The first
   session of a game looks as before; it sharpens as the folder fills. It takes GPU time while it runs, and video
-  memory in the game. A game's `hle/textures/<title id>/auto` folder can be copied to another PC.
+  memory in the game. With it on, a game's disc is also read once for textures kept in the standard XPR
+  containers, so those are upscaled without the game having shown them (many large games keep theirs another
+  way, and are learned as you play).
+- **HD texture packs to share**: a game's menu has "Export HD texture pack", which writes
+  `texture packs/exported/<game> [<title id>] HD textures.zip`. To install one, put the zip into the
+  `texture packs` folder and start xbased.
 - **CRT filters**: soft scanlines, a classic TV, an arcade monitor.
 - **Settings chosen for your PC**: the first start looks at the GPU and the display and sets the render scale,
   the filtering and the anti-aliasing to match (Settings > Video has a switch to choose them again).

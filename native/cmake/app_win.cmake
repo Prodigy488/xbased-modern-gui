@@ -4,6 +4,7 @@
 set(NC_APP_SOURCES
   "${CMAKE_CURRENT_SOURCE_DIR}/app/win_main.c"
   "${CMAKE_CURRENT_SOURCE_DIR}/app/texauto.c"
+  "${CMAKE_CURRENT_SOURCE_DIR}/app/texscan.c"
   "${CMAKE_CURRENT_SOURCE_DIR}/app/win_mods.c"
   "${CMAKE_CURRENT_SOURCE_DIR}/app/mod_fit.c"
   "${CMAKE_CURRENT_SOURCE_DIR}/app/win_auto.c"
@@ -21,6 +22,7 @@ set(NC_APP_SOURCES
   "${CMAKE_CURRENT_SOURCE_DIR}/app/ui/sound.c"
   "${CMAKE_CURRENT_SOURCE_DIR}/app/ui/dash.c"
   "${CMAKE_CURRENT_SOURCE_DIR}/app/ui/hwtune.c"
+  "${CMAKE_CURRENT_SOURCE_DIR}/app/ui/texshare.c"
   "${CMAKE_CURRENT_SOURCE_DIR}/app/ui/dash_settings.c"
   "${CMAKE_CURRENT_SOURCE_DIR}/app/ui/dash_memory.c"
   "${CMAKE_CURRENT_SOURCE_DIR}/app/ui/dash_browse.c"

@@ -404,6 +404,42 @@ static void texpack_alpha(uint8_t *px, uint32_t w, uint32_t h, const uint8_t *ow
     }
 }
 
+/* A texture as a file on the disc holds it (an XPR container's resource: its header's words and its data, `avail`
+ * bytes of it), for the textures to be written out without the game loading them (native/app/texscan.c): the
+ * hash the game's own definition of it would get, and its largest level as R, G, B, A (g_free). False for
+ * what the game's definition wouldn't take either (hle_draw_tex_define's rules for a pack), a palettized
+ * texture (its palette is another resource, bound at run time) and data that isn't all there. */
+bool hle_draw_tex_scan(const uint32_t common, uint32_t format, uint32_t size, const uint8_t *data, size_t avail,
+                       uint64_t *hash, uint8_t **rgba, uint32_t *w, uint32_t *h)
+{
+    HleResDesc d;
+    HleResInfo ri;
+    if (!hle_res_from_header(common, format, size, &d) || !hle_res_info(&d, &ri)) {
+        return false;
+    }
+    const HleFmtInfo *fi = hle_fmt_info(d.fmt);
+    if (d.kind != HLE_RK_TEXTURE || !fi || (fi->flags & (HLE_FI_YUV | HLE_FI_DEPTH | HLE_FI_LIN)) ||
+        d.fmt == HLE_XFMT_P8 || d.w < 16 || d.h < 16 || d.w > 4096 || d.h > 4096 || !ri.bytes || ri.bytes > avail) {
+        return false;
+    }
+    const uint32_t levels = MAX(ri.levels, 1u);
+    uint32_t p0, p1;
+    const uint32_t o0 = hle_res_subresource(&d, 0, 0, &p0);
+    const uint32_t o1 = levels > 1 ? hle_res_subresource(&d, 0, 1, &p1) : ri.bytes;
+    if (o1 <= o0 || o1 > ri.bytes) {
+        return false;
+    }
+    uint8_t *px = tex_rgba(&d, fi, data, NULL);
+    if (!px) {
+        return false;
+    }
+    *hash = hle_texpack_hash(data + o0, o1 - o0, d.fmt, d.w, d.h, NULL, 0);
+    *rgba = px;
+    *w = d.w;
+    *h = d.h;
+    return true;
+}
+
 static bool g_pack_deferred;
 
 bool hle_draw_tex_pack_deferred(void)

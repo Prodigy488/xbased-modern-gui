@@ -1,5 +1,30 @@
 # xbased changelog
 
+## 1.0.76.29 (Modern GUI fork)
+
+- HD texture packs to share (native/app/ui/texshare.c). A game's page and its in-game menu have "Export HD
+  texture pack": the game's upscaled pictures (auto/) and hand-made ones go into
+  "texture packs/exported/<game's name> [<title id>] HD textures.zip" in the data folder (a second part past
+  1.9 GB or 60000 pictures), with a pack.txt that names the game. A zip put into "texture packs" is installed
+  when the dashboard next starts, a message says how many pictures, and the zip moves to
+  "texture packs/installed". An installed upscaler's picture is treated as one made on this PC: checked
+  against the game's texture and given its alpha when drawn. Only entries named <title id>/<hash>.png or
+  <title id>/auto/<hash>.png leave a zip, and only into the textures folder; a pack zipped again by another
+  program (deflate) is read too. Tested on Linux: an export installed on a second folder gives the same
+  files, a deflated zip installs, entries with ".." in their names are left out, Python's zipfile reads the
+  export. The menu row and the message were not seen on a screen.
+- The disc scanned for textures (native/app/texscan.c). With automatic upscaling on, the first run of a game
+  reads its disc image (or folder) once, on a thread of its own, for XPR0 containers, the XDK's packed
+  resources, alone or inside other files, and writes the textures in them to dump/ under the hash the game's
+  own loading of them gets, so the upscaler has them after that run without the game having shown them. Not
+  palettized ones (their palette comes at run time), and nothing from a game that keeps its textures in a
+  format of its own or compressed, as many large ones do: the log's "texture scan:" line says how many were
+  found, and dump/scan.done keeps it from being done again. What stands on reading, not on a test: that a
+  texture's description in a container is Direct3D's five words with the common word 0x0004xxxx and one
+  reference, and that the game hands the data over unchanged, so the hashes meet. The finding of containers
+  (a tag across a read's join, a tag that is no container) was tested on Linux with a made-up image; no real
+  disc was read. A found texture that never matches costs an upscale and nothing else.
+
 ## 1.0.76.28 (Modern GUI fork)
 
 - Every game's log is kept. xbased.log is written over when a game starts, so the log of a crash was gone as

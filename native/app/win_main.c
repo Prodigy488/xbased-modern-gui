@@ -1624,7 +1624,7 @@ static const char *pick_disc(void)
 }
 
 #ifndef XBASED_VERSION
-#define XBASED_VERSION "1.0.76.28"
+#define XBASED_VERSION "1.0.76.29"
 #endif
 
 static void rm_tree(const char *path)
@@ -2267,6 +2267,16 @@ int main(int argc, char *argv[])
             quit_to_dash(win);
         }
         overlay_tick();
+        {
+            /* automatic texture upscaling: the disc looked through for textures, once, beside the game */
+            static bool scanned;
+            if (!scanned && (hle_host_texpack() & 4) && hle_texpack_dir()) {
+                scanned = true;
+                if (nc_texscan_start(g_disc, hle_texpack_dir())) {
+                    nc_log("hakuX-app", "texture scan: reading %s for textures (in the background)", g_disc);
+                }
+            }
+        }
         if (minimized || g_nw.width <= 0 || !nc_present_frame(&g_nw)) {
             SDL_Delay(8); /* nothing to wait for the display on */
         }

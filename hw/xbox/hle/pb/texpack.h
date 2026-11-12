@@ -32,4 +32,8 @@ void hle_texpack_free(uint8_t *rgba);
 bool hle_texpack_dump_wanted(uint64_t hash);
 void hle_texpack_dump(uint64_t hash, const uint8_t *rgba, uint32_t w, uint32_t h);
 
+/* The disc scanner's (native/app/texscan.c, a thread of its own: files only): a texture found on the disc written
+ * to dir's dump/ as the game's own would be, unless it is there or has a picture. True when written. */
+bool hle_texpack_scan_dump(const char *dir, uint64_t hash, const uint8_t *rgba, uint32_t w, uint32_t h);
+
 #endif

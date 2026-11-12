@@ -36,6 +36,10 @@ void nc_present_set_interp(bool on);   /* an in-between frame for games slower t
 void nc_present_set_sharpen(int level); /* 0 off, 1 to 3: sharpening when no upscaler does it */
 void nc_present_set_integer(bool on);  /* the picture a whole number of times the console's lines tall */
 void nc_present_set_refresh(float hz);
+/* Automatic texture upscaling: the disc (an image, or the game's folder) read on a thread of its own for the
+ * textures it holds in XPR containers, which are written out to `dir` (the title's textures folder, with its
+ * ending slash) for the upscaler (texscan.c). Once a disc; false when it was done before (or can't start). */
+bool nc_texscan_start(const char *disc, const char *dir);
 /* Automatic texture upscaling (texauto.c): the textures a game wrote out into `dir` (the title's folder, with its
  * ending slash) that have no upscaled picture yet, handed to Real-ESRGAN, which runs on by itself. Returns how
  * many (0 none to do, -1 the program missing or not started); note says which, for the log. */

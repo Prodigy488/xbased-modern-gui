@@ -9,6 +9,7 @@
 #include "native/app/ui/dash_int.h"
 #include "native/app/ui/homebrew.h"
 #include "native/app/ui/hwtune.h"
+#include "native/app/ui/texshare.h"
 #include "native/app/ui/shortcut.h"
 #include "native/app/ui/playtime.h"
 #include "native/app/ui/xemu_import.h"
@@ -28,7 +29,7 @@
 #endif
 
 #ifndef XBASED_VERSION
-#define XBASED_VERSION "1.0.76.28"
+#define XBASED_VERSION "1.0.76.29"
 #endif
 
 Dash D;
@@ -1909,6 +1910,24 @@ static void SDLCALL cover_file_cb(void *ud, const char *const *files, int filter
     }
 }
 
+
+/* A game's menu row: its upscaled and hand-made textures zipped into "texture packs/exported/" for another PC
+ * (texshare.c). The zip is written at once: a large pack holds the menu for some seconds. */
+static void export_pack_row(List *l, const XdGame *g)
+{
+    if (!list_row(l, T(S_PACK_EXPORT), NULL, NULL)) {
+        return;
+    }
+    char out[1500], msg[1700];
+    const int n = texshare_export(cfg_data_dir(), g->title_id, g->title, out, sizeof(out));
+    if (n > 0) {
+        snprintf(msg, sizeof(msg), T(S_PACK_EXPORTED), n, out);
+    } else {
+        snprintf(msg, sizeof(msg), "%s", T(n ? S_PACK_EXPORT_FAILED : S_PACK_EXPORT_NONE));
+    }
+    dash_toast(msg);
+}
+
 /* The game's name, edited in place: Enter (A) to type and again to keep,
  * Esc to leave it; kept empty, the disc's own again. */
 static void rename_row(List *l, LibGame *g)
@@ -2030,6 +2049,7 @@ static void scr_game(void)
         D.sel[SCR_GAME_SETTINGS] = 0;
         dash_push(SCR_GAME_SETTINGS);
     }
+    export_pack_row(&l, &D.cur->g);
     if (list_row(&l, T(S_MODS), NULL, NULL)) {
         D.editing_game = true;
         D.sel[SCR_MODS] = 0;
@@ -2269,6 +2289,14 @@ int dash_run(SDL_Window *win, const char *exe)
     }
     i18n_set(cfg_get(&D.global, "ui.lang"));
     cc_sync(&D.global);     /* the EEPROM changed by hand or by a title meanwhile */
+    {
+        /* HD texture packs put into "texture packs/": installed (texshare.c) */
+        char note[300];
+        texshare_import_all(cfg_data_dir(), note, sizeof(note));
+        if (note[0]) {
+            dash_toast(note);
+        }
+    }
     upd_cleanup();
     if (cfg_bool(&D.global, "update.check", true)) {
         upd_check_start(XBASED_VERSION);
@@ -2533,6 +2561,7 @@ static void scr_ingame(void)
         D.sel[SCR_GAME_SETTINGS] = 0;
         dash_push(SCR_GAME_SETTINGS);
     }
+    export_pack_row(&l, &D.cur->g);
     if (list_row(&l, T(S_CONTROLS), NULL, NULL)) {
         D.editing_game = false;
         D.player = 0;
