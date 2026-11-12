@@ -1500,12 +1500,87 @@ static void state_request_poll(void)
 
 /* ------------------------------------------------------------- main */
 
+/* The log about to be written over, kept if it is a game's: moved to logs/ as "<date>-<time> <the disc's
+ * name>.log" (the time it was last written), the 40 newest kept. A crash is looked into from the log of the
+ * run it happened in, and that was gone as soon as another game started. */
+static void log_keep(const char *path)
+{
+    char head[16384];
+    FILE *f = fopen(path, "rb");
+    if (!f) {
+        return;
+    }
+    const size_t n = fread(head, 1, sizeof(head) - 1, f);
+    fclose(f);
+    head[n] = 0;
+    const char *d = strstr(head, "native core: disc ");
+    if (!d) {
+        return;                 /* the dashboard's own, or a run that never got to a game */
+    }
+    d += 18;
+    const char *e = strstr(d, ", hdd ");
+    const char *nl = strchr(d, '\n');
+    if (!e || (nl && nl < e)) {
+        e = nl ? nl : d + strlen(d);
+    }
+    const char *b = e;
+    while (b > d && b[-1] != '/' && b[-1] != '\\') {
+        b--;
+    }
+    char name[80];
+    size_t k = 0;
+    for (const char *p = b; p < e && k < sizeof(name) - 1; p++) {
+        const unsigned char c = (unsigned char)*p;
+        name[k++] = c < 32 || strchr("<>:\"/\\|?*", c) ? '_' : (char)c;
+    }
+    name[k] = 0;
+    char *dot = strrchr(name, '.');
+    if (dot && dot != name) {
+        *dot = 0;
+    }
+    char dir[MAX_PATH + 16], to[MAX_PATH + 160];
+    snprintf(dir, sizeof(dir), "%slogs", g_data_dir);
+    SDL_CreateDirectory(dir);
+    SDL_PathInfo pi;
+    SDL_DateTime dt;
+    if (!SDL_GetPathInfo(path, &pi) || !SDL_TimeToDateTime(pi.modify_time, &dt, true)) {
+        memset(&dt, 0, sizeof(dt));
+    }
+    snprintf(to, sizeof(to), "%s/%04d%02d%02d-%02d%02d%02d %s.log", dir, dt.year, dt.month, dt.day, dt.hour,
+             dt.minute, dt.second, name);
+    remove(to);
+    if (rename(path, to) != 0) {
+        return;
+    }
+    /* the names start with the time: sorted, the oldest come first */
+    int count = 0;
+    char **names = SDL_GlobDirectory(dir, "*.log", 0, &count);
+    for (int i = 0; names && i < count; i++) {
+        for (int j = i + 1; j < count; j++) {
+            if (strcmp(names[j], names[i]) < 0) {
+                char *t = names[i];
+                names[i] = names[j];
+                names[j] = t;
+            }
+        }
+    }
+    for (int i = 0; names && i < count - 40; i++) {
+        char old[MAX_PATH + 300];
+        snprintf(old, sizeof(old), "%s/%s", dir, names[i]);
+        remove(old);
+    }
+    SDL_free(names);
+}
+
 /* xbased.log beside the executable: a run the process started again (a
  * title's relaunch, a state loaded) goes on in the same log. */
 static void log_setup(bool console, bool again)
 {
     char path[MAX_PATH + 16];
     snprintf(path, sizeof(path), "%sxbased.log", g_data_dir);
+    if (!again) {
+        log_keep(path);
+    }
 #ifdef _WIN32
     if (console && AllocConsole()) {
         freopen("CONOUT$", "w", stdout);
@@ -1549,7 +1624,7 @@ static const char *pick_disc(void)
 }
 
 #ifndef XBASED_VERSION
-#define XBASED_VERSION "1.0.76.27"
+#define XBASED_VERSION "1.0.76.28"
 #endif
 
 static void rm_tree(const char *path)

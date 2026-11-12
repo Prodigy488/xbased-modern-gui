@@ -3,6 +3,8 @@
  * "hw.auto" is set, which is then cleared) the GPU and the display are looked at and the settings that depend on
  * them are written to xbased.ini: the first time only those not there yet, with hw.auto all of them.
  *
+ * Automatic texture upscaling is turned on for a discrete GPU of 6 GB or more.
+ *
  *   GPU                               render scale up to   anisotropic   anti-aliasing   pack textures up to
  *   discrete, 10 GB or more                  4x               16x           SMAA             2048
  *   discrete, 6 GB or more                   4x               16x           SMAA             1024
@@ -96,6 +98,7 @@ void hwtune_pick(int kind, uint64_t vram, int display_h, HwTune *t)
     t->smaa = tier >= 2;
     t->fxaa = tier == 1;
     t->fsr = tier >= 1 && display_h > 0 && t->scale * 480 < display_h - 48;
+    t->texauto = tier == 3;
     t->texcap = kind == 2 && vram >= 10 * gb ? 2048 : kind == 2 && vram >= 6 * gb ? 1024 :
                 kind == 2 && vram >= 3 * gb ? 512 : 256;
 }
@@ -141,6 +144,12 @@ bool hwtune_apply(Config *c, SDL_Window *win, char *note, size_t note_n)
     }
     snprintf(v, sizeof(v), "%d", t.texcap);
     set += put(c, "texcap", v, all);
+    /* automatic texture upscaling: on where the GPU has the memory for it (and off elsewhere when asked again) */
+    if (t.texauto) {
+        set += put(c, "texauto", "1", all);
+    } else if (all) {
+        set += put(c, "texauto", "0", true);
+    }
     cfg_set(c, "hw.tuned", "1");
     cfg_unset(c, "hw.auto");
     snprintf(note, note_n, "settings for this PC (%s, %.1f GB, display %d high): scale %dx, anisotropic %dx, %s, "

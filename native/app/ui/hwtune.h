@@ -12,6 +12,7 @@ struct SDL_Window;
 typedef struct HwTune {
     int scale, aniso, texcap;
     bool smaa, fxaa, fsr;
+    bool texauto;               /* automatic texture upscaling: a discrete GPU of 6 GB or more */
 } HwTune;
 
 /* The settings for a GPU of this kind (2 discrete, 1 integrated, 0 none) and memory, on a display this high. */

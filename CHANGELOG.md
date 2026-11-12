@@ -1,5 +1,20 @@
 # xbased changelog
 
+## 1.0.76.28 (Modern GUI fork)
+
+- Every game's log is kept. xbased.log is written over when a game starts, so the log of a crash was gone as
+  soon as another game was run (a crash of The Incredibles was reported with the log of the game played
+  after it). Before it is written over, a log that got as far as a game is moved to the data folder's logs/
+  as "<date>-<time> <the disc's name>.log", by when it was last written; the 40 newest stay. A run started
+  again (a state loaded, a title's relaunch) still goes on in the same log, and the dashboard's own log is
+  not kept. Tested on Linux with sample logs.
+- Automatic texture upscaling on by default where the GPU has the memory. The hardware pick (1.0.76.25) now
+  also sets "texauto": on for a discrete GPU of 6 GB or more when the setting isn't there yet (a first start,
+  or an upgrade from a version before the pick), and off elsewhere when the pick is asked for again. What
+  that brings to someone who didn't ask for it: a game's first loads are slower while its textures are written
+  out, the GPU is busy for some minutes after a game is left, the textures folder grows by some hundred MB a
+  game, and games use more video memory. Settings > Video turns it off.
+
 ## 1.0.76.27 (Modern GUI fork)
 
 - Automatic texture upscaling took on few of some games' textures. A log of 1.0.76.26 (title 41430007) ends
