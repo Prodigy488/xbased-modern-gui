@@ -1,4 +1,4 @@
-# xbased Modern GUI 1.0.76.18: game compatibility fixes, Autofix for stalled games, Linux AppImage
+# xbased Modern GUI 1.0.76.19: game compatibility fixes, Autofix for stalled games, Linux AppImage
 
 ```
 Changes since 1.0.76.2
@@ -20,8 +20,8 @@ New
   Jimenez et al.'s reference, MIT). Replaces FXAA when both are on. Not run with a GPU here.
 - Frame interpolation (Settings > Video, off): for games at 30 fps, a frame between each two drawn from the
   motion between them, shown half a frame early; costs half a frame (about 17 ms) of delay and some GPU time.
-  Not FSR 3's frame generation (no motion vectors from the game). Not run with a GPU here: the maths were
-  checked on a CPU, the shaders compile.
+  Not FSR 3's frame generation (no motion vectors from the game). 1.0.76.19 sharpens it (half-pixel motion,
+  a motion per pixel instead of per block, a Catmull-Rom filter); checked on a CPU, the shaders compile.
 - Steel Battalion's controller: for Steel Battalion (title 43430002) port 1 gets the game's big controller (levers,
   pedals, 40 buttons, gear lever, tuner dial) and your keyboard and gamepad drive it: a gamepad layout (Back held
   for the cockpit panel, with the five start-up toggle switches on the D-pad and left stick click) and every control on the keyboard, listed in the README ("Steel Battalion"). `sbc=1` /
@@ -41,7 +41,7 @@ New
 - Settings > System > "Scan games for missing kernel functions": reads every game's default.xbe
   and writes compat_report.txt (the games with the most gaps first, and each missing function with
   how many games need it). "Open the scan report" opens it.
-- Linux: an AppImage (xbased-1.0.76.18-x86_64.AppImage). Needs a Vulkan driver and glibc 2.38 or newer (Ubuntu 24.04, Fedora 39, Debian 13); not run with a GPU or sound yet.
+- Linux: an AppImage (xbased-1.0.76.19-x86_64.AppImage). Needs a Vulkan driver and glibc 2.38 or newer (Ubuntu 24.04, Fedora 39, Debian 13); not run with a GPU or sound yet.
   Settings, saves and states are in ~/.local/share/xbased.
 
 Logs (to find out why a game stops or is silent)
@@ -55,4 +55,4 @@ Known
   missing: the game never asks the audio chip to play them. Not fixed yet.
 ```
 
-Downloads: `xbased-modern-gui-1.0.76.18-windows-x64.zip` (Windows 10/11 x64, Vulkan 1.1) and `xbased-1.0.76.18-x86_64.AppImage` (Linux x86-64). There is no macOS build: the emulator has no macOS port yet.
+Downloads: `xbased-modern-gui-1.0.76.19-windows-x64.zip` (Windows 10/11 x64, Vulkan 1.1) and `xbased-1.0.76.19-x86_64.AppImage` (Linux x86-64). There is no macOS build: the emulator has no macOS port yet.

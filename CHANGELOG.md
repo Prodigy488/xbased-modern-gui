@@ -1,5 +1,19 @@
 # xbased changelog
 
+## 1.0.76.19 (Modern GUI fork)
+
+- Frame interpolation looked slightly smeared (reported on 1.0.76.18). Three causes, three changes: the
+  motion search was accurate to 1 to 2 pixels, and the half-way frame averages two samples, so a motion a
+  pixel off blurs it: the search now refines to half a pixel (two more passes over 64 samples a block);
+  each pixel took its motion from a blend of the four nearest blocks', which dragged one block's motion over
+  its neighbour's edge: each pixel now takes whichever of the four (or none) the two frames agree best on
+  around it; and the two samples were read bilinearly, which blurs a half-pixel shift: they are now read with
+  a Catmull-Rom filter. The fall-back to the real frame where the two disagree starts earlier. Checked on a
+  CPU against synthetic motion (half-pixel shifts, an object moving against its background: the picture's
+  edge sharpness against the true half-way frame went from 0.82 to 0.92, and the error was halved where the
+  motion is a whole number of pixels); not run on a GPU. The search costs about half as much again per new
+  frame.
+
 ## 1.0.76.18 (Modern GUI fork)
 
 - SMAA: Settings > Video > "Anti-aliasing: SMAA" (off). The presenter's FXAA is a blur of the frame's

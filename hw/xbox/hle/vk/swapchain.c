@@ -707,9 +707,11 @@ static const char k_fs_copy[] =
     "  o = vec4(texture(u_tex, v_uv).rgb, 1.0);\n"
     "}\n";
 /* Motion by block matching, one block (extra.x frame pixels square) a pixel of the image drawn: how the
- * content of the previous frame (u_tex2) moved into the frame (u_tex), the best of 17 x 17 shifts a step
- * (extra.y pixels) apart, each judged on 16 samples of the block's luma, with a small lean to the still.
- * Written as the shift over 8 steps, 0.5 the none. */
+ * content of the previous frame (u_tex2) moved into the frame (u_tex). First the best of 17 x 17 shifts a step
+ * (extra.y pixels) apart, judged on 16 samples of the block's luma with a small lean to the still; then
+ * two refinements on 64 samples, a pixel's step over 5 x 5 shifts and half a pixel's over 3 x 3 (the centre
+ * kept unless another is better), for the shift to the half pixel the in-between frame needs. Written as the
+ * shift over 10 steps, 0.5 the none. */
 static const char k_fs_ilme[] =
     "float lum(vec2 p, sampler2D t, vec2 size) { return dot(textureLod(t, p / size, 0.0).rgb, vec3(0.299, 0.587, 0.114)); }\n"
     "void main() {\n"
@@ -733,21 +735,82 @@ static const char k_fs_ilme[] =
     "      if (sad < best) { best = sad; bv = d; }\n"
     "    }\n"
     "  }\n"
-    "  o = vec4(bv / (8.0 * stp) * 0.5 + 0.5, 0.0, 1.0);\n"
+    "  float c8[64];\n"
+    "  for (int k = 0; k < 64; k++) {\n"
+    "    c8[k] = lum(c + (vec2(float(k & 7), float(k >> 3)) - 3.5) * (B * 0.125), u_tex, size);\n"
+    "  }\n"
+    "  for (int stage = 0; stage < 2; stage++) {\n"
+    "    float st = stage == 0 ? 0.5 * stp : 0.25 * stp;\n"
+    "    int r = stage == 0 ? 2 : 1, n1 = 2 * r + 1;\n"
+    "    vec2 b0 = bv;\n"
+    "    float bs = 1e9;\n"
+    "    for (int n = -1; n < n1 * n1; n++) {\n"
+    "      vec2 d = b0;\n"
+    "      if (n >= 0) { d += vec2(float(n % n1 - r), float(n / n1 - r)) * st; }\n"
+    "      float sad = 0.0;\n"
+    "      for (int k = 0; k < 64; k++) {\n"
+    "        vec2 p = c + (vec2(float(k & 7), float(k >> 3)) - 3.5) * (B * 0.125) - d;\n"
+    "        sad += abs(c8[k] - lum(p, u_tex2, size));\n"
+    "      }\n"
+    "      if (sad < bs - 0.0001) { bs = sad; bv = d; }\n"
+    "    }\n"
+    "  }\n"
+    "  o = vec4(clamp(bv / (10.0 * stp) * 0.5 + 0.5, 0.0, 1.0), 0.0, 1.0);\n"
     "}\n";
-/* The frame between the previous (u_tex2) and this one (u_tex): each pixel from both along its block's motion
- * (u_tex3; extra.x the shift's 8 steps in pixels, extra.y a block's size); where the two don't agree, from this
- * frame alone, so a wrong vector shows the frame itself early and never a double image. */
+/* The frame between the previous (u_tex2) and this one (u_tex), from the block motions (u_tex3; extra.x the
+ * shift's 10 steps in pixels, extra.y a block's size). Each pixel takes, of the four nearest blocks' motions and
+ * none, the one on which the two frames agree best around it (so a block's edge doesn't drag its neighbour's
+ * motion over it), and is both frames along it, read with a Catmull-Rom filter (bilinear blurs a half-pixel
+ * shift). Where they still disagree it is this frame alone, so a wrong motion shows the frame itself early and
+ * never a double image. */
 static const char k_fs_ilmix[] =
+    "vec3 cr(sampler2D t, vec2 uv) {\n"
+    "  vec2 size = vec2(textureSize(t, 0));\n"
+    "  vec2 pos = uv * size;\n"
+    "  vec2 c = floor(pos - 0.5) + 0.5;\n"
+    "  vec2 f = pos - c;\n"
+    "  vec2 w0 = f * (-0.5 + f * (1.0 - 0.5 * f));\n"
+    "  vec2 w1 = 1.0 + f * f * (-2.5 + 1.5 * f);\n"
+    "  vec2 w2 = f * (0.5 + f * (2.0 - 1.5 * f));\n"
+    "  vec2 w3 = f * f * (-0.5 + 0.5 * f);\n"
+    "  vec2 w12 = w1 + w2;\n"
+    "  vec2 p0 = (c - 1.0) / size, p3 = (c + 2.0) / size, p12 = (c + w2 / w12) / size;\n"
+    "  vec3 r = textureLod(t, vec2(p0.x, p0.y), 0.0).rgb * (w0.x * w0.y) + textureLod(t, vec2(p12.x, p0.y), 0.0).rgb * (w12.x * w0.y) +\n"
+    "           textureLod(t, vec2(p3.x, p0.y), 0.0).rgb * (w3.x * w0.y) + textureLod(t, vec2(p0.x, p12.y), 0.0).rgb * (w0.x * w12.y) +\n"
+    "           textureLod(t, vec2(p12.x, p12.y), 0.0).rgb * (w12.x * w12.y) + textureLod(t, vec2(p3.x, p12.y), 0.0).rgb * (w3.x * w12.y) +\n"
+    "           textureLod(t, vec2(p0.x, p3.y), 0.0).rgb * (w0.x * w3.y) + textureLod(t, vec2(p12.x, p3.y), 0.0).rgb * (w12.x * w3.y) +\n"
+    "           textureLod(t, vec2(p3.x, p3.y), 0.0).rgb * (w3.x * w3.y);\n"
+    "  return clamp(r, 0.0, 1.0);\n"
+    "}\n"
     "void main() {\n"
     "  vec2 size = vec2(textureSize(u_tex, 0));\n"
-    "  vec2 muv = min(v_uv * size / (vec2(textureSize(u_tex3, 0)) * pc.extra.y), vec2(1.0));\n"
-    "  vec2 mv = (textureLod(u_tex3, muv, 0.0).rg * 2.0 - 1.0) * pc.extra.x / size;\n"
-    "  vec3 a = textureLod(u_tex2, v_uv - 0.5 * mv, 0.0).rgb;\n"
-    "  vec3 b = textureLod(u_tex, v_uv + 0.5 * mv, 0.0).rgb;\n"
+    "  float B = pc.extra.y;\n"
+    "  ivec2 nb = textureSize(u_tex3, 0);\n"
+    "  ivec2 b0 = ivec2(floor(v_uv * size / B - 0.5));\n"
+    "  vec2 cand[5];\n"
+    "  for (int k = 0; k < 4; k++) {\n"
+    "    ivec2 bi = clamp(b0 + ivec2(k & 1, k >> 1), ivec2(0), nb - 1);\n"
+    "    cand[k] = (texelFetch(u_tex3, bi, 0).rg * 2.0 - 1.0) * pc.extra.x;\n"
+    "  }\n"
+    "  cand[4] = vec2(0.0);\n"
+    "  const vec2 offs[5] = vec2[5](vec2(0.0, 0.0), vec2(1.0, 0.0), vec2(-1.0, 0.0), vec2(0.0, 1.0), vec2(0.0, -1.0));\n"
+    "  float best = 1e9;\n"
+    "  vec2 bm = vec2(0.0);\n"
+    "  for (int k = 0; k < 5; k++) {\n"
+    "    float e = 0.0;\n"
+    "    for (int i = 0; i < 5; i++) {\n"
+    "      vec2 at = v_uv + offs[i] * (B * 0.125) / size;\n"
+    "      vec3 a = textureLod(u_tex2, at - 0.5 * cand[k] / size, 0.0).rgb;\n"
+    "      vec3 b = textureLod(u_tex, at + 0.5 * cand[k] / size, 0.0).rgb;\n"
+    "      e += dot(abs(a - b), vec3(1.0 / 3.0));\n"
+    "    }\n"
+    "    e *= 0.2;\n"
+    "    if (e < best - 0.000001) { best = e; bm = cand[k]; }\n"
+    "  }\n"
+    "  vec3 a = cr(u_tex2, v_uv - 0.5 * bm / size);\n"
+    "  vec3 b = cr(u_tex, v_uv + 0.5 * bm / size);\n"
     "  vec3 c = textureLod(u_tex, v_uv, 0.0).rgb;\n"
-    "  float err = dot(abs(a - b), vec3(1.0 / 3.0));\n"
-    "  o = vec4(mix(0.5 * (a + b), c, smoothstep(0.08, 0.25, err)), 1.0);\n"
+    "  o = vec4(mix(0.5 * (a + b), c, smoothstep(0.06, 0.18, best)), 1.0);\n"
     "}\n";
 
 #include "hw/xbox/hle/vk/smaa.inc"
@@ -2432,7 +2495,7 @@ void hle_present_end(float sx, float sy, bool fxaa, int upscale, bool average, u
                 g_ps.il_pending = false;
                 if (g_ps.il_pv.serial && dt >= 24000000ll && dt <= 100000000ll) {
                     const float me[4] = { (float)blk, (float)stp, 0.0f, 0.0f };
-                    const float mix[4] = { (float)(8 * stp), (float)blk, 0.0f, 0.0f };
+                    const float mix[4] = { (float)(10 * stp), (float)blk, 0.0f, 0.0f };
                     x_pass(cb, f, SET_X2, &g_ps.il_mv, g_ps.pipe[P_IL_ME], src, g_ps.il_pv.view, VK_NULL_HANDLE, me);
                     x_pass(cb, f, SET_X3, &g_ps.il_mid, g_ps.pipe[P_IL_MIX], src, g_ps.il_pv.view, g_ps.il_mv.view,
                            mix);
