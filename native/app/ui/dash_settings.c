@@ -60,6 +60,7 @@ static void rows_video(List *l)
     opt_choice(l, S_ANISO, "aniso", anv, ann, 5, "0");
     opt_bool(l, S_TEXPACK, "texpack", false, false);
     opt_bool(l, S_TEXDUMP, "texdump", false, false);
+    opt_bool(l, S_TEXAUTO, "texauto", false, false);
     static const char *uv[] = {"bilinear", "fsr", "nis", "nearest"};
     const char *un[] = {T(S_BILINEAR), "AMD FSR 1", "NVIDIA NIS", T(S_NEAREST)};
     opt_choice(l, S_UPSCALE, "upscale", uv, un, 4, "bilinear");

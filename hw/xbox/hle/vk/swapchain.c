@@ -802,9 +802,12 @@ static const char k_fs_ilme[] =
 /* The frame between the previous (u_tex2) and this one (u_tex), from the block motions (u_tex3, in frame
  * pixels; extra.y a block's size). Each pixel takes, of the four nearest blocks' motions and
  * none, the one on which the two frames agree best around it (so a block's edge doesn't drag its neighbour's
- * motion over it), and is both frames along it, read with a Catmull-Rom filter (bilinear blurs a half-pixel
- * shift). Where they still disagree (around the pixel, or the two samples themselves) it is this frame alone, so
- * a wrong motion shows the frame itself early and never a double image. */
+ * motion over it), and is this frame moved half-way back along it, read with a Catmull-Rom filter. It was the
+ * average of both frames, which kept under half of a detailed picture's finest detail (each frame has its own
+ * aliasing and dither pattern, and any shift by part of a pixel softens): sharp, soft, sharp, a flicker on
+ * distant textures. One frame alone keeps its pattern, and the half-way shift is pulled toward whole pixels
+ * (by an eighth of a pixel at most), where reading it loses nothing. Where the two frames disagree (around the
+ * pixel, or at it) it is this frame unmoved, so a wrong motion shows the frame itself early. */
 static const char k_fs_ilmix[] =
     "vec3 cr(sampler2D t, vec2 uv) {\n"
     "  vec2 size = vec2(textureSize(t, 0));\n"
@@ -849,11 +852,13 @@ static const char k_fs_ilmix[] =
     "    e *= 0.2;\n"
     "    if (e < best - 0.000001) { best = e; bm = cand[k]; }\n"
     "  }\n"
-    "  vec3 a = cr(u_tex2, v_uv - 0.5 * bm / size);\n"
-    "  vec3 b = cr(u_tex, v_uv + 0.5 * bm / size);\n"
+    "  vec3 a = textureLod(u_tex2, v_uv - 0.5 * bm / size, 0.0).rgb;\n"
+    "  vec3 b = textureLod(u_tex, v_uv + 0.5 * bm / size, 0.0).rgb;\n"
     "  vec3 c = textureLod(u_tex, v_uv, 0.0).rgb;\n"
     "  float off = max(best, 0.5 * dot(abs(a - b), vec3(1.0 / 3.0)));\n"
-    "  o = vec4(mix(0.5 * (a + b), c, smoothstep(0.035, 0.11, off)), 1.0);\n"
+    "  vec2 h = 0.5 * bm, hr = floor(h + 0.5), hf = h - hr;\n"
+    "  h = hr + sign(hf) * 2.0 * hf * hf;\n"
+    "  o = vec4(mix(cr(u_tex, v_uv + h / size), c, smoothstep(0.035, 0.11, off)), 1.0);\n"
     "}\n";
 
 #include "hw/xbox/hle/vk/smaa.inc"

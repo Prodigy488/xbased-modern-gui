@@ -52,8 +52,8 @@ No BIOS, MCPX ROM or hard-disk image is needed.
 
 | Platform | File | |
 |---|---|---|
-| **Windows** 10/11 (x64) | `xbased-modern-gui-1.0.76.22-windows-x64.zip` | Unzip anywhere and run `xbased.exe`. Portable: everything stays in its folder. |
-| **Linux** (x86-64) | `xbased-1.0.76.22-x86_64.AppImage` | `chmod +x` it and run it. Needs a Vulkan driver and glibc 2.38 or newer (Ubuntu 24.04, Fedora 39, Debian 13). |
+| **Windows** 10/11 (x64) | `xbased-modern-gui-1.0.76.23-windows-x64.zip` | Unzip anywhere and run `xbased.exe`. Portable: everything stays in its folder. |
+| **Linux** (x86-64) | `xbased-1.0.76.23-x86_64.AppImage` | `chmod +x` it and run it. Needs a Vulkan driver and glibc 2.38 or newer (Ubuntu 24.04, Fedora 39, Debian 13). |
 
 Get it from **[Releases](https://github.com/Prodigy488/xbased-modern-gui/releases/latest)**.
 The Linux AppImage starts, but it has not been run with a GPU or sound on Linux (it was
@@ -136,6 +136,11 @@ xbased doesn't include any copyrighted Xbox software.
 - **Texture packs** (Settings > Video, off): PNG files in `hle/textures/<title id>/` of your data folder are drawn
   in place of the game's textures, at any size. "Write the game's textures out" fills that folder's `dump/` with
   the game's own, each named by its hash: edit or upscale one, keep the name, and put it one folder up.
+- **Automatic texture upscaling** (Settings > Video, off): with [Real-ESRGAN](https://github.com/xinntao/Real-ESRGAN/releases)'s
+  portable program (`realesrgan-ncnn-vulkan`, a separate download) unzipped into a `realesrgan` folder beside
+  xbased (or in the data folder), the textures a game used are upscaled 4x after you leave it, in the
+  background, and drawn the next time you play. The first sessions of a game look as before; it sharpens as
+  the folder fills. It takes GPU time while it runs, and video memory in the game.
 - **CRT filters**: soft scanlines, a classic TV, an arcade monitor.
 - Every setting **global or per game**.
 

@@ -75,6 +75,9 @@ bool nc_option(NcOptions *o, const char *arg)
     } else if ((v = value(arg, "texpack="))) {
         nc_hle_set_texpack(1, atoi(v) != 0);
         nc_log("hakuX-app", "texture packs %s", atoi(v) ? "on" : "off");
+    } else if ((v = value(arg, "texauto="))) {
+        nc_hle_set_texpack(4, atoi(v) != 0);
+        nc_log("hakuX-app", "automatic texture upscaling %s", atoi(v) ? "on" : "off");
     } else if ((v = value(arg, "texdump="))) {
         nc_hle_set_texpack(2, atoi(v) != 0);
         nc_log("hakuX-app", "texture dump %s", atoi(v) ? "on" : "off");

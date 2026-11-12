@@ -34,7 +34,11 @@ void nc_present_set_fxaa(bool on);
 void nc_present_set_smaa(bool on);     /* SMAA in place of FXAA */
 void nc_present_set_interp(bool on);   /* an in-between frame for games slower than the refresh */
 void nc_present_set_integer(bool on);  /* the picture a whole number of times the console's lines tall */
-void nc_present_set_refresh(float hz); /* the display's refresh rate (frame interpolation's limits) */
+void nc_present_set_refresh(float hz);
+/* Automatic texture upscaling (texauto.c): the textures a game wrote out into `dir` (the title's folder, with its
+ * ending slash) that have no upscaled picture yet, handed to Real-ESRGAN, which runs on by itself. Returns how
+ * many (0 none to do, -1 the program missing or not started); note says which, for the log. */
+int nc_texauto_run(const char *dir, const char *exe_dir, const char *data_dir, char *note, size_t note_n); /* the display's refresh rate (frame interpolation's limits) */
 /* The frame rate in the window's corner. */
 void nc_present_set_show_fps(bool on);
 /* A frame smaller than its place in the window: scaled up bilinearly, or by

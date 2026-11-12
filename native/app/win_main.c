@@ -39,6 +39,8 @@
 #include "native/app/ui/sbc_map.h"
 #include "native/app/ui/ui.h"
 #include "hw/xbox/hle/hitch.h"
+#include "hw/xbox/hle/host.h"
+#include "hw/xbox/hle/pb/texpack.h"
 #include "hw/xbox/hle/vk/swapchain.h"
 #include "native/app/ui/xbox_data.h"
 #include "native/app/ui/xemu_import.h"
@@ -342,6 +344,14 @@ static void give_foreground(bool to_dash)
  * A code with bit 30 is a run started again (run_again): no dashboard. */
 static _Noreturn void exit_now(int code)
 {
+    /* automatic texture upscaling: what this run wrote out goes to the upscaler, which runs on after it */
+    if ((hle_host_texpack() & 4) && hle_texpack_dir()) {
+        char note[2600];
+        const int n = nc_texauto_run(hle_texpack_dir(), g_exe_dir, g_data_dir, note, sizeof(note));
+        if (n || note[0]) {
+            nc_log("hakuX-app", "texture upscaling: %s", note[0] ? note : "nothing new");
+        }
+    }
     fflush(NULL);
 #ifdef _WIN32
     give_foreground(!(code & 0x40000000));
@@ -1533,7 +1543,7 @@ static const char *pick_disc(void)
 }
 
 #ifndef XBASED_VERSION
-#define XBASED_VERSION "1.0.76.22"
+#define XBASED_VERSION "1.0.76.23"
 #endif
 
 static void rm_tree(const char *path)

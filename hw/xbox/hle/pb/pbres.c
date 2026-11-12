@@ -350,47 +350,63 @@ static bool texpack_define(uint32_t id, uint64_t hash, bool mips)
     if (!px) {
         return false;
     }
-    uint32_t levels = 1, total = 0;
-    if (mips) {
-        while (levels < 13 && ((w >> levels) || (h >> levels))) {
-            levels++;
+    /* its levels, each the average of four texels of the one above, on the heap (the arena's memory reads
+     * slowly); the first of at most 2048 a side is the one that goes up, with those under it if the game's
+     * texture has levels (an upscaler's 4x of a large texture is taken at half or a quarter) */
+    enum { CAP = 2048, MAXL = 14 };
+    uint8_t *lv[MAXL] = { px };
+    uint32_t lw[MAXL] = { w }, lh[MAXL] = { h };
+    unsigned n = 1, first = 0;
+    while (lw[first] > CAP || lh[first] > CAP || (mips && (lw[n - 1] > 1 || lh[n - 1] > 1))) {
+        if (n == MAXL) {
+            break;
         }
-    }
-    for (uint32_t l = 0; l < levels; l++) {
-        total += MAX(w >> l, 1u) * MAX(h >> l, 1u) * 4;
-    }
-    uint8_t *dst;
-    uint32_t off = arena_alloc(total, 16, &dst);
-    if (off == HLE_ARENA_FULL) {
-        hle_texpack_free(px);
-        return false;                   /* the game's own this time */
-    }
-    memcpy(dst, px, (size_t)w * h * 4);
-    uint32_t pos = w * h * 4, pw = w, ph = h;
-    uint8_t *prev = px, *own = NULL;    /* the level above, read from the heap (the arena's memory reads slowly) */
-    for (uint32_t l = 1; l < levels; l++) {
-        const uint32_t lw = MAX(pw / 2, 1u), lh = MAX(ph / 2, 1u);
-        uint8_t *cur = g_malloc((size_t)lw * lh * 4);
-        for (uint32_t y = 0; y < lh; y++) {
+        const uint32_t pw = lw[n - 1], ph = lh[n - 1], cw = MAX(pw / 2, 1u), ch = MAX(ph / 2, 1u);
+        const uint8_t *prev = lv[n - 1];
+        uint8_t *cur = g_malloc((size_t)cw * ch * 4);
+        for (uint32_t y = 0; y < ch; y++) {
             const uint32_t y0 = MIN(y * 2, ph - 1), y1 = MIN(y * 2 + 1, ph - 1);
-            for (uint32_t x = 0; x < lw; x++) {
+            for (uint32_t x = 0; x < cw; x++) {
                 const uint32_t x0 = MIN(x * 2, pw - 1), x1 = MIN(x * 2 + 1, pw - 1);
                 for (unsigned c = 0; c < 4; c++) {
-                    cur[((size_t)y * lw + x) * 4 + c] = (uint8_t)(
+                    cur[((size_t)y * cw + x) * 4 + c] = (uint8_t)(
                         (prev[((size_t)y0 * pw + x0) * 4 + c] + prev[((size_t)y0 * pw + x1) * 4 + c] +
                          prev[((size_t)y1 * pw + x0) * 4 + c] + prev[((size_t)y1 * pw + x1) * 4 + c] + 2) / 4);
                 }
             }
         }
-        memcpy(dst + pos, cur, (size_t)lw * lh * 4);
-        pos += lw * lh * 4;
-        g_free(own);
-        prev = own = cur;
-        pw = lw;
-        ph = lh;
+        lv[n] = cur;
+        lw[n] = cw;
+        lh[n] = ch;
+        n++;
+        if (lw[first] > CAP || lh[first] > CAP) {
+            first = n - 1;
+        }
     }
-    g_free(own);
+    const uint32_t levels = mips ? n - first : 1;
+    uint32_t total = 0;
+    for (uint32_t l = 0; l < levels; l++) {
+        total += lw[first + l] * lh[first + l] * 4;
+    }
+    uint8_t *dst;
+    uint32_t off = lw[first] <= CAP && lh[first] <= CAP ? arena_alloc(total, 16, &dst) : HLE_ARENA_FULL;
+    if (off != HLE_ARENA_FULL) {
+        uint32_t pos = 0;
+        for (uint32_t l = 0; l < levels; l++) {
+            const uint32_t bytes = lw[first + l] * lh[first + l] * 4;
+            memcpy(dst + pos, lv[first + l], bytes);
+            pos += bytes;
+        }
+    }
+    w = lw[first];
+    h = lh[first];
+    for (unsigned i = 1; i < n; i++) {
+        g_free(lv[i]);
+    }
     hle_texpack_free(px);
+    if (off == HLE_ARENA_FULL) {
+        return false;                   /* no room this time: the game's own */
+    }
     HleCmdTex *c = hle_fe_begin(HLE_OP_TEX, sizeof(*c));
     c->id = id;
     c->xfmt = HLE_XFMT_A8B8G8R8;        /* bytes R, G, B, A */
@@ -467,10 +483,10 @@ static bool tex_define(uint32_t id, const uint32_t h5[5], const HleResDesc *dp,
         if (o1 > o0 && o1 <= ri.bytes) {
             const uint64_t hash = hle_texpack_hash(src + o0, o1 - o0, d.fmt, d.w, d.h, p8 ? pal : NULL,
                                                    p8 ? npal : 0);
-            if ((pack & 1) && texpack_define(id, hash, levels > 1)) {
+            if ((pack & 5) && texpack_define(id, hash, levels > 1)) {
                 return true;
             }
-            if ((pack & 2) && hle_texpack_dump_wanted(hash)) {
+            if ((pack & 6) && hle_texpack_dump_wanted(hash)) {
                 g_autofree uint8_t *rgba = tex_rgba(&d, fi, src, pal);
                 if (rgba) {
                     hle_texpack_dump(hash, rgba, d.w, d.h);

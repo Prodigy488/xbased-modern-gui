@@ -1,5 +1,33 @@
 # xbased changelog
 
+## 1.0.76.23 (Modern GUI fork)
+
+- Frame interpolation flickered on detailed backgrounds (reported on 1.0.76.22). The in-between frame was the
+  average of the two frames around it, each moved half-way. Each frame has its own aliasing and dither
+  pattern, and a move by part of a pixel softens, so the average kept about 57 % of a detailed picture's
+  finest detail (measured on a CPU model: point-sampled texture, motion 0 to 8 pixels a frame): sharp, soft,
+  sharp at half the frame rate. It is now the newer frame alone, moved half-way back, and that move is pulled
+  toward whole pixels (by an eighth of a pixel at most), where reading the picture loses nothing: 86 % on the
+  same model. The two frames are still compared, and where they disagree the frame is shown unmoved, as
+  before. (The first suspect, the search giving still, dithered backgrounds a motion, was modelled and is not
+  the cause: under 2 % of blocks, before and after.) Not run on a GPU.
+- Automatic texture upscaling (Settings > Video, "texauto" in the settings files; off). With it on, a game
+  writes its textures out and uses a pack as with those two settings, and when you leave the game the
+  textures that have no picture yet (none of your own in the title's folder, none in its auto/) are copied to
+  a folder of their own and handed to Real-ESRGAN (realesrgan-ncnn-vulkan -n realesrgan-x4plus -s 4), which
+  writes them four times the size into auto/ and runs on by itself. The next time the game starts they are
+  drawn. The program is not included: its portable release goes into a "realesrgan" folder beside xbased, or
+  in the data folder (the AppImage: ~/.local/share/xbased/realesrgan), or $XBASED_REALESRGAN names it. The
+  log says how many textures went to it, or that it wasn't found.
+  A pack's picture may now be up to 8192 a side and goes up at 2048 at most (halved until it fits), so a 4x
+  of a large texture is used at 2x; a file cut short (the PC turned off mid-way) is deleted and made again.
+  Your own file in the title's folder wins over auto/'s.
+  What to expect: upscaled textures take 16 times the memory at 4x, and DXT textures become uncompressed, so a
+  game heavy on textures can need several GB of video memory; tiling textures can show seams, since each is
+  upscaled on its own; folders with non-ASCII letters in their path are not handled on Windows yet. Tested on
+  Linux with a stand-in for the program (the right files queued, the program's arguments, it running on after
+  xbased exits, nothing queued twice); not with Real-ESRGAN itself and not on Windows.
+
 ## 1.0.76.22 (Modern GUI fork)
 
 Four additions, none of them run on a GPU here (the shaders compile for Vulkan 1.1 and 1.3; the parts that are

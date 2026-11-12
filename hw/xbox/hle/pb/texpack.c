@@ -76,15 +76,23 @@ static Set g_absent, g_dumped;
 static unsigned g_nloaded, g_ndumped;
 
 /* <base>textures/<title id>/ (and its dump/), made at first use */
+static char *dir;
+
+const char *hle_texpack_dir(void)
+{
+    return dir;
+}
+
 static const char *pack_dir(void)
 {
-    static char *dir;
     if (!dir) {
         dir = g_strdup_printf("%stextures/%08X/", hle_host_base_path(), g_hle.title.xbe.title_id);
         g_autofree char *dump = g_strdup_printf("%sdump", dir);
+        g_autofree char *aut = g_strdup_printf("%sauto", dir);
         g_mkdir_with_parents(dump, 0775);
+        g_mkdir_with_parents(aut, 0775);
         hle_log("hakuX-hle-front", "texture packs: %s (PNG files named by the textures' hashes; dump/ holds the "
-                "game's own, written out when that is on)", dir);
+                "game's own, written out when that is on; auto/ those an upscaler made of them)", dir);
     }
     return dir;
 }
@@ -105,21 +113,30 @@ uint8_t *hle_texpack_load(uint64_t hash, uint32_t *w, uint32_t *h)
     if (set_has(&g_absent, hash)) {
         return NULL;
     }
+    /* your own file first, then the upscaler's */
     g_autofree char *path = g_strdup_printf("%s%016llx.png", pack_dir(), (unsigned long long)hash);
     gchar *file = NULL;
     gsize len = 0;
+    bool made = false;
     if (!g_file_get_contents(path, &file, &len, NULL) || !file) {
-        set_add(&g_absent, hash);
-        return NULL;
+        g_free(path);
+        path = g_strdup_printf("%sauto/%016llx.png", pack_dir(), (unsigned long long)hash);
+        made = true;
+        if (!g_file_get_contents(path, &file, &len, NULL) || !file) {
+            set_add(&g_absent, hash);
+            return NULL;
+        }
     }
     int iw = 0, ih = 0, comp = 0;
     uint8_t *px = len <= INT32_MAX ? stbi_load_from_memory((const stbi_uc *)file, (int)len, &iw, &ih, &comp, 4) : NULL;
     g_free(file);
-    if (!px || iw < 1 || ih < 1 || iw > 4096 || ih > 4096) {
+    if (!px || iw < 1 || ih < 1 || iw > 8192 || ih > 8192) {
         hle_log("hakuX-hle-front", "texture packs: %s not used (%s)", path,
-                px ? "larger than 4096 pixels a side" : "not a PNG this reads");
+                px ? "larger than 8192 pixels a side" : "not a PNG this reads");
         if (px) {
             stbi_image_free(px);
+        } else if (made) {
+            remove(path);               /* an upscale cut short: made again after the next run */
         }
         set_add(&g_absent, hash);
         return NULL;
@@ -169,9 +186,9 @@ static void out_write(void *ctx, void *data, int size)
 void hle_texpack_dump(uint64_t hash, const uint8_t *rgba, uint32_t w, uint32_t h)
 {
     g_autofree char *path = g_strdup_printf("%sdump/%016llx.png", pack_dir(), (unsigned long long)hash);
-    gchar *have = NULL;
-    if (g_file_get_contents(path, &have, NULL, NULL)) {
-        g_free(have);                   /* written by an earlier run */
+    FILE *have = fopen(path, "rb");
+    if (have) {
+        fclose(have);                   /* written by an earlier run */
         return;
     }
     Out o = { 0 };
