@@ -1,4 +1,4 @@
-# xbased Modern GUI 1.0.76.26: game compatibility fixes, Autofix for stalled games, Linux AppImage
+# xbased Modern GUI 1.0.76.27: game compatibility fixes, Autofix for stalled games, Linux AppImage
 
 ```
 Changes since 1.0.76.2
@@ -39,6 +39,9 @@ New
   look like the game's texture is not used.
 - 1.0.76.26: Real-ESRGAN (the program and its x4plus model, about 40 MB) comes in the download, so automatic
   texture upscaling works without fetching anything. Its licences are in the realesrgan folder.
+- 1.0.76.27: automatic upscaling now takes on textures with transparency and palettized ones, which it refused
+  before (most of some games' textures): the upscaler gets the colour, the game's own alpha is kept. Textures
+  refused earlier are made again after the next run of the game.
 - Integer scaling (Settings > Video, off): the picture a whole number of times the console's lines tall, with
   borders. Pair it with the Nearest upscaler for square pixels.
 - Texture packs (Settings > Video, off): PNG files in hle/textures/<title id>/ (in the data folder) are drawn in
@@ -69,7 +72,7 @@ New
 - Settings > System > "Scan games for missing kernel functions": reads every game's default.xbe
   and writes compat_report.txt (the games with the most gaps first, and each missing function with
   how many games need it). "Open the scan report" opens it.
-- Linux: an AppImage (xbased-1.0.76.26-x86_64.AppImage). Needs a Vulkan driver and glibc 2.38 or newer (Ubuntu 24.04, Fedora 39, Debian 13); not run with a GPU or sound yet.
+- Linux: an AppImage (xbased-1.0.76.27-x86_64.AppImage). Needs a Vulkan driver and glibc 2.38 or newer (Ubuntu 24.04, Fedora 39, Debian 13); not run with a GPU or sound yet.
   Settings, saves and states are in ~/.local/share/xbased.
 
 Logs (to find out why a game stops or is silent)
@@ -83,4 +86,4 @@ Known
   missing: the game never asks the audio chip to play them. Not fixed yet.
 ```
 
-Downloads: `xbased-modern-gui-1.0.76.26-windows-x64.zip` (Windows 10/11 x64, Vulkan 1.1) and `xbased-1.0.76.26-x86_64.AppImage` (Linux x86-64). There is no macOS build: the emulator has no macOS port yet.
+Downloads: `xbased-modern-gui-1.0.76.27-windows-x64.zip` (Windows 10/11 x64, Vulkan 1.1) and `xbased-1.0.76.27-x86_64.AppImage` (Linux x86-64). There is no macOS build: the emulator has no macOS port yet.

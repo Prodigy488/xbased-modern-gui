@@ -1,5 +1,24 @@
 # xbased changelog
 
+## 1.0.76.27 (Modern GUI fork)
+
+- Automatic texture upscaling took on few of some games' textures. A log of 1.0.76.26 (title 41430007) ends
+  "this run drew 13 upscaled textures and refused 180", and the refusals' lines say which: 22 of the 24 logged
+  are palettized textures (format 0x0B), the other two A8R8G8B8, with the upscaled picture's alpha far from
+  the texture's (up to all of it: 255 of 255) and its colour often too (40 to 240, 28 allowed); two had the
+  colour right (0.1) and only the alpha wrong. The textures that passed are the ones without an alpha
+  channel to speak of. So what Real-ESRGAN's program makes of a PNG with an alpha channel is not to be used,
+  on this PC at least. Now:
+  - a texture is written out as colour alone (a three-channel PNG), which is the path the passing ones took;
+  - the alpha drawn is always the game's own, read bilinearly at the picture's size, whatever the file has;
+  - the check is on colour alone (where the texture isn't transparent; everywhere if nearly all of it is);
+  - a picture refused is removed with its dump, so the texture is written out again in the new form and
+    upscaled after that run; one refused a second time is marked (auto/<hash>.bad) and left alone;
+  - textures under 16 texels a side are left as they are (an 8 x 8 came back as noise).
+  Pictures already made that have the colour right are used as they are, with the game's alpha.
+  Checked on a CPU: the alpha's transfer and the check. Whether the colour of those textures now comes back
+  right is for the next log to say ("drew N, refused M", and each refusal's line).
+
 ## 1.0.76.26 (Modern GUI fork)
 
 - Real-ESRGAN comes with xbased: realesrgan-ncnn-vulkan (release v0.2.5.0, 20220424) and its

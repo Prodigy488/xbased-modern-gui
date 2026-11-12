@@ -93,6 +93,12 @@ int nc_texauto_run(const char *dir, const char *exe_dir, const char *data_dir, c
         if (there(a) || there(b)) {
             continue;
         }
+        /* refused twice (auto/<name>.bad, hle_texpack_reject): not again */
+        const size_t stem = SDL_strlen(f[i]) > 4 ? SDL_strlen(f[i]) - 4 : 0;
+        SDL_snprintf(a, sizeof(a), "%s/%.*s.bad", aut, (int)stem, f[i]);
+        if (there(a)) {
+            continue;
+        }
         if (!todo && !SDL_CreateDirectory(queue)) {
             break;
         }

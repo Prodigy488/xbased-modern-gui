@@ -22,7 +22,7 @@ bool hle_texpack_has(uint64_t hash);
  * the upscaler's (auto/), which the caller checks against the game's texture (hle_texpack_reject if unlike). */
 uint8_t *hle_texpack_load(uint64_t hash, uint32_t *w, uint32_t *h, bool *from_auto);
 void hle_texpack_reject(uint64_t hash, uint32_t w, uint32_t h, uint32_t ow, uint32_t oh, uint32_t fmt, bool decoded,
-                        float colour, float alpha);
+                        float colour);
 /* A picture went up in the texture's place (the log, the counts). */
 void hle_texpack_used(uint64_t hash, uint32_t w, uint32_t h, bool from_auto);
 /* How many pictures were used and how many of the upscaler's refused, this run. */

@@ -342,43 +342,66 @@ static uint8_t *tex_rgba(const HleResDesc *d, const HleFmtInfo *fi, const uint8_
     return o;
 }
 
-/* An upscaler's picture against the game's own texture: it must be a whole number of times its size and, averaged
- * back down, look like it (colour where the texture isn't transparent, and its alpha). A picture that fails (an
- * upscaler's black or garbled output, a file of another texture) is not used. */
+/* An upscaler's picture against the game's own texture: it must be a whole number of times its size and,
+ * averaged back down, look like it in colour (where the texture isn't transparent; everywhere if nearly all of
+ * it is). A picture that fails (an upscaler's black or garbled output) is not used. The picture's alpha is not
+ * looked at: it is replaced (texpack_alpha). */
 static bool texpack_like(const uint8_t *px, uint32_t w, uint32_t h, const uint8_t *own, uint32_t ow, uint32_t oh,
-                         float *colour, float *alpha)
+                         float *colour)
 {
-    *colour = *alpha = -1.0f;           /* not compared */
+    *colour = -1.0f;                    /* not compared */
     if (!ow || !oh || w % ow || h % oh || w / ow != h / oh) {
         return false;
     }
     const uint32_t k = w / ow;
     /* a grid of at most 64 x 64 of the texture's texels is enough to tell */
     const uint32_t sx = MAX(ow / 64, 1u), sy = MAX(oh / 64, 1u);
-    double dc = 0.0, wc = 0.0, da = 0.0, n = 0.0;
+    double dc = 0.0, wc = 0.0, du = 0.0, n = 0.0;
     for (uint32_t y = 0; y < oh; y += sy) {
         for (uint32_t x = 0; x < ow; x += sx) {
-            uint32_t sum[4] = { 0 };
+            uint32_t sum[3] = { 0 };
             for (uint32_t j = 0; j < k; j++) {
                 const uint8_t *p = px + (((size_t)y * k + j) * w + (size_t)x * k) * 4;
                 for (uint32_t i = 0; i < k; i++, p += 4) {
                     sum[0] += p[0];
                     sum[1] += p[1];
                     sum[2] += p[2];
-                    sum[3] += p[3];
                 }
             }
             const uint8_t *o = own + ((size_t)y * ow + x) * 4;
             const double a = o[3] / 255.0, kk = (double)k * k;
-            dc += a * (fabs(sum[0] / kk - o[0]) + fabs(sum[1] / kk - o[1]) + fabs(sum[2] / kk - o[2])) / 3.0;
+            const double e = (fabs(sum[0] / kk - o[0]) + fabs(sum[1] / kk - o[1]) + fabs(sum[2] / kk - o[2])) / 3.0;
+            dc += a * e;
             wc += a;
-            da += fabs(sum[3] / kk - o[3]);
+            du += e;
             n += 1.0;
         }
     }
-    *colour = wc < 1.0 ? 0.0f : (float)(dc / wc);
-    *alpha = (float)(da / n);
-    return *colour < 28.0f && *alpha < 28.0f;
+    *colour = (float)(wc > 0.05 * n ? dc / wc : du / n);
+    return *colour < 28.0f;
+}
+
+/* The game's own alpha into the upscaler's picture (k times the size), read bilinearly. The upscaler is given
+ * colour alone: what it made of textures with an alpha channel came back wrong in alpha and often in colour (a
+ * log of 1.0.76.26: 180 of 193 pictures refused, nearly all of palettized or A8R8G8B8 textures). */
+static void texpack_alpha(uint8_t *px, uint32_t w, uint32_t h, const uint8_t *own, uint32_t ow, uint32_t oh)
+{
+    const float k = (float)w / (float)ow;
+    for (uint32_t y = 0; y < h; y++) {
+        const float fy = MAX(((float)y + 0.5f) / k - 0.5f, 0.0f);
+        const uint32_t y0 = MIN((uint32_t)fy, oh - 1), y1 = MIN(y0 + 1, oh - 1);
+        const float ty = fy - (float)y0;
+        for (uint32_t x = 0; x < w; x++) {
+            const float fx = MAX(((float)x + 0.5f) / k - 0.5f, 0.0f);
+            const uint32_t x0 = MIN((uint32_t)fx, ow - 1), x1 = MIN(x0 + 1, ow - 1);
+            const float tx = fx - (float)x0;
+            const float a = ((float)own[((size_t)y0 * ow + x0) * 4 + 3] * (1.0f - tx) +
+                             (float)own[((size_t)y0 * ow + x1) * 4 + 3] * tx) * (1.0f - ty) +
+                            ((float)own[((size_t)y1 * ow + x0) * 4 + 3] * (1.0f - tx) +
+                             (float)own[((size_t)y1 * ow + x1) * 4 + 3] * tx) * ty;
+            px[((size_t)y * w + x) * 4 + 3] = (uint8_t)(a + 0.5f);
+        }
+    }
 }
 
 static bool g_pack_deferred;
@@ -429,12 +452,13 @@ static int texpack_define(uint32_t id, uint64_t hash, bool mips, const HleResDes
     }
     if (made) {
         g_autofree uint8_t *own = tex_rgba(d, fi, src, pal);
-        float dc = -1.0f, da = -1.0f;
-        if (!own || !texpack_like(px, w, h, own, d->w, d->h, &dc, &da)) {
-            hle_texpack_reject(hash, w, h, d->w, d->h, d->fmt, own != NULL, dc, da);
+        float dc = -1.0f;
+        if (!own || !texpack_like(px, w, h, own, d->w, d->h, &dc)) {
+            hle_texpack_reject(hash, w, h, d->w, d->h, d->fmt, own != NULL, dc);
             hle_texpack_free(px);
             return 0;
         }
+        texpack_alpha(px, w, h, own, d->w, d->h);
     }
     hle_texpack_used(hash, w, h, made);
     /* its levels, each the average of four texels of the one above, on the heap (the arena's memory reads
@@ -564,11 +588,12 @@ static bool tex_define(uint32_t id, const uint32_t h5[5], const HleResDesc *dp,
                  MAX(depth >> l, 1u);
     }
     total *= faces;
-    /* Texture packs: a plain texture (not a cube, a volume, a linear or a signed one) is known by a hash of its
+    /* Texture packs: a plain texture (not a cube, a volume, a linear or a signed one, 16 texels a side or more:
+     * an upscaler makes nothing of less) is known by a hash of its
      * largest level as the game holds it; the pack's picture goes up in its place, or the game's own is written
      * out for a pack to be made from. */
     const int pack = hle_host_texpack();
-    if (pack && !vol && faces == 1 && !h5[2] && !(fi->flags & HLE_FI_LIN) && d.w >= 4 && d.h >= 4) {
+    if (pack && !vol && faces == 1 && !h5[2] && !(fi->flags & HLE_FI_LIN) && d.w >= 16 && d.h >= 16) {
         uint32_t p0, p1;
         const uint32_t o0 = hle_res_subresource(&d, 0, 0, &p0);
         const uint32_t o1 = levels > 1 ? hle_res_subresource(&d, 0, 1, &p1) : ri.bytes;

@@ -127,22 +127,45 @@ bool hle_texpack_has(uint64_t hash)
     }
     g_autofree char *own = g_strdup_printf("%s%016llx.png", pack_dir(), (unsigned long long)hash);
     g_autofree char *aut = g_strdup_printf("%sauto/%016llx.png", pack_dir(), (unsigned long long)hash);
-    const bool there = file_there(own) || file_there(aut);
+    g_autofree char *bad = g_strdup_printf("%sauto/%016llx.bad", pack_dir(), (unsigned long long)hash);
+    const bool there = file_there(own) || (file_there(aut) && !file_there(bad));
     set_add(there ? &g_present : &g_absent, hash);
     return there;
 }
 
-void hle_texpack_reject(uint64_t hash, uint32_t w, uint32_t h, uint32_t ow, uint32_t oh, uint32_t fmt, bool decoded,
-                        float colour, float alpha)
+static void touch(const char *path)
 {
+    FILE *f = fopen(path, "wb");
+    if (f) {
+        fclose(f);
+    }
+}
+
+/* An upscaler's picture was refused. The first time, it and the texture's dump are removed, so the texture is
+ * written out again (colour alone now) and upscaled again after this run (auto/<hash>.redo remembers); refused
+ * a second time, auto/<hash>.bad says to leave it (neither read nor made again). */
+void hle_texpack_reject(uint64_t hash, uint32_t w, uint32_t h, uint32_t ow, uint32_t oh, uint32_t fmt, bool decoded,
+                        float colour)
+{
+    const unsigned long long x = (unsigned long long)hash;
+    g_autofree char *png = g_strdup_printf("%sauto/%016llx.png", pack_dir(), x);
+    g_autofree char *redo = g_strdup_printf("%sauto/%016llx.redo", pack_dir(), x);
+    g_autofree char *bad = g_strdup_printf("%sauto/%016llx.bad", pack_dir(), x);
+    g_autofree char *dump = g_strdup_printf("%sdump/%016llx.png", pack_dir(), x);
+    const bool again = !file_there(redo);
+    if (again) {
+        touch(redo);
+        remove(dump);
+    } else {
+        touch(bad);
+    }
+    remove(png);
     set_add(&g_absent, hash);
     if (g_nrejected++ < 24) {
-        /* the numbers say why: sizes that don't divide, a format this can't decode, or how far (of 255) the
-         * picture averaged down is from the texture in colour and in alpha (28 is the most allowed) */
         hle_log("hakuX-hle-front", "texture packs: auto/%016llx.png (%ux%u) not used: the game's texture is %ux%u "
-                "format 0x%02X%s, colour off by %.1f, alpha off by %.1f (#%u of 24 logged)",
-                (unsigned long long)hash, w, h, ow, oh, fmt, decoded ? "" : " (not decoded)", (double)colour,
-                (double)alpha, g_nrejected);
+                "format 0x%02X%s, colour off by %.1f of 255 (28 allowed); %s (#%u of 24 logged)", x, w, h, ow, oh,
+                fmt, decoded ? "" : " (not decoded)", (double)colour,
+                again ? "to be made again after this run" : "the second time: left alone from now on", g_nrejected);
     }
 }
 
@@ -242,8 +265,17 @@ void hle_texpack_dump(uint64_t hash, const uint8_t *rgba, uint32_t w, uint32_t h
         fclose(have);                   /* written by an earlier run */
         return;
     }
+    /* colour alone, three channels: the upscaler's handling of an alpha channel is not to be relied on, and the
+     * texture's own alpha is what is drawn in any case (pbres.c texpack_alpha) */
+    const size_t n = (size_t)w * h;
+    g_autofree uint8_t *rgb = g_malloc(n * 3);
+    for (size_t i = 0; i < n; i++) {
+        rgb[i * 3] = rgba[i * 4];
+        rgb[i * 3 + 1] = rgba[i * 4 + 1];
+        rgb[i * 3 + 2] = rgba[i * 4 + 2];
+    }
     Out o = { 0 };
-    if (stbi_write_png_to_func(out_write, &o, (int)w, (int)h, 4, rgba, (int)w * 4) && o.n) {
+    if (stbi_write_png_to_func(out_write, &o, (int)w, (int)h, 3, rgb, (int)w * 3) && o.n) {
         g_file_set_contents(path, (const gchar *)o.p, (gssize)o.n, NULL);
         if (g_ndumped++ < 8 || !(g_ndumped & 255)) {
             hle_log("hakuX-hle-front", "texture packs: wrote dump/%016llx.png (%ux%u; %u so far)",
