@@ -1,5 +1,19 @@
 # xbased changelog
 
+## 1.0.76.20 (Modern GUI fork)
+
+- Frame interpolation smeared low-contrast content that moves fast (a dim scene, fog, sky, distant ground in
+  a camera turn). The motion search leaned toward "no motion" by a fixed amount a step (0.12 on the sum of 16
+  luma differences), which is more than the whole difference such content has: it was given no motion, and
+  the two frames, alike enough to pass the check, were blended one over the other. The lean is now a share of
+  the difference (3 % a step, plus a trace to settle flat areas), so it weighs the same on a dim picture as
+  on a bright one, and the check for showing the real frame instead is stricter (it also looks at the two
+  samples themselves). On a CPU model of the search and the mix, content of 8 % contrast moving 12 px a frame
+  went from 38 % error against the true half-way frame to none (52 % to 3 % with dither noise), content of
+  4 % and 2 % contrast from about 100 % (a plain double image) to none (7 % and 15 % with dither); a still,
+  dithered picture still gets no motion; high-contrast content is unchanged. Both shaders compile (Vulkan 1.1
+  and 1.3); not run on a GPU.
+
 ## 1.0.76.19 (Modern GUI fork)
 
 - Frame interpolation looked slightly smeared (reported on 1.0.76.18). Three causes, three changes: the

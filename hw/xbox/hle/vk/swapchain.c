@@ -708,7 +708,9 @@ static const char k_fs_copy[] =
     "}\n";
 /* Motion by block matching, one block (extra.x frame pixels square) a pixel of the image drawn: how the
  * content of the previous frame (u_tex2) moved into the frame (u_tex). First the best of 17 x 17 shifts a step
- * (extra.y pixels) apart, judged on 16 samples of the block's luma with a small lean to the still; then
+ * (extra.y pixels) apart, judged on 16 samples of the block's luma with a small lean to the still (a share of
+ * the difference, so it weighs the same on a dim picture as on a bright one: a fixed 0.12 a step outweighed
+ * the whole difference of low-contrast content, which then got no motion and came out doubled); then
  * two refinements on 64 samples, a pixel's step over 5 x 5 shifts and half a pixel's over 3 x 3 (the centre
  * kept unless another is better), for the shift to the half pixel the in-between frame needs. Written as the
  * shift over 10 steps, 0.5 the none. */
@@ -727,11 +729,13 @@ static const char k_fs_ilme[] =
     "  for (int j = -8; j <= 8; j++) {\n"
     "    for (int i = -8; i <= 8; i++) {\n"
     "      vec2 d = vec2(float(i), float(j)) * stp;\n"
-    "      float sad = 0.12 * float(abs(i) + abs(j));\n"
+    "      float sad = 0.0;\n"
     "      for (int k = 0; k < 16; k++) {\n"
     "        vec2 p = c + (vec2(float(k & 3), float(k >> 2)) - 1.5) * (B * 0.25) - d;\n"
     "        sad += abs(cur[k] - lum(p, u_tex2, size));\n"
     "      }\n"
+    "      float far = float(abs(i) + abs(j));\n"
+    "      sad = sad * (1.0 + 0.03 * far) + 0.004 * far;\n"
     "      if (sad < best) { best = sad; bv = d; }\n"
     "    }\n"
     "  }\n"
@@ -761,8 +765,8 @@ static const char k_fs_ilme[] =
  * shift's 10 steps in pixels, extra.y a block's size). Each pixel takes, of the four nearest blocks' motions and
  * none, the one on which the two frames agree best around it (so a block's edge doesn't drag its neighbour's
  * motion over it), and is both frames along it, read with a Catmull-Rom filter (bilinear blurs a half-pixel
- * shift). Where they still disagree it is this frame alone, so a wrong motion shows the frame itself early and
- * never a double image. */
+ * shift). Where they still disagree (around the pixel, or the two samples themselves) it is this frame alone, so
+ * a wrong motion shows the frame itself early and never a double image. */
 static const char k_fs_ilmix[] =
     "vec3 cr(sampler2D t, vec2 uv) {\n"
     "  vec2 size = vec2(textureSize(t, 0));\n"
@@ -810,7 +814,8 @@ static const char k_fs_ilmix[] =
     "  vec3 a = cr(u_tex2, v_uv - 0.5 * bm / size);\n"
     "  vec3 b = cr(u_tex, v_uv + 0.5 * bm / size);\n"
     "  vec3 c = textureLod(u_tex, v_uv, 0.0).rgb;\n"
-    "  o = vec4(mix(0.5 * (a + b), c, smoothstep(0.06, 0.18, best)), 1.0);\n"
+    "  float off = max(best, 0.5 * dot(abs(a - b), vec3(1.0 / 3.0)));\n"
+    "  o = vec4(mix(0.5 * (a + b), c, smoothstep(0.035, 0.11, off)), 1.0);\n"
     "}\n";
 
 #include "hw/xbox/hle/vk/smaa.inc"
