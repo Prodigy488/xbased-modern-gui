@@ -141,8 +141,11 @@ static int run_one(const char *dir, const char *exe_dir, const char *data_dir, c
         return 0;
     }
     SDL_snprintf(models, sizeof(models), "%.*smodels", (int)tdir, tool);
+    /* "-t 128": small tiles, so that each GPU dispatch of the upscaler is short. With its own choice (large
+     * tiles) a batch can hold the GPU for seconds beside a game drawn at 4x, and Windows resets a GPU that
+     * does not answer in about 2 s (VK_ERROR_DEVICE_LOST in the game's vkQueueSubmit2). */
     const char *args[] = { tool, "-i", queue, "-o", aut, "-n", "realesrgan-x4plus", "-s", "4", "-f", "png",
-                           "-m", models, NULL };
+                           "-m", models, "-t", "128", NULL };
     SDL_PropertiesID p = SDL_CreateProperties();
     SDL_SetPointerProperty(p, SDL_PROP_PROCESS_CREATE_ARGS_POINTER, (void *)args);
     /* nothing of its output wanted (it writes its progress); not a "background" process, whose end can't be
