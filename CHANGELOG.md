@@ -1,5 +1,12 @@
 # xbased changelog
 
+## 1.0.76.35 (Modern GUI fork)
+
+- F9 takes a graphics capture while a game runs, for a bug report: the next frame's render targets go to
+  hle_shadow/ and 800 draws, with their textures and sampler registers, to the log. It sets the same debug
+  properties as props.ini (debug.hakux.rtdump, debug.hakux.pbdraws), which only act on a value that changes
+  while the game runs and so were awkward to use from the file; each press is a new value.
+
 ## 1.0.76.34 (Modern GUI fork)
 
 - Voice chat (experimental, Settings > Audio > "Voice chat headset", off): an Xbox Live Communicator, the Xbox's

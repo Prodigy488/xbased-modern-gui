@@ -1652,7 +1652,7 @@ static const char *pick_disc(void)
 }
 
 #ifndef XBASED_VERSION
-#define XBASED_VERSION "1.0.76.34"
+#define XBASED_VERSION "1.0.76.35"
 #endif
 
 static void rm_tree(const char *path)
@@ -2154,6 +2154,18 @@ int main(int argc, char *argv[])
                 } else if (ev.key.key == g_map.hotkey[IM_HK_TURBO]) {
                     nc_win_prop_set("debug.hakux.uncap", "1");  /* frames as fast as they come, while held */
                     nc_win_prop_set("debug.hakux.fpscap", "0");
+                } else if (ev.key.key == SDLK_F9) {
+                    /* a graphics capture for a bug report: the next frame's render targets
+                     * (hle_shadow/) and 800 draws with their textures in the log; each press a
+                     * new value, which is what the debug properties wait for */
+                    static int s_cap;
+                    char v[16];
+                    snprintf(v, sizeof(v), "%d", ++s_cap);
+                    nc_win_prop_set("debug.hakux.rtdump", v);
+                    snprintf(v, sizeof(v), "%d", 800 + s_cap);
+                    nc_win_prop_set("debug.hakux.pbdraws", v);
+                    nc_log("hakuX-app", "capture %d: the next frame's render targets and 800 draws", s_cap);
+                    notice("Graphics capture taken (F9): see the log and hle_shadow", NULL);
                 } else if (ev.key.key == g_map.hotkey[IM_HK_SHOT]) {
                     screenshot();
                 } else if (ev.key.key == g_map.hotkey[IM_HK_MENU]) {
