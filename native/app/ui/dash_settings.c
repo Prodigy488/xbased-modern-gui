@@ -288,6 +288,31 @@ void scr_settings(void)
         static const char *av[] = {"stereo", "5.1"};
         const char *an[] = {T(S_STEREO), T(S_SURROUND51)};
         opt_choice(&l, S_AUDIO_OUTPUT, "audio", av, an, 2, "stereo");
+        {
+            /* the sound devices the system lists now (a game's start picks the one chosen, or the default if it is
+             * gone); the names are SDL's, the same the game's output looks for */
+            enum { ND = 12 };
+            static char dn[ND][160];
+            static const char *dv[ND], *dnm[ND];
+            int n = 1;
+            dv[0] = "default";
+            dnm[0] = T(S_AUDIO_DEVICE_DEFAULT);
+            if (SDL_InitSubSystem(SDL_INIT_AUDIO)) {
+                int cnt = 0;
+                SDL_AudioDeviceID *ids = SDL_GetAudioPlaybackDevices(&cnt);
+                for (int i = 0; ids && i < cnt && n < ND; i++) {
+                    const char *nm = SDL_GetAudioDeviceName(ids[i]);
+                    if (nm && nm[0] && strcmp(nm, "default")) {
+                        snprintf(dn[n], sizeof(dn[n]), "%s", nm);
+                        dv[n] = dn[n];
+                        dnm[n] = dn[n];
+                        n++;
+                    }
+                }
+                SDL_free(ids);
+            }
+            opt_choice(&l, S_AUDIO_DEVICE, "audio.device", dv, dnm, n, "default");
+        }
         opt_int(&l, S_VOLUME, "volume", 0, 100, 5, 100, "%");
         opt_bool(&l, S_MUTE_BG, "mutebg", true, false);
         opt_bool(&l, S_UI_SOUNDS, "ui.sounds", false, false);

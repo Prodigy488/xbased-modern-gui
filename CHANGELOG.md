@@ -1,5 +1,19 @@
 # xbased changelog
 
+## 1.0.76.33 (Modern GUI fork)
+
+- Sound device: Settings > Audio > "Sound device" lists the playback devices the system has and the one chosen
+  is used from the next game start (the default one if it is not there any more or will not open; the log says
+  which). Chosen by name, global or per game.
+- Upscaling while playing is lighter: a run beside a game takes at most about 2 million input pixels (about eight
+  textures of 512 a side, the newest dumps first: what the game shows now), so the GPU is held for a second or so
+  and let go; the run when a game ends still takes everything. Textures of 1024 or more a side are not made
+  (the pictures are used at 1024 at most, so a 4x of them was only made smaller again). Tested here with a
+  stand-in for the program: which files it is handed, in which order, for a budget and for none.
+- Looked through with clang's static analyzer (the new files, the presenter, the back end, the draw and window
+  code): nothing real found; one report (a possible null render target in a channel clear) cannot happen, the
+  caller drops the target flag without one.
+
 ## 1.0.76.32 (Modern GUI fork)
 
 - Texture pack pictures are capped at 1024 a side for every game and GPU (2048 before; an xbased.ini that says

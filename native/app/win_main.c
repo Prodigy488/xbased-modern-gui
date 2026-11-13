@@ -77,6 +77,7 @@
 /* native/dev/apu/out.c */
 void nc_audio_set_paused(bool on);
 void nc_audio_set_volume(float v);
+void nc_audio_set_device(const char *name);
 /* native/dev/ohci.c */
 void nc_dev_ohci_set_pads(unsigned mask);
 /* hw/xbox/hle/pb/pbmode.h */
@@ -347,6 +348,7 @@ static int SDLCALL texlive_thread(void *arg)
 {
     (void)arg;
     char note[2600];
+    nc_texauto_set_budget(2000000);     /* about 8 textures of 512 a side: a second or so of the GPU, then it lets go */
     const int n = nc_texauto_run(hle_texpack_dir(), g_exe_dir, g_data_dir, note, sizeof(note));
     if (n > 0) {
         nc_log("hakuX-app", "texture upscaling (while playing): %s", note);
@@ -365,6 +367,7 @@ static _Noreturn void exit_now(int code)
     /* automatic texture upscaling: what this run wrote out goes to the upscaler, which runs on after it */
     if ((hle_host_texpack() & 4) && hle_texpack_dir()) {
         char note[2600];
+        nc_texauto_set_budget(0);       /* the game is over: everything that is waiting */
         const int n = nc_texauto_run(hle_texpack_dir(), g_exe_dir, g_data_dir, note, sizeof(note));
         if (n || note[0]) {
             nc_log("hakuX-app", "texture upscaling: %s", note[0] ? note : "nothing new");
@@ -1642,7 +1645,7 @@ static const char *pick_disc(void)
 }
 
 #ifndef XBASED_VERSION
-#define XBASED_VERSION "1.0.76.32"
+#define XBASED_VERSION "1.0.76.33"
 #endif
 
 static void rm_tree(const char *path)
@@ -1909,6 +1912,8 @@ int main(int argc, char *argv[])
             hle_present_set_crt(atoi(a + 4));
         } else if (!strncmp(a, "vsync=", 6)) {
             hle_present_set_vsync(atoi(a + 6) != 0);
+        } else if (!strncmp(a, "audio.device=", 13)) {
+            nc_audio_set_device(a + 13);
         } else if (!strncmp(a, "volume=", 7)) {
             g_volume = atoi(a + 7) / 100.0f;
             nc_audio_set_volume(g_volume);

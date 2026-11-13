@@ -442,4 +442,5 @@ XE(S_OG_STATUS_READY, "Ready")
 XE(S_OG_HELP_NONE, "Add the qcow2 hard disk image of an Xbox that has its dashboard on the C: drive (the image xemu uses). Only its dashboard files are read; nothing in the image is changed, and your saves stay in xbased.")
 XE(S_OG_HELP_READY, "The Xbox dashboard runs in its own window like a game. Press the Guide button (or Back+Start, or Esc) and choose Quit to come back here. Language and video settings changed there carry over to xbased, and the other way round.")
 XE(S_OG_HELP_INSIGNIA, "Create or manage your Insignia account here: the dashboard's Xbox Live pages. Choose Network: Insignia first (Insignia tab).")
-
+XE(S_AUDIO_DEVICE, "Sound device (next game start)")
+XE(S_AUDIO_DEVICE_DEFAULT, "System default")

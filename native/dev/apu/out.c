@@ -294,6 +294,37 @@ void nc_audio_set_paused(bool on)
  * for what the device will play next; the ring gives it, padded with
  * silence as AAudio's callback was. */
 static SDL_AudioStream *g_sdl;
+static char g_dev_name[256];       /* the output device the user chose (its name), empty: the system's default */
+
+/* The playback device to use by its name (as SDL lists them; "" or "default": the system's). Takes effect when the
+ * output next opens (a game's start). */
+void nc_audio_set_device(const char *name)
+{
+    snprintf(g_dev_name, sizeof(g_dev_name), "%s", name && strcmp(name, "default") ? name : "");
+}
+
+/* the chosen device's id, or the default one if there is none chosen or it is not there any more (unplugged) */
+static SDL_AudioDeviceID pick_device(void)
+{
+    if (!g_dev_name[0]) {
+        return SDL_AUDIO_DEVICE_DEFAULT_PLAYBACK;
+    }
+    int n = 0;
+    SDL_AudioDeviceID *ids = SDL_GetAudioPlaybackDevices(&n);
+    SDL_AudioDeviceID found = 0;
+    for (int i = 0; ids && i < n && !found; i++) {
+        const char *nm = SDL_GetAudioDeviceName(ids[i]);
+        if (nm && !strcmp(nm, g_dev_name)) {
+            found = ids[i];
+        }
+    }
+    SDL_free(ids);
+    if (!found) {
+        nc_log("hakuX-apu", "output device \"%s\" is not there: the default one is used", g_dev_name);
+        return SDL_AUDIO_DEVICE_DEFAULT_PLAYBACK;
+    }
+    return found;
+}
 static float g_volume = 1.0f;
 
 static void SDLCALL on_sdl(void *user, SDL_AudioStream *s, int additional, int total)
@@ -346,7 +377,13 @@ int apu_out_open(int capacity_bytes, int samples, pthread_cond_t *wake)
     SDL_SetHint(SDL_HINT_AUDIO_DEVICE_SAMPLE_FRAMES, frames);
     const SDL_AudioSpec spec = {SDL_AUDIO_S16LE, g_apu_out_channels, OUT_RATE};
     if (SDL_InitSubSystem(SDL_INIT_AUDIO)) {
-        g_sdl = SDL_OpenAudioDeviceStream(SDL_AUDIO_DEVICE_DEFAULT_PLAYBACK, &spec, on_sdl, NULL);
+        g_sdl = SDL_OpenAudioDeviceStream(pick_device(), &spec, on_sdl, NULL);
+        if (!g_sdl && g_dev_name[0]) {
+            /* the chosen one would not open: the default does, sound is better than none */
+            nc_log("hakuX-apu", "output device \"%s\" did not open (SDL: %s): the default one is used", g_dev_name,
+                   SDL_GetError());
+            g_sdl = SDL_OpenAudioDeviceStream(SDL_AUDIO_DEVICE_DEFAULT_PLAYBACK, &spec, on_sdl, NULL);
+        }
     }
     if (!g_sdl) {
         nc_log("hakuX-apu", "no output stream (SDL: %s); draining without sound", SDL_GetError());

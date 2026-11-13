@@ -53,6 +53,44 @@ static bool find_tool(const char *exe_dir, const char *data_dir, char *tool, siz
  * every few seconds during a game (win_main.c) as well as at its end. */
 static SDL_Process *g_job;
 static SDL_AtomicInt g_in;
+/* How much one run takes: input pixels (0: all that is waiting). A run beside a game is kept small, so that it
+ * holds the GPU for a second or so and then lets go; the run when a game ends takes everything. */
+static int g_budget;
+
+void nc_texauto_set_budget(int pixels)
+{
+    g_budget = pixels;
+}
+
+/* The picture's size from its PNG header (8 bytes of signature, then IHDR: width and height, big-endian). */
+static bool png_size(const char *path, int *w, int *h)
+{
+    SDL_IOStream *io = SDL_IOFromFile(path, "rb");
+    if (!io) {
+        return false;
+    }
+    unsigned char b[24];
+    const bool ok = SDL_ReadIO(io, b, sizeof(b)) == sizeof(b) && !SDL_memcmp(b + 12, "IHDR", 4);
+    SDL_CloseIO(io);
+    if (!ok) {
+        return false;
+    }
+    *w = b[16] << 24 | b[17] << 16 | b[18] << 8 | b[19];
+    *h = b[20] << 24 | b[21] << 16 | b[22] << 8 | b[23];
+    return *w > 0 && *h > 0;
+}
+
+typedef struct Cand {
+    char name[96];
+    SDL_Time mtime;
+    int px;
+} Cand;
+
+static int newer_first(const void *x, const void *y)
+{
+    const Cand *a = x, *b = y;
+    return a->mtime < b->mtime ? 1 : a->mtime > b->mtime ? -1 : 0;
+}
 
 static int run_one(const char *dir, const char *exe_dir, const char *data_dir, char *note, size_t note_n);
 
@@ -111,11 +149,15 @@ static int run_one(const char *dir, const char *exe_dir, const char *data_dir, c
         }
     }
     SDL_free(old);
-    /* this run's input: the dumped textures with no picture of the same name in the pack or in auto/ */
-    int nf = 0, todo = 0;
+    /* this run's input: the dumped textures with no picture of the same name in the pack or in auto/, and with
+     * something to gain: pictures are used at 1024 a side at most (pbres.c texpack_cap), so a texture that is
+     * 1024 or more already has no use for a 4x picture (it would only be made smaller again). The newest dumps
+     * first (what the game is showing now), and up to the budget. */
+    int nf = 0, todo = 0, ncand = 0;
     char **f = SDL_GlobDirectory(dump, "*.png", 0, &nf);
+    Cand *cand = nf > 0 ? SDL_calloc((size_t)nf, sizeof(Cand)) : NULL;
     SDL_snprintf(queue, sizeof(queue), "%s/queue-%lld", dump, (long long)time(NULL));
-    for (int i = 0; f && i < nf; i++) {
+    for (int i = 0; cand && f && i < nf; i++) {
         SDL_snprintf(a, sizeof(a), "%s/%s", aut, f[i]);
         SDL_snprintf(b, sizeof(b), "%s%s", dir, f[i]);
         if (there(a) || there(b)) {
@@ -127,15 +169,39 @@ static int run_one(const char *dir, const char *exe_dir, const char *data_dir, c
         if (there(a)) {
             continue;
         }
+        SDL_snprintf(a, sizeof(a), "%s/%s", dump, f[i]);
+        int w = 0, h = 0;
+        if (!png_size(a, &w, &h) || w >= 1024 || h >= 1024) {
+            continue;
+        }
+        SDL_PathInfo pi;
+        if (SDL_strlen(f[i]) >= sizeof(cand[0].name) || !SDL_GetPathInfo(a, &pi)) {
+            continue;
+        }
+        SDL_strlcpy(cand[ncand].name, f[i], sizeof(cand[ncand].name));
+        cand[ncand].mtime = pi.modify_time;
+        cand[ncand].px = w * h;
+        ncand++;
+    }
+    if (g_budget > 0) {
+        SDL_qsort(cand, (size_t)ncand, sizeof(Cand), newer_first);
+    }
+    long long used_px = 0;
+    for (int i = 0; i < ncand; i++) {
+        if (g_budget > 0 && todo && used_px + cand[i].px > g_budget) {
+            continue;           /* too much for this run: a later one (a smaller one may still fit) */
+        }
         if (!todo && !SDL_CreateDirectory(queue)) {
             break;
         }
-        SDL_snprintf(a, sizeof(a), "%s/%s", dump, f[i]);
-        SDL_snprintf(b, sizeof(b), "%s/%s", queue, f[i]);
+        SDL_snprintf(a, sizeof(a), "%s/%s", dump, cand[i].name);
+        SDL_snprintf(b, sizeof(b), "%s/%s", queue, cand[i].name);
         if (SDL_CopyFile(a, b)) {
             todo++;
+            used_px += cand[i].px;
         }
     }
+    SDL_free(cand);
     SDL_free(f);
     if (!todo) {
         return 0;
