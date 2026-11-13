@@ -56,6 +56,7 @@ static SDL_AtomicInt g_in;
 /* How much one run takes: input pixels (0: all that is waiting). A run beside a game is kept small, so that it
  * holds the GPU for a second or so and then lets go; the run when a game ends takes everything. */
 static int g_budget;
+static char g_prev[80];        /* what the batch before ended with, if badly, for the next note */
 
 void nc_texauto_set_budget(int pixels)
 {
@@ -106,6 +107,11 @@ int nc_texauto_run(const char *dir, const char *exe_dir, const char *data_dir, c
         if (SDL_WaitProcess(g_job, false, &code)) {
             SDL_DestroyProcess(g_job);
             g_job = NULL;
+            /* a run that failed (no Vulkan device, a crash) is said in the next run's note, not lost */
+            g_prev[0] = 0;
+            if (code) {
+                SDL_snprintf(g_prev, sizeof(g_prev), "the batch before ended with code %d; ", code);
+            }
         }
     }
     if (!g_job) {
@@ -232,6 +238,7 @@ static int run_one(const char *dir, const char *exe_dir, const char *data_dir, c
         return -1;
     }
     g_job = pr;                         /* it runs on; its end is asked for at the next call */
-    SDL_snprintf(note, note_n, "%d textures to %s (into %s)", todo, tool, aut);
+    SDL_snprintf(note, note_n, "%s%d textures to %s (into %s)", g_prev, todo, tool, aut);
+    g_prev[0] = 0;
     return todo;
 }

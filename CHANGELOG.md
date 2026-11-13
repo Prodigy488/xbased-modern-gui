@@ -1,5 +1,12 @@
 # xbased changelog
 
+## Unreleased (after 1.0.76.33)
+
+- Autofix makes no retry for a game whose GPU was lost (VK_ERROR_DEVICE_LOST): the game is left spinning with
+  nothing drawn, which looked like a stall, and a switch of the emulator's cannot help it.
+- A texture upscaler batch that ended with an error says so in the next batch's log line ("the batch before ended
+  with code N"); it was silent. Tested with a stand-in program that exits with 3.
+
 ## 1.0.76.33 (Modern GUI fork)
 
 - Sound device: Settings > Audio > "Sound device" lists the playback devices the system has and the one chosen
