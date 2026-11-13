@@ -1,4 +1,4 @@
-# xbased Modern GUI 1.0.76.39: game compatibility fixes, Autofix for stalled games, Linux AppImage
+# xbased Modern GUI 1.0.76.40: game compatibility fixes, Autofix for stalled games, Linux AppImage
 
 ```
 Changes since 1.0.76.2
@@ -62,6 +62,9 @@ New
   controller, your PC's microphone and the game's sound device; the controller's USB now does isochronous
   transfers. Host-tested; not tried with a game. Also: no autofix retry after a lost GPU; a failed upscaler batch
   is said in the log.
+- "Not enough free blocks to save game data" (1.0.76.40): the cache drives (partitions 3 to 5) could read as full when their folder
+  held more than the nominal 2 GB, so a title that checks free blocks before saving refused and turned autosave off. They now always
+  report at least 1 GB free.
 - Update check (1.0.76.39): builds 1.0.76.35 to .38 reported themselves as 1.0.76.34 (the dashboard kept its own copy of the
   version), so the check offered the release you already had; the version is written once now. Install this one by hand.
 - Jade Empire's focus mode (1.0.76.38): the grey, blocky picture it drew (on stock xbased and xemu too) is gone. The
@@ -100,7 +103,7 @@ New
 - Settings > System > "Scan games for missing kernel functions": reads every game's default.xbe
   and writes compat_report.txt (the games with the most gaps first, and each missing function with
   how many games need it). "Open the scan report" opens it.
-- Linux: an AppImage (xbased-1.0.76.39-x86_64.AppImage). Needs a Vulkan driver and glibc 2.38 or newer (Ubuntu 24.04, Fedora 39, Debian 13); not run with a GPU or sound yet.
+- Linux: an AppImage (xbased-1.0.76.40-x86_64.AppImage). Needs a Vulkan driver and glibc 2.38 or newer (Ubuntu 24.04, Fedora 39, Debian 13); not run with a GPU or sound yet.
   Settings, saves and states are in ~/.local/share/xbased.
 
 Logs (to find out why a game stops or is silent)
@@ -114,4 +117,4 @@ Known
   missing: the game never asks the audio chip to play them. Not fixed yet.
 ```
 
-Downloads: `xbased-modern-gui-1.0.76.39-windows-x64.zip` (Windows 10/11 x64, Vulkan 1.1) and `xbased-1.0.76.39-x86_64.AppImage` (Linux x86-64). There is no macOS build: the emulator has no macOS port yet.
+Downloads: `xbased-modern-gui-1.0.76.40-windows-x64.zip` (Windows 10/11 x64, Vulkan 1.1) and `xbased-1.0.76.40-x86_64.AppImage` (Linux x86-64). There is no macOS build: the emulator has no macOS port yet.

@@ -1,5 +1,10 @@
 # xbased changelog
 
+## 1.0.76.40 (Modern GUI fork)
+
+- The cache drives (partitions 3 to 5) always report at least 1 GB free: a log showed partition 5 at 0 MB free because its
+  folder held 299 GB, and titles that check free blocks before saving ("Not enough free blocks to save game data") refused.
+
 ## 1.0.76.39 (Modern GUI fork)
 
 - The update check no longer offers an older build: the dashboard kept its own copy of the version number, which
