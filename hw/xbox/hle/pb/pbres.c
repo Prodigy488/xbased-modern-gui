@@ -578,6 +578,17 @@ static int texpack_define(uint32_t id, uint64_t hash, bool mips, const HleResDes
     c->faces = 1;
     c->arena_off = off;
     c->arena_len = total;
+    /* how much the pictures come to (the log shows it before a GPU loss: 1.0.76.31 logs of Morrowind lost the GPU
+     * at the same place with hundreds of pictures of 2048 a side in use) */
+    static uint64_t s_bytes, s_mark;
+    static uint32_t s_n;
+    s_bytes += total;
+    s_n++;
+    if (s_bytes >= s_mark + (512ull << 20)) {
+        s_mark = s_bytes - s_bytes % (512ull << 20);
+        hle_log("hakuX-hle-front", "texture packs: %u pictures uploaded so far, %llu MiB (the largest side %u)", s_n,
+                (unsigned long long)(s_bytes >> 20), cap);
+    }
     return 1;
 }
 
