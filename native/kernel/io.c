@@ -1553,13 +1553,12 @@ static uint32_t do_open(NcKernel *k, uint32_t access, uint32_t share, uint32_t a
     } else {
         char host[512];
         int exists = host_path(dev, rel, host, sizeof(host));
-        if (exists < 0 && (disposition == FILE_CREATE || disposition == FILE_OPEN_IF || disposition == FILE_OVERWRITE_IF ||
-                           disposition == FILE_SUPERSEDE)) {
-            /* A save file asked for in a save folder (UDATA\<title id>\<folder>\<file>) that is not
-             * there yet: the folder is made. Soulcalibur II opens "<folder>\SaveMeta.xbx" with
-             * OPEN_ALWAYS without making the folder first (its log shows no create), failed with
-             * path not found, and said the console had no free blocks. */
-            char parent[512], hp[512], *comp[8];
+        if (exists < 0) {
+            /* A file in a save folder (UDATA\<title id>\<folder>\<file>) that is not there yet: a
+             * missing name, not a missing path. Soulcalibur II looks for its save's "<folder>\SaveMeta.xbx"
+             * (OPEN_ALWAYS) before it has made the folder; path not found made it say the console had
+             * no free blocks, where a missing file lets it go on to make a new save. */
+            char parent[512], *comp[8];
             snprintf(parent, sizeof(parent), "%s", rel);
             unsigned nc_comp = 0;
             char *sv = NULL;
@@ -1567,12 +1566,8 @@ static uint32_t do_open(NcKernel *k, uint32_t access, uint32_t share, uint32_t a
                 comp[nc_comp++] = t;
             }
             if (nc_comp == 4 && !strcasecmp(comp[0], "UDATA") && strlen(comp[1]) == 8) {
-                char dirrel[512];
-                snprintf(dirrel, sizeof(dirrel), "%s\\%s\\%s", comp[0], comp[1], comp[2]);
-                if (host_path(dev, dirrel, hp, sizeof(hp)) == 0 && mkdir(hp, 0775) == 0) {
-                    nc_log("hakuX-native-io", "open %s: its save folder made first", path);
-                    exists = host_path(dev, rel, host, sizeof(host));
-                }
+                nc_log("hakuX-native-io", "open %s: no such save folder (a missing name)", path);
+                return STATUS_OBJECT_NAME_NOT_FOUND;
             }
         }
         if (exists < 0) {
