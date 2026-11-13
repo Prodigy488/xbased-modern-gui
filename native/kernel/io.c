@@ -2634,6 +2634,14 @@ static uint32_t volume_info(NcKernel *k, const NcFile *nf, uint32_t cls, uint32_
             if (part == 1 && size < used + (4ull << 30)) {
                 size = used + (4ull << 30);
             }
+            /* The cache and utility drives (3-5) read the same way when their folder
+             * holds more than the nominal 2 GB (a log showed partition 5 at
+             * 299 GB used, 0 MB free): a title that checks for free blocks before
+             * saving (Xbox title 4E4D0003: "Not enough free blocks to save game
+             * data", autosave disabled) refused. Keep 1 GB free. */
+            if (part >= 3 && size < used + (1ull << 30)) {
+                size = used + (1ull << 30);
+            }
             uint64_t free_part = used < size ? size - used : 0;
             if (freeb < free_part) {
                 free_part = freeb;
