@@ -2,8 +2,12 @@
 
 ## 1.0.76.40 (Modern GUI fork)
 
-- The cache drives (partitions 3 to 5) always report at least 1 GB free: a log showed partition 5 at 0 MB free because its
-  folder held 299 GB, and titles that check free blocks before saving ("Not enough free blocks to save game data") refused.
+- "Not enough free blocks to save game data" (Soulcalibur II; any title that keeps only the low 32 bits of the free
+  bytes): the data drive's "always 4 GB free" is exactly 2^32 bytes, which such a title reads as 0. Every drive now
+  reports at most one cluster under 4 GB free. Confirmed with Soulcalibur II, which now makes its save.
+- The cache drives (partitions 3 to 5) always report at least 1 GB free: a log showed partition 5 at 0 MB free because
+  its folder's scan came to 299 GB.
+- A failed open with "path not found" is logged with its path (the first 40).
 
 ## 1.0.76.39 (Modern GUI fork)
 
