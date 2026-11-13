@@ -1418,6 +1418,12 @@ static void autofix_tick(bool away)
     if (!g_af.enabled) {
         return;
     }
+    /* a GPU that was lost (VK_ERROR_DEVICE_LOST) leaves the game spinning with nothing drawn: that is not a stall
+     * a switch of the emulator's could get it past, so no retry is made for it (a Morrowind log began with an
+     * autofix trial for a "spin" stall, and ended in a lost GPU; whether the one led to the other is not known) */
+    if (nc_hle_fatal_kind() == NC_FATAL_GPU_LOST) {
+        return;
+    }
     const Uint64 now_ms = SDL_GetTicks();
     if (g_af_pend.active) {
         if (away) {
