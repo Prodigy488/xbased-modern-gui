@@ -1,5 +1,12 @@
 # xbased changelog
 
+## 1.0.76.36 (Modern GUI fork)
+
+- F10 cycles a graphics test mode (debug.hakux.fbdbg) for chasing the focus-mode picture in Jade Empire: 1 sends
+  the pixel-shader draws that read the target they render through a copy of it, sampled at their own texture
+  coordinates; 2 skips those draws; 3 skips the draws that sample a depth buffer's words. A notice shows the
+  mode and the log says it; 0 is the normal picture.
+
 ## 1.0.76.35 (Modern GUI fork)
 
 - F9 takes a graphics capture while a game runs, for a bug report: the next frame's render targets go to

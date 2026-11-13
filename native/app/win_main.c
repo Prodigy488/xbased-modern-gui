@@ -1652,7 +1652,7 @@ static const char *pick_disc(void)
 }
 
 #ifndef XBASED_VERSION
-#define XBASED_VERSION "1.0.76.35"
+#define XBASED_VERSION "1.0.76.36"
 #endif
 
 static void rm_tree(const char *path)
@@ -2166,6 +2166,18 @@ int main(int argc, char *argv[])
                     nc_win_prop_set("debug.hakux.pbdraws", v);
                     nc_log("hakuX-app", "capture %d: the next frame's render targets and 800 draws", s_cap);
                     notice("Graphics capture taken (F9): see the log and hle_shadow", NULL);
+                } else if (ev.key.key == SDLK_F10) {
+                    /* a graphics A/B for a bug report (debug.hakux.fbdbg): 0 normal, 1 programs that read their
+                     * own target use a copy of it, 2 those draws skipped, 3 draws reading depth skipped */
+                    static int s_dbg;
+                    char v[8];
+                    s_dbg = (s_dbg + 1) % 4;
+                    snprintf(v, sizeof(v), "%d", s_dbg);
+                    nc_win_prop_set("debug.hakux.fbdbg", v);
+                    nc_log("hakuX-app", "graphics test mode %d (F10)", s_dbg);
+                    char msg[64];
+                    snprintf(msg, sizeof(msg), "Graphics test mode %d (F10)", s_dbg);
+                    notice(msg, NULL);
                 } else if (ev.key.key == g_map.hotkey[IM_HK_SHOT]) {
                     screenshot();
                 } else if (ev.key.key == g_map.hotkey[IM_HK_MENU]) {
