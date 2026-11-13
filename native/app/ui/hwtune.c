@@ -6,7 +6,7 @@
  * Automatic texture upscaling is turned on for a discrete GPU of 6 GB or more.
  *
  *   GPU                               render scale up to   anisotropic   anti-aliasing   pack textures up to
- *   discrete, 10 GB or more                  4x               16x           SMAA             2048
+ *   discrete, 10 GB or more                  4x               16x           SMAA             1024
  *   discrete, 6 GB or more                   4x               16x           SMAA             1024
  *   discrete, 3 GB or more                   3x               16x           SMAA              512
  *   discrete under 3 GB, or integrated       2x                8x           FXAA              256
@@ -99,7 +99,7 @@ void hwtune_pick(int kind, uint64_t vram, int display_h, HwTune *t)
     t->fxaa = tier == 1;
     t->fsr = tier >= 1 && display_h > 0 && t->scale * 480 < display_h - 48;
     t->texauto = tier == 3;
-    t->texcap = kind == 2 && vram >= 10 * gb ? 2048 : kind == 2 && vram >= 6 * gb ? 1024 :
+    t->texcap = kind == 2 && vram >= 6 * gb ? 1024 :
                 kind == 2 && vram >= 3 * gb ? 512 : 256;
 }
 

@@ -458,11 +458,13 @@ bool hle_draw_tex_pack_deferred(void)
     return d;
 }
 
-/* The largest side a pack's picture goes up at (hle_host_texpack_cap: by the GPU's memory), 2048 at most. */
+/* The largest side a pack's picture goes up at (hle_host_texpack_cap: by the GPU's memory), 1024 at most for every game and GPU:
+ * hundreds of pictures of 2048 a side lost the GPU (VK_ERROR_DEVICE_LOST) in Morrowind, and above 1024 the
+ * pictures add little at the sizes the console's games are shown at. An older xbased.ini may say 2048: same. */
 static uint32_t texpack_cap(void)
 {
     const int c = hle_host_texpack_cap();
-    return c >= 2048 ? 2048u : c >= 1024 ? 1024u : c >= 512 ? 512u : c > 0 ? 256u : 2048u;
+    return c >= 1024 ? 1024u : c >= 512 ? 512u : c > 0 ? 256u : 1024u;
 }
 
 /* The pack's picture for `hash` into the arena as object id's image, with its smaller levels made here when the

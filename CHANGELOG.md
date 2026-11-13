@@ -1,5 +1,15 @@
 # xbased changelog
 
+## 1.0.76.32 (Modern GUI fork)
+
+- Texture pack pictures are capped at 1024 a side for every game and GPU (2048 before; an xbased.ini that says
+  2048 is capped too). Two logs of Morrowind (4x, upscaling on, an RTX 5090 Laptop GPU) lost the GPU
+  (VK_ERROR_DEVICE_LOST in vkQueueSubmit2) at the same place, an area load with hundreds of pictures of 2048
+  a side in use, and with the live upscaler off the second time. Above 1024 the pictures add little at the sizes
+  these games are shown at. Cause not proven; the log now says how many pictures and MiB were uploaded (every
+  512 MiB), so the next one shows it.
+- Real-ESRGAN runs in 128-pixel tiles ("-t 128"), so that none of its GPU dispatches is long beside a game.
+
 ## 1.0.76.31 (Modern GUI fork)
 
 - Windows: no console window when the upscaler runs. 1.0.76.30 started Real-ESRGAN as an ordinary child
