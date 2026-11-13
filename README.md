@@ -52,8 +52,8 @@ No BIOS, MCPX ROM or hard-disk image is needed.
 
 | Platform | File | |
 |---|---|---|
-| **Windows** 10/11 (x64) | `xbased-modern-gui-1.0.76.29-windows-x64.zip` | Unzip anywhere and run `xbased.exe`. Portable: everything stays in its folder. |
-| **Linux** (x86-64) | `xbased-1.0.76.29-x86_64.AppImage` | `chmod +x` it and run it. Needs a Vulkan driver and glibc 2.38 or newer (Ubuntu 24.04, Fedora 39, Debian 13). |
+| **Windows** 10/11 (x64) | `xbased-modern-gui-1.0.76.30-windows-x64.zip` | Unzip anywhere and run `xbased.exe`. Portable: everything stays in its folder. |
+| **Linux** (x86-64) | `xbased-1.0.76.30-x86_64.AppImage` | `chmod +x` it and run it. Needs a Vulkan driver and glibc 2.38 or newer (Ubuntu 24.04, Fedora 39, Debian 13). |
 
 Get it from **[Releases](https://github.com/Prodigy488/xbased-modern-gui/releases/latest)**.
 The Linux AppImage starts, but it has not been run with a GPU or sound on Linux (it was
@@ -138,10 +138,11 @@ xbased doesn't include any copyrighted Xbox software.
 - **Texture packs** (Settings > Video, off): PNG files in `hle/textures/<title id>/` of your data folder are drawn
   in place of the game's textures, at any size. "Write the game's textures out" fills that folder's `dump/` with
   the game's own, each named by its hash: edit or upscale one, keep the name, and put it one folder up.
-- **Automatic texture upscaling** (Settings > Video, off): the textures a game used are upscaled 4x by
-  [Real-ESRGAN](https://github.com/xinntao/Real-ESRGAN) after you leave it, in the background, and drawn the next
-  time you play. Real-ESRGAN comes with xbased (the `realesrgan` folder; its licences are in it). The first
-  session of a game looks as before; it sharpens as the folder fills. It takes GPU time while it runs, and video
+- **Automatic texture upscaling** (Settings > Video): the textures a game uses are upscaled 4x by
+  [Real-ESRGAN](https://github.com/xinntao/Real-ESRGAN), which comes with xbased (the `realesrgan` folder; its
+  licences are in it). It runs beside the game, a batch every few seconds, and a texture changes to its
+  upscaled picture a few seconds after that is made: a new area sharpens while you are in it, and is sharp from
+  the start the next time. "Upscale while playing too" off leaves it to after the game. It takes GPU time and video
   memory in the game. With it on, a game's disc is also read once for textures kept in the standard XPR
   containers, so those are upscaled without the game having shown them (many large games keep theirs another
   way, and are learned as you play).

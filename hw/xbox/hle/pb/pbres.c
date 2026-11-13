@@ -440,7 +440,16 @@ bool hle_draw_tex_scan(const uint32_t common, uint32_t format, uint32_t size, co
     return true;
 }
 
-static bool g_pack_deferred;
+static bool g_pack_deferred, g_pack_pending;
+static uint64_t g_pack_pending_hash;
+
+bool hle_draw_tex_pack_pending(uint64_t *hash)
+{
+    const bool p = g_pack_pending;
+    g_pack_pending = false;
+    *hash = g_pack_pending_hash;
+    return p;
+}
 
 bool hle_draw_tex_pack_deferred(void)
 {
@@ -629,21 +638,28 @@ static bool tex_define(uint32_t id, const uint32_t h5[5], const HleResDesc *dp,
      * largest level as the game holds it; the pack's picture goes up in its place, or the game's own is written
      * out for a pack to be made from. */
     const int pack = hle_host_texpack();
-    if (pack && !vol && faces == 1 && !h5[2] && !(fi->flags & HLE_FI_LIN) && d.w >= 16 && d.h >= 16) {
+    if ((pack & 7) && !vol && faces == 1 && !h5[2] && !(fi->flags & HLE_FI_LIN) && d.w >= 16 && d.h >= 16) {
         uint32_t p0, p1;
         const uint32_t o0 = hle_res_subresource(&d, 0, 0, &p0);
         const uint32_t o1 = levels > 1 ? hle_res_subresource(&d, 0, 1, &p1) : ri.bytes;
         if (o1 > o0 && o1 <= ri.bytes) {
             const uint64_t hash = hle_texpack_hash(src + o0, o1 - o0, d.fmt, d.w, d.h, p8 ? pal : NULL,
                                                    p8 ? npal : 0);
-            if ((pack & 5) && texpack_define(id, hash, levels > 1, &d, fi, src, pal) > 0) {
+            const int got = (pack & 5) ? texpack_define(id, hash, levels > 1, &d, fi, src, pal) : 0;
+            if (got > 0) {
                 return true;
             }
             if ((pack & 6) && hle_texpack_dump_wanted(hash)) {
                 g_autofree uint8_t *rgba = tex_rgba(&d, fi, src, pal);
                 if (rgba) {
                     hle_texpack_dump(hash, rgba, d.w, d.h);
+                    hle_texpack_note_dumped(hash);
                 }
+            }
+            /* no picture yet, and the upscaler runs beside the game: the draw code asks for it again */
+            if (!got && hle_texpack_awaited(hash)) {
+                g_pack_pending = true;
+                g_pack_pending_hash = hash;
             }
         }
     }

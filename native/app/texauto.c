@@ -49,7 +49,35 @@ static bool find_tool(const char *exe_dir, const char *data_dir, char *tool, siz
     return true;
 }
 
+/* The upscaler started last, while it runs: one at a time (it takes the whole GPU), and a run is asked for
+ * every few seconds during a game (win_main.c) as well as at its end. */
+static SDL_Process *g_job;
+static SDL_AtomicInt g_in;
+
+static int run_one(const char *dir, const char *exe_dir, const char *data_dir, char *note, size_t note_n);
+
 int nc_texauto_run(const char *dir, const char *exe_dir, const char *data_dir, char *note, size_t note_n)
+{
+    note[0] = 0;
+    if (!SDL_CompareAndSwapAtomicInt(&g_in, 0, 1)) {
+        return 0;               /* another thread is at it */
+    }
+    int n = 0;
+    if (g_job) {
+        int code = 0;
+        if (SDL_WaitProcess(g_job, false, &code)) {
+            SDL_DestroyProcess(g_job);
+            g_job = NULL;
+        }
+    }
+    if (!g_job) {
+        n = run_one(dir, exe_dir, data_dir, note, note_n);
+    }
+    SDL_SetAtomicInt(&g_in, 0);
+    return n;
+}
+
+static int run_one(const char *dir, const char *exe_dir, const char *data_dir, char *note, size_t note_n)
 {
     char tool[1200], dump[1200], aut[1200], queue[1300], a[1400], b[1400], models[1300];
     size_t tdir = 0;
@@ -117,14 +145,18 @@ int nc_texauto_run(const char *dir, const char *exe_dir, const char *data_dir, c
                            "-m", models, NULL };
     SDL_PropertiesID p = SDL_CreateProperties();
     SDL_SetPointerProperty(p, SDL_PROP_PROCESS_CREATE_ARGS_POINTER, (void *)args);
-    SDL_SetBooleanProperty(p, SDL_PROP_PROCESS_CREATE_BACKGROUND_BOOLEAN, true);
+    /* nothing of its output wanted (it writes its progress); not a "background" process, whose end can't be
+     * asked for: this one's is (g_job), and it runs on all the same when xbased has gone */
+    SDL_SetNumberProperty(p, SDL_PROP_PROCESS_CREATE_STDIN_NUMBER, SDL_PROCESS_STDIO_NULL);
+    SDL_SetNumberProperty(p, SDL_PROP_PROCESS_CREATE_STDOUT_NUMBER, SDL_PROCESS_STDIO_NULL);
+    SDL_SetNumberProperty(p, SDL_PROP_PROCESS_CREATE_STDERR_NUMBER, SDL_PROCESS_STDIO_NULL);
     SDL_Process *pr = SDL_CreateProcessWithProperties(p);
     SDL_DestroyProperties(p);
     if (!pr) {
         SDL_snprintf(note, note_n, "%s did not start: %s", tool, SDL_GetError());
         return -1;
     }
-    SDL_DestroyProcess(pr);             /* it runs on */
+    g_job = pr;                         /* it runs on; its end is asked for at the next call */
     SDL_snprintf(note, note_n, "%d textures to %s (into %s)", todo, tool, aut);
     return todo;
 }

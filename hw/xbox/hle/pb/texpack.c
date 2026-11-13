@@ -5,6 +5,8 @@
 #include "hw/xbox/hle/hle.h"
 #include "hw/xbox/hle/host.h"
 #include "hw/xbox/hle/pb/texpack.h"
+#include <sys/stat.h>
+#include <time.h>
 #define XXH_INLINE_ALL
 #include "xxhash.h"
 
@@ -72,7 +74,26 @@ static void set_add(Set *s, uint64_t k)
     s->n++;
 }
 
-static Set g_absent, g_present, g_dumped;
+/* g_absent: no picture's file was there (asked once a run, unless pictures are made while the game runs);
+ * g_refused: there is one and it isn't to be used; g_present: there is one; g_dumped: written out this run (or
+ * found written); g_wait: a texture with a dump, whose picture can still come */
+static Set g_absent, g_refused, g_present, g_dumped, g_wait;
+
+/* Pictures are made while the game runs (hle_host_texpack bits 2 and 3): one that isn't there may come. */
+static bool live(void)
+{
+    return (hle_host_texpack() & 12) == 12;
+}
+
+/* How long ago a file was last written, in seconds; -1 without one. */
+static double file_age(const char *path)
+{
+    struct stat st;
+    if (stat(path, &st)) {
+        return -1.0;
+    }
+    return difftime(time(NULL), st.st_mtime);
+}
 static unsigned g_nloaded, g_ndumped, g_nrejected, g_nused;
 
 /* <base>textures/<title id>/ (and its dump/), made at first use */
@@ -119,7 +140,7 @@ static bool file_there(const char *path)
 
 bool hle_texpack_has(uint64_t hash)
 {
-    if (set_has(&g_absent, hash)) {
+    if (set_has(&g_refused, hash) || (!live() && set_has(&g_absent, hash))) {
         return false;
     }
     if (set_has(&g_present, hash)) {
@@ -128,8 +149,13 @@ bool hle_texpack_has(uint64_t hash)
     g_autofree char *own = g_strdup_printf("%s%016llx.png", pack_dir(), (unsigned long long)hash);
     g_autofree char *aut = g_strdup_printf("%sauto/%016llx.png", pack_dir(), (unsigned long long)hash);
     g_autofree char *bad = g_strdup_printf("%sauto/%016llx.bad", pack_dir(), (unsigned long long)hash);
-    const bool there = file_there(own) || (file_there(aut) && !file_there(bad));
-    set_add(there ? &g_present : &g_absent, hash);
+    /* the upscaler's: once it is whole (two seconds since it was written to) */
+    const bool there = file_there(own) || (file_age(aut) >= 2.0 && !file_there(bad));
+    if (there) {
+        set_add(&g_present, hash);
+    } else if (!live()) {
+        set_add(&g_absent, hash);
+    }
     return there;
 }
 
@@ -160,7 +186,7 @@ void hle_texpack_reject(uint64_t hash, uint32_t w, uint32_t h, uint32_t ow, uint
         touch(bad);
     }
     remove(png);
-    set_add(&g_absent, hash);
+    set_add(&g_refused, hash);
     if (g_nrejected++ < 24) {
         hle_log("hakuX-hle-front", "texture packs: auto/%016llx.png (%ux%u) not used: the game's texture is %ux%u "
                 "format 0x%02X%s, colour off by %.1f of 255 (28 allowed); %s (#%u of 24 logged)", x, w, h, ow, oh,
@@ -187,7 +213,7 @@ void hle_texpack_counts(unsigned *used, unsigned *rejected)
 uint8_t *hle_texpack_load(uint64_t hash, uint32_t *w, uint32_t *h, bool *from_auto)
 {
     *from_auto = false;
-    if (set_has(&g_absent, hash)) {
+    if (set_has(&g_refused, hash) || (!live() && set_has(&g_absent, hash))) {
         return NULL;
     }
     /* your own file first, then the upscaler's */
@@ -200,13 +226,18 @@ uint8_t *hle_texpack_load(uint64_t hash, uint32_t *w, uint32_t *h, bool *from_au
         path = g_strdup_printf("%sauto/%016llx.png", pack_dir(), (unsigned long long)hash);
         made = true;
         if (!g_file_get_contents(path, &file, &len, NULL) || !file) {
-            set_add(&g_absent, hash);
+            if (!live()) {
+                set_add(&g_absent, hash);
+            }
             return NULL;
         }
     }
     int iw = 0, ih = 0, comp = 0;
     uint8_t *px = len <= INT32_MAX ? stbi_load_from_memory((const stbi_uc *)file, (int)len, &iw, &ih, &comp, 4) : NULL;
     g_free(file);
+    if (!px && made && file_age(path) < 5.0) {
+        return NULL;                    /* the upscaler is still writing it: asked again later */
+    }
     if (!px || iw < 1 || ih < 1 || iw > 8192 || ih > 8192) {
         hle_log("hakuX-hle-front", "texture packs: %s not used (%s)", path,
                 px ? "larger than 8192 pixels a side" : "not a PNG this reads");
@@ -215,7 +246,7 @@ uint8_t *hle_texpack_load(uint64_t hash, uint32_t *w, uint32_t *h, bool *from_au
         } else if (made) {
             remove(path);               /* an upscale cut short: made again after the next run */
         }
-        set_add(&g_absent, hash);
+        set_add(&g_refused, hash);
         return NULL;
     }
     *w = (uint32_t)iw;
@@ -227,6 +258,25 @@ uint8_t *hle_texpack_load(uint64_t hash, uint32_t *w, uint32_t *h, bool *from_au
 void hle_texpack_free(uint8_t *rgba)
 {
     stbi_image_free(rgba);
+}
+
+void hle_texpack_note_dumped(uint64_t hash)
+{
+    set_add(&g_wait, hash);
+}
+
+bool hle_texpack_awaited(uint64_t hash)
+{
+    return live() && set_has(&g_wait, hash) && !set_has(&g_refused, hash);
+}
+
+bool hle_texpack_ready(uint64_t hash)
+{
+    if (set_has(&g_refused, hash)) {
+        return false;
+    }
+    g_autofree char *aut = g_strdup_printf("%sauto/%016llx.png", pack_dir(), (unsigned long long)hash);
+    return file_age(aut) >= 2.0;
 }
 
 bool hle_texpack_dump_wanted(uint64_t hash)

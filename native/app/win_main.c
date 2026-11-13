@@ -342,6 +342,24 @@ static void give_foreground(bool to_dash)
  * dashboard waiting behind it. TerminateProcess skips that; what the run
  * wrote is written (stderr isn't buffered, files are closed as they go).
  * A code with bit 30 is a run started again (run_again): no dashboard. */
+/* A run of the upscaler during the game (texauto.c): what was written out since the last. */
+static int SDLCALL texlive_thread(void *arg)
+{
+    (void)arg;
+    char note[2600];
+    const int n = nc_texauto_run(hle_texpack_dir(), g_exe_dir, g_data_dir, note, sizeof(note));
+    if (n > 0) {
+        nc_log("hakuX-app", "texture upscaling (while playing): %s", note);
+    } else if (n < 0) {
+        static bool said;
+        if (!said) {
+            said = true;
+            nc_log("hakuX-app", "texture upscaling: %s", note);
+        }
+    }
+    return 0;
+}
+
 static _Noreturn void exit_now(int code)
 {
     /* automatic texture upscaling: what this run wrote out goes to the upscaler, which runs on after it */
@@ -1624,7 +1642,7 @@ static const char *pick_disc(void)
 }
 
 #ifndef XBASED_VERSION
-#define XBASED_VERSION "1.0.76.29"
+#define XBASED_VERSION "1.0.76.30"
 #endif
 
 static void rm_tree(const char *path)
@@ -2267,6 +2285,19 @@ int main(int argc, char *argv[])
             quit_to_dash(win);
         }
         overlay_tick();
+        {
+            /* the upscaler beside the game: every ten seconds what the game wrote out since goes to it (on a
+             * thread: listing the folder takes a moment), unless one is still running */
+            static Uint64 last;
+            const Uint64 now = SDL_GetTicks();
+            if ((hle_host_texpack() & 12) == 12 && hle_texpack_dir() && now - last >= 10000) {
+                last = now;
+                SDL_Thread *t = SDL_CreateThread(texlive_thread, "texlive", NULL);
+                if (t) {
+                    SDL_DetachThread(t);
+                }
+            }
+        }
         {
             /* automatic texture upscaling: the disc looked through for textures, once, beside the game */
             static bool scanned;

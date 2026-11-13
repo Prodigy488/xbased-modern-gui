@@ -15,6 +15,7 @@
 #include "hw/xbox/hle/vk/guest_ram.h"
 #include "hw/xbox/hle/vk/quirks.h"
 #include "hw/xbox/hle/pb/pbres.h"
+#include "hw/xbox/hle/pb/texpack.h"
 #include "hw/xbox/hle/tex/xdk.h"
 #include "hw/xbox/hle/tex/xdk_res.h"
 #include "hw/xbox/hle/tex/xg_swizzle.h"
@@ -158,6 +159,9 @@ typedef struct PbTex {
     bool ok;                            /* defined (else it can't be: not again) */
     uint32_t pack_retry;                /* a texture pack's picture is waiting for room: the frame (+ 1) it
                                            was last tried in; defined again in a later one */
+    uint32_t pack_wait;                 /* a picture is being made for it (the upscaler beside the game):
+                                           the frame (+ 1) it was last asked for */
+    uint64_t pack_hash;                 /* what to ask by */
 } PbTex;
 
 static struct {
@@ -2778,6 +2782,16 @@ static uint32_t texture(unsigned s, bool *unset, bool *lin)
         if (t->pack_retry && t->pack_retry != g_pd.swap_ids + 1) {
             redefine = true;
         }
+        /* a picture being made: asked for every two seconds or so (each texture at its own frame), and no more
+         * than one taken up every six frames (reading one is tens of milliseconds) */
+        if (!redefine && t->pack_wait && g_pd.swap_ids + 1 - t->pack_wait >= 120u + (uint32_t)(t->pack_hash & 63)) {
+            static uint32_t s_last;
+            t->pack_wait = g_pd.swap_ids + 1;
+            if (g_pd.swap_ids - s_last >= 6 && hle_texpack_ready(t->pack_hash)) {
+                s_last = g_pd.swap_ids;
+                redefine = true;
+            }
+        }
     }
     static uint32_t pal[256];
     uint32_t npal = 0, pal_hash = 0;
@@ -2822,6 +2836,7 @@ static uint32_t texture(unsigned s, bool *unset, bool *lin)
         coh_pend_wait(pa, hle_draw_tex_bytes(h5));  /* a copy queued into its texels lands first */
         t->ok = hle_draw_tex_define(t->id, h5, pal, npal, &bytes) != 0;
         t->pack_retry = hle_draw_tex_pack_deferred() ? g_pd.swap_ids + 1 : 0;
+        t->pack_wait = hle_draw_tex_pack_pending(&t->pack_hash) ? g_pd.swap_ids + 1 : 0;
         t->pa = pa;
         t->bytes = bytes;
         t->pal_hash = pal_hash;

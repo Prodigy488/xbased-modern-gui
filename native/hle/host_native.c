@@ -185,7 +185,7 @@ int hle_host_anisotropy(void)
     return g_anisotropy;
 }
 
-static int g_texpack;
+static int g_texpack = 8;       /* bit 3 (the upscaler beside the game, with bit 2) on unless texlive=0 */
 
 void nc_hle_set_texpack(int bits, bool on)
 {

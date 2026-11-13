@@ -3,7 +3,8 @@
  * drawn in their place (any size). The files are in <base>textures/<title id>/ (dumps in its dump/ folder), named
  * by a hash of the texture as the game holds it (XXH3-64 of its largest level's bytes, then of its palette, its
  * format and size). hle_host_texpack(): bit 0 use packs, bit 1 write the textures out, bit 2 both, for an
- * upscaler run after the game (native/app/texauto.c) whose pictures, in auto/, are used like a pack's.
+ * upscaler run after the game (native/app/texauto.c) whose pictures, in auto/, are used like a pack's; bit 3
+ * with bit 2: the upscaler runs during the game too, and its pictures are taken up as they come.
  */
 #ifndef HW_XBOX_HLE_PB_TEXPACK_H
 #define HW_XBOX_HLE_PB_TEXPACK_H
@@ -28,6 +29,13 @@ void hle_texpack_used(uint64_t hash, uint32_t w, uint32_t h, bool from_auto);
 /* How many pictures were used and how many of the upscaler's refused, this run. */
 void hle_texpack_counts(unsigned *used, unsigned *rejected);
 void hle_texpack_free(uint8_t *rgba);
+/* Pictures made while the game runs (hle_host_texpack bits 2 and 3: the upscaler is run every few seconds on
+ * what was written out, native/app/win_main.c). A texture written out (hle_texpack_note_dumped) is awaited: its
+ * definition says so (pbres.c), and the draw code asks hle_texpack_ready now and then and defines the texture
+ * again when its picture is there, whole. */
+void hle_texpack_note_dumped(uint64_t hash);
+bool hle_texpack_awaited(uint64_t hash);
+bool hle_texpack_ready(uint64_t hash);
 /* True the first time for a hash this run: the caller decodes the texture and hands it to hle_texpack_dump. */
 bool hle_texpack_dump_wanted(uint64_t hash);
 void hle_texpack_dump(uint64_t hash, const uint8_t *rgba, uint32_t w, uint32_t h);

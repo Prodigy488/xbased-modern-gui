@@ -2750,7 +2750,7 @@ static void *render_thread(void *opaque)
 static int arena_init(void)
 {
     const uint32_t usual = g_hvk.caps.bc ? 32u << 20 : 64u << 20;
-    if (hle_host_texpack() && !hle_vk_arena_init(256u << 20)) {
+    if ((hle_host_texpack() & 7) && !hle_vk_arena_init(256u << 20)) {
         return 0;
     }
     return hle_vk_arena_init(usual);

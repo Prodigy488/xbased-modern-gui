@@ -1,5 +1,26 @@
 # xbased changelog
 
+## 1.0.76.30 (Modern GUI fork)
+
+- Textures upscaled while the game runs (Settings > Video > "Upscale while playing too", "texlive" in the
+  settings files; on, and in effect with automatic upscaling on). Until now the upscaler ran when a game was
+  left, so its pictures were first drawn in the next session. Now:
+  - every ten seconds of a game, what it wrote out since goes to Real-ESRGAN, on a thread of the window's;
+    one run at a time (a run still going is left to finish; what came meanwhile goes with the next);
+  - a texture that was written out and has no picture yet is remembered as awaited; the draw code asks for
+    its picture every two seconds or so (each texture at its own frame, so the asking is spread out), and
+    when the file is there and two seconds old (whole) defines the texture again, which draws the picture
+    from then on. At most one texture is taken up every six frames: reading a picture takes tens of
+    milliseconds, and a scene's worth at once would be a stall;
+  - a picture's absence is no longer remembered for the run when this is on (it was asked for once);
+  - the upscaler is started as an ordinary child with its output thrown away, not as a "background" process
+    (whose end can't be asked for). It still runs on when xbased has gone.
+  What it costs: the upscaler takes the same GPU as the game while a batch runs, so the frame rate can drop
+  then, and each texture taken up is a short hitch. With the setting off it is as before (after the game).
+  Tested on Linux with a stand-in for the upscaler: one run at a time, the next run takes only what is new,
+  a run goes on after xbased exits, none of its output in the log. The taking up of pictures in a running
+  game is not tested: it uses the path a picture waiting for room has used since 1.0.76.25.
+
 ## 1.0.76.29 (Modern GUI fork)
 
 - HD texture packs to share (native/app/ui/texshare.c). A game's page and its in-game menu have "Export HD
