@@ -2648,22 +2648,15 @@ static uint32_t volume_info(NcKernel *k, const NcFile *nf, uint32_t cls, uint32_
             if (freeb < free_part) {
                 free_part = freeb;
             }
+            /* Never 4 GB or more free: a title that keeps only the low 32 bits of the free
+             * bytes (Soulcalibur II stores GetDiskFreeSpaceEx's low dword) read the data
+             * drive's "always 4 GB free" (exactly 2^32 bytes) as 0 and said "Not enough free
+             * blocks to save game data". One cluster under 4 GB at most. */
+            if (free_part > (4ull << 30) - cluster) {
+                free_part = (4ull << 30) - cluster;
+            }
             total = size / cluster;
             avail = free_part / cluster;
-            static unsigned p1_queries;
-            if (part == 1 && ++p1_queries == 2) {
-                static const uint32_t rng[][2] = {{0x0008bd00, 0x500}, {0x00104a80, 0x100}, {0x00104680, 0x1a0}};
-                for (unsigned r = 0; r < 3; r++) {
-                    for (uint32_t off = 0; off < rng[r][1]; off += 32) {
-                        char hex[80];
-                        const uint8_t *m = nc_vm_host(k->vm, rng[r][0] + off);
-                        for (unsigned i = 0; i < 32; i++) {
-                            snprintf(hex + 2 * i, 3, "%02x", m[i]);
-                        }
-                        nc_log("hakuX-codedump", "%08x %s", rng[r][0] + off, hex);
-                    }
-                }
-            }
             static unsigned logged, every;
             if (!(logged & (1u << part)) || every++ < 60) {
                 logged |= 1u << part;
