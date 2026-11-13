@@ -1554,23 +1554,6 @@ static uint32_t do_open(NcKernel *k, uint32_t access, uint32_t share, uint32_t a
         char host[512];
         int exists = host_path(dev, rel, host, sizeof(host));
         if (exists < 0) {
-            /* A file in a save folder (UDATA\<title id>\<folder>\<file>) that is not there yet: a
-             * missing name, not a missing path. Soulcalibur II looks for its save's "<folder>\SaveMeta.xbx"
-             * (OPEN_ALWAYS) before it has made the folder; path not found made it say the console had
-             * no free blocks, where a missing file lets it go on to make a new save. */
-            char parent[512], *comp[8];
-            snprintf(parent, sizeof(parent), "%s", rel);
-            unsigned nc_comp = 0;
-            char *sv = NULL;
-            for (char *t = strtok_r(parent, "\\", &sv); t && nc_comp < 8; t = strtok_r(NULL, "\\", &sv)) {
-                comp[nc_comp++] = t;
-            }
-            if (nc_comp == 4 && !strcasecmp(comp[0], "UDATA") && strlen(comp[1]) == 8) {
-                nc_log("hakuX-native-io", "open %s: no such save folder (a missing name)", path);
-                return STATUS_OBJECT_NAME_NOT_FOUND;
-            }
-        }
-        if (exists < 0) {
             static unsigned shown;
             if (g_trace_io || shown++ < 40) {
                 nc_log("hakuX-native-io", "open %s: path not found (access %08x, disposition %u, options %08x)", path, access,
@@ -2667,6 +2650,20 @@ static uint32_t volume_info(NcKernel *k, const NcFile *nf, uint32_t cls, uint32_
             }
             total = size / cluster;
             avail = free_part / cluster;
+            static unsigned p1_queries;
+            if (part == 1 && ++p1_queries == 2) {
+                static const uint32_t rng[][2] = {{0x0008bd00, 0x500}, {0x00104a80, 0x100}, {0x00104680, 0x1a0}};
+                for (unsigned r = 0; r < 3; r++) {
+                    for (uint32_t off = 0; off < rng[r][1]; off += 32) {
+                        char hex[80];
+                        const uint8_t *m = nc_vm_host(k->vm, rng[r][0] + off);
+                        for (unsigned i = 0; i < 32; i++) {
+                            snprintf(hex + 2 * i, 3, "%02x", m[i]);
+                        }
+                        nc_log("hakuX-codedump", "%08x %s", rng[r][0] + off, hex);
+                    }
+                }
+            }
             static unsigned logged, every;
             if (!(logged & (1u << part)) || every++ < 60) {
                 logged |= 1u << part;
