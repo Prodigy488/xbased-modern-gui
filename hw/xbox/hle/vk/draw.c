@@ -3005,10 +3005,17 @@ void hle_draw_psframe_poll(uint64_t swap)
     }
     v[0] = 0;
     hle_prop_get("debug.hakux.fbdbg", v);
-    if (atoi(v) != g_hle_fbdbg) {
-        g_hle_fbdbg = atoi(v);
-        hle_log("hakuX-hle-pipe", "fbdbg=%d (1: target reads through a copy, 2: skipped, 3: depth reads skipped)",
-                g_hle_fbdbg);
+    {
+        /* unset or "auto": mode 1 for the titles that need it (Jade Empire's focus mode: its in-place
+         * filter pass reads the target at its own texture coordinates, which a fetch of the fragment's
+         * pixel does not reproduce), else 0 */
+        const bool autom = !v[0] || !strcmp(v, "auto");
+        const int want = autom ? (g_hle.title.xbe.title_id == 0x4d53006du ? 1 : 0) : atoi(v);
+        if (want != g_hle_fbdbg) {
+            g_hle_fbdbg = want;
+            hle_log("hakuX-hle-pipe", "fbdbg=%d%s (1: target reads through a copy, 2: skipped, 3: depth reads "
+                    "skipped)", g_hle_fbdbg, autom ? " (auto)" : "");
+        }
     }
     v[0] = 0;
     hle_prop_get("debug.hakux.probe", v);

@@ -1,5 +1,13 @@
 # xbased changelog
 
+## 1.0.76.37 (Modern GUI fork)
+
+- Jade Empire's focus mode draws right: the game's in-place filter pass reads its own target at its texture
+  coordinates, and the fragment-pixel fetch the programs got for that did not reproduce it (the picture came out
+  grey and blocky, on stock xbased and xemu too). For this title the draws that read the target they render now
+  sample a copy of it (the test mode 1 below), found with the F10 test modes. Other titles are unchanged.
+  F10 cycles auto (the default), 0 (the old fetch), 1, 2 and 3; the log and a notice name the mode.
+
 ## 1.0.76.36 (Modern GUI fork)
 
 - F10 cycles a graphics test mode (debug.hakux.fbdbg) for chasing the focus-mode picture in Jade Empire: 1 sends
