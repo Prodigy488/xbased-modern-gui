@@ -1,5 +1,14 @@
 # xbased changelog
 
+## 1.0.76.31 (Modern GUI fork)
+
+- Windows: no console window when the upscaler runs. 1.0.76.30 started Real-ESRGAN as an ordinary child
+  process so that its end could be asked for, and on Windows a console program started that way from a
+  windowed one gets a console window: a black window came up over the game at every batch (reported with a
+  screenshot). It is started as SDL's "background" process again on Windows (CREATE_NO_WINDOW), as before
+  1.0.76.30; SDL's Windows code can ask such a process for its end all the same (it keeps the handle), which
+  is all the batches need. Linux is unchanged. Read from SDL's source; not run on Windows here.
+
 ## 1.0.76.30 (Modern GUI fork)
 
 - Textures upscaled while the game runs (Settings > Video > "Upscale while playing too", "texlive" in the

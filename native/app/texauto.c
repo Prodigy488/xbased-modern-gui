@@ -147,6 +147,12 @@ static int run_one(const char *dir, const char *exe_dir, const char *data_dir, c
     SDL_SetPointerProperty(p, SDL_PROP_PROCESS_CREATE_ARGS_POINTER, (void *)args);
     /* nothing of its output wanted (it writes its progress); not a "background" process, whose end can't be
      * asked for: this one's is (g_job), and it runs on all the same when xbased has gone */
+#ifdef _WIN32
+    /* Windows: a console program started from a windowed one gets a console window of its own unless it is
+     * started as a "background" process (SDL: CREATE_NO_WINDOW), which there can still be asked for its end.
+     * (1.0.76.30 started it without: a black window came up over the game at every batch.) */
+    SDL_SetBooleanProperty(p, SDL_PROP_PROCESS_CREATE_BACKGROUND_BOOLEAN, true);
+#endif
     SDL_SetNumberProperty(p, SDL_PROP_PROCESS_CREATE_STDIN_NUMBER, SDL_PROCESS_STDIO_NULL);
     SDL_SetNumberProperty(p, SDL_PROP_PROCESS_CREATE_STDOUT_NUMBER, SDL_PROCESS_STDIO_NULL);
     SDL_SetNumberProperty(p, SDL_PROP_PROCESS_CREATE_STDERR_NUMBER, SDL_PROCESS_STDIO_NULL);
