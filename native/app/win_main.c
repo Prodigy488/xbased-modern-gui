@@ -29,6 +29,7 @@
 #include <math.h>
 
 #include "native/app/app.h"
+#include "native/app/version.h"
 #include "native/app/ui/autofix.h"
 #include "native/app/ui/compat_scan.h"
 #include "native/app/ui/config.h"
@@ -1650,10 +1651,6 @@ static const char *pick_disc(void)
     }
     return g_dialog_path[0] ? g_dialog_path : NULL;
 }
-
-#ifndef XBASED_VERSION
-#define XBASED_VERSION "1.0.76.38"
-#endif
 
 static void rm_tree(const char *path)
 {

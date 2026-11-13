@@ -1,5 +1,11 @@
 # xbased changelog
 
+## 1.0.76.39 (Modern GUI fork)
+
+- The update check no longer offers an older build: the dashboard kept its own copy of the version number, which
+  was not bumped after 1.0.76.34 (the About line and the check read 1.0.76.34 in later builds). The version is now
+  written once, in native/app/version.h, for the dashboard and the window loop.
+
 ## 1.0.76.38 (Modern GUI fork)
 
 - Jade Empire's focus mode draws right: the game's filter draw samples a texture laid over the depth buffer's

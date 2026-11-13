@@ -4,6 +4,7 @@
  * are in dash_settings.c, dash_memory.c.
  */
 #include "native/app/ui/dash.h"
+#include "native/app/version.h"
 #include "native/app/ui/autofix.h"
 #include "native/app/ui/console_cfg.h"
 #include "native/app/ui/dash_int.h"
@@ -26,10 +27,6 @@
 #include <windows.h>
 
 #include "native/app/win_aslr.h"
-#endif
-
-#ifndef XBASED_VERSION
-#define XBASED_VERSION "1.0.76.34"
 #endif
 
 Dash D;
