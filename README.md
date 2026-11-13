@@ -52,8 +52,8 @@ No BIOS, MCPX ROM or hard-disk image is needed.
 
 | Platform | File | |
 |---|---|---|
-| **Windows** 10/11 (x64) | `xbased-modern-gui-1.0.76.34-windows-x64.zip` | Unzip anywhere and run `xbased.exe`. Portable: everything stays in its folder. |
-| **Linux** (x86-64) | `xbased-1.0.76.34-x86_64.AppImage` | `chmod +x` it and run it. Needs a Vulkan driver and glibc 2.38 or newer (Ubuntu 24.04, Fedora 39, Debian 13). |
+| **Windows** 10/11 (x64) | `xbased-modern-gui-1.0.76.38-windows-x64.zip` | Unzip anywhere and run `xbased.exe`. Portable: everything stays in its folder. |
+| **Linux** (x86-64) | `xbased-1.0.76.38-x86_64.AppImage` | `chmod +x` it and run it. Needs a Vulkan driver and glibc 2.38 or newer (Ubuntu 24.04, Fedora 39, Debian 13). |
 
 Get it from **[Releases](https://github.com/Prodigy488/xbased-modern-gui/releases/latest)**.
 The Linux AppImage starts, but it has not been run with a GPU or sound on Linux (it was

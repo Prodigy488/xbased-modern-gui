@@ -1,4 +1,4 @@
-# xbased Modern GUI 1.0.76.34: game compatibility fixes, Autofix for stalled games, Linux AppImage
+# xbased Modern GUI 1.0.76.38: game compatibility fixes, Autofix for stalled games, Linux AppImage
 
 ```
 Changes since 1.0.76.2
@@ -62,6 +62,12 @@ New
   controller, your PC's microphone and the game's sound device; the controller's USB now does isochronous
   transfers. Host-tested; not tried with a game. Also: no autofix retry after a lost GPU; a failed upscaler batch
   is said in the log.
+- Jade Empire's focus mode (1.0.76.38): the grey, blocky picture it drew (on stock xbased and xemu too) is gone. The
+  game's filter draw reads a texture laid over its depth buffer; for this title that draw is left out, so the world
+  keeps its colours (the depth part of the effect is missing). Other games are unchanged.
+- Bug-report keys (1.0.76.35 to .37): F9 writes the next frame's render targets to hle_shadow/ and logs 800 draws; F10
+  cycles graphics test modes (auto, 0 to 3) for draws that read their own target or a depth buffer. Nothing changes
+  until they are pressed, except the Jade Empire case above.
 - Integer scaling (Settings > Video, off): the picture a whole number of times the console's lines tall, with
   borders. Pair it with the Nearest upscaler for square pixels.
 - Texture packs (Settings > Video, off): PNG files in hle/textures/<title id>/ (in the data folder) are drawn in
@@ -92,7 +98,7 @@ New
 - Settings > System > "Scan games for missing kernel functions": reads every game's default.xbe
   and writes compat_report.txt (the games with the most gaps first, and each missing function with
   how many games need it). "Open the scan report" opens it.
-- Linux: an AppImage (xbased-1.0.76.34-x86_64.AppImage). Needs a Vulkan driver and glibc 2.38 or newer (Ubuntu 24.04, Fedora 39, Debian 13); not run with a GPU or sound yet.
+- Linux: an AppImage (xbased-1.0.76.38-x86_64.AppImage). Needs a Vulkan driver and glibc 2.38 or newer (Ubuntu 24.04, Fedora 39, Debian 13); not run with a GPU or sound yet.
   Settings, saves and states are in ~/.local/share/xbased.
 
 Logs (to find out why a game stops or is silent)
@@ -106,4 +112,4 @@ Known
   missing: the game never asks the audio chip to play them. Not fixed yet.
 ```
 
-Downloads: `xbased-modern-gui-1.0.76.34-windows-x64.zip` (Windows 10/11 x64, Vulkan 1.1) and `xbased-1.0.76.34-x86_64.AppImage` (Linux x86-64). There is no macOS build: the emulator has no macOS port yet.
+Downloads: `xbased-modern-gui-1.0.76.38-windows-x64.zip` (Windows 10/11 x64, Vulkan 1.1) and `xbased-1.0.76.38-x86_64.AppImage` (Linux x86-64). There is no macOS build: the emulator has no macOS port yet.
