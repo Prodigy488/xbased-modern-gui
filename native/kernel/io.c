@@ -1554,8 +1554,10 @@ static uint32_t do_open(NcKernel *k, uint32_t access, uint32_t share, uint32_t a
         char host[512];
         int exists = host_path(dev, rel, host, sizeof(host));
         if (exists < 0) {
-            if (g_trace_io) {
-                nc_log("hakuX-native-io", "open %s: path not found", path);
+            static unsigned shown;
+            if (g_trace_io || shown++ < 40) {
+                nc_log("hakuX-native-io", "open %s: path not found (access %08x, disposition %u, options %08x)", path, access,
+                       disposition, options);
             }
             return STATUS_OBJECT_PATH_NOT_FOUND;
         }
@@ -2648,8 +2650,8 @@ static uint32_t volume_info(NcKernel *k, const NcFile *nf, uint32_t cls, uint32_
             }
             total = size / cluster;
             avail = free_part / cluster;
-            static unsigned logged;
-            if (!(logged & (1u << part))) {
+            static unsigned logged, every;
+            if (!(logged & (1u << part)) || every++ < 60) {
                 logged |= 1u << part;
                 nc_log("hakuX-native-io", "volume info: partition %d, %llu MB of %llu MB free (used %llu MB, host free %llu MB)", part,
                        (unsigned long long)(free_part >> 20), (unsigned long long)(size >> 20),
