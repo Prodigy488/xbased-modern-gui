@@ -3006,11 +3006,12 @@ void hle_draw_psframe_poll(uint64_t swap)
     v[0] = 0;
     hle_prop_get("debug.hakux.fbdbg", v);
     {
-        /* unset or "auto": mode 1 for the titles that need it (Jade Empire's focus mode: its in-place
-         * filter pass reads the target at its own texture coordinates, which a fetch of the fragment's
-         * pixel does not reproduce), else 0 */
+        /* unset or "auto": mode 3 for the titles that need it, else 0. Jade Empire's focus mode draws its
+         * filter from the depth buffer's words (a texture over the depth memory, read as bytes); the
+         * picture that comes out is grey and blocky, on stock xbased and xemu too, and without that draw
+         * it is right (the test modes, 3 against 0, 1 and 2) */
         const bool autom = !v[0] || !strcmp(v, "auto");
-        const int want = autom ? (g_hle.title.xbe.title_id == 0x4d53006du ? 1 : 0) : atoi(v);
+        const int want = autom ? (g_hle.title.xbe.title_id == 0x4d53006du ? 3 : 0) : atoi(v);
         if (want != g_hle_fbdbg) {
             g_hle_fbdbg = want;
             hle_log("hakuX-hle-pipe", "fbdbg=%d%s (1: target reads through a copy, 2: skipped, 3: depth reads "

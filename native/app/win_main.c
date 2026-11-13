@@ -1652,7 +1652,7 @@ static const char *pick_disc(void)
 }
 
 #ifndef XBASED_VERSION
-#define XBASED_VERSION "1.0.76.37"
+#define XBASED_VERSION "1.0.76.38"
 #endif
 
 static void rm_tree(const char *path)
@@ -2169,7 +2169,7 @@ int main(int argc, char *argv[])
                 } else if (ev.key.key == SDLK_F10) {
                     /* a graphics A/B for a bug report (debug.hakux.fbdbg): auto (default), 0 normal, 1 programs that read their
                      * own target use a copy of it, 2 those draws skipped, 3 draws reading depth skipped */
-                    static int s_dbg = -1;      /* -1: auto (mode 1 for Jade Empire, else 0) */
+                    static int s_dbg = -1;      /* -1: auto (mode 3 for Jade Empire, else 0) */
                     char v[8];
                     s_dbg = s_dbg >= 3 ? -1 : s_dbg + 1;
                     if (s_dbg < 0) {
