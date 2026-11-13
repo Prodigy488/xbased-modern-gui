@@ -1,11 +1,20 @@
 # xbased changelog
 
-## Unreleased (after 1.0.76.33)
+## 1.0.76.34 (Modern GUI fork)
 
-- Autofix makes no retry for a game whose GPU was lost (VK_ERROR_DEVICE_LOST): the game is left spinning with
-  nothing drawn, which looked like a stall, and a switch of the emulator's cannot help it.
-- A texture upscaler batch that ended with an error says so in the next batch's log line ("the batch before ended
-  with code N"); it was silent. Tested with a stand-in program that exits with 3.
+- Voice chat (experimental, Settings > Audio > "Voice chat headset", off): an Xbox Live Communicator, the Xbox's
+  USB headset, in player 1's controller (its first memory unit slot), for the games' voice chat on Insignia and
+  System Link. It is the real headset's USB device (045e:0283: two interfaces, an isochronous endpoint each, mono
+  16-bit samples at 8000 to 24000 Hz, as the Xbox dev wiki lists it); the PC's default microphone is what it
+  hears and its speaker is the game's sound device. The controller's USB (ohci.c) now does isochronous transfers
+  (it skipped them before): one packet a frame from the TD's PSW list, condition codes and sizes written back, a
+  TD whose frames have gone by retired with DataOverrun. Host test (tests/native/usb): the headset's descriptors,
+  the sample-rate request, a speaker's four packets out and a microphone's in with their PSWs and done queue, and
+  the missed frames. NOT tried with a game: the Xbox's voice library, and how it uses the device, are unseen
+  here, so whether a title sees the headset is not known. With it off (default) nothing changes. The microphone is
+  opened when a title first uses the headset (the system may ask for permission); the log says "headset: ..." for
+  each step. Also: autofix makes no retry for a game whose GPU was lost, and a failed upscaler batch is said in
+  the log.
 
 ## 1.0.76.33 (Modern GUI fork)
 

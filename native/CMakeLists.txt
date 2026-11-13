@@ -112,6 +112,8 @@ add_library(hakux_native STATIC
   dev/usb_hub.c
   dev/xid.c
   dev/xid_sbc.c
+  dev/xid_xblc.c
+  dev/xblc_audio.c
   dev/ohci.c
   dev/aci.c
   dev/nvnet.c

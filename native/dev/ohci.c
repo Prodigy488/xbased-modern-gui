@@ -106,6 +106,7 @@
 #define CC_NOERROR           0
 #define CC_STALL             4
 #define CC_DEVICENOTRESPONDING 5
+#define CC_DATAOVERRUN       8
 #define CC_DATAUNDERRUN      9
 
 typedef struct Ohci {
@@ -138,6 +139,7 @@ static NcUsbDev *g_pad_hub[4];
 static bool g_front_hub;
 static bool g_ready;                    /* nc_dev_ohci_init done */
 static bool g_sbc;                      /* player 1's controller: the Steel Battalion one */
+static bool g_voice;                    /* a headset (Xbox Live Communicator) in player 1's controller's slot */
 static int g_early_mask = -1;           /* nc_dev_ohci_set_pads before it: the boot's */
 
 static uint64_t now_ns(void)
@@ -436,6 +438,80 @@ static bool service_td(Ohci *o, uint32_t ed_pa, uint32_t ed[4])
     return !(ed[2] & ED_H);
 }
 
+/* Service the head isochronous TD of an ED (OpenHCI 4.3.2): one packet per frame, the one for the frame number
+ * now (PSW[frame - SF]). Its place in the buffer is the packet's offset (bit 12: in BE's page, else BP0's) up to the
+ * next packet's, the last one to BE. Each packet's PSW gets its condition code and the bytes moved; the TD is
+ * retired after its last packet, or at once when the frame it wants is already past. Returns false: nothing more
+ * for this ED this frame. */
+static bool service_iso_td(Ohci *o, uint32_t ed_pa, uint32_t ed[4])
+{
+    const uint32_t td_pa = ed[2] & PTR_MASK;
+    uint32_t td[8];
+    if (!rd_words(o, td_pa, td, 8)) {
+        ed[2] |= ED_H;
+        return false;
+    }
+    const unsigned fc = (td[0] >> 24) & 7;
+    const int rel = (int16_t)(uint16_t)(o->frame_number - (td[0] & 0xffff));
+    if (rel < 0) {
+        return false;                       /* its frame has not come */
+    }
+    uint32_t cc = CC_NOERROR;
+    if (rel > (int)fc) {
+        cc = CC_DATAOVERRUN;                /* it was not reached in time: retired whole */
+    } else {
+        const unsigned i = (unsigned)rel;
+        const uint32_t psw = (td[4 + i / 2] >> (16 * (i & 1))) & 0xffff;
+        const uint32_t start = ((psw & 0x1000) ? (td[3] & ~0xfffu) : (td[1] & ~0xfffu)) + (psw & 0xfff);
+        uint32_t end = td[3];               /* BE: the last byte */
+        if (i < fc) {
+            const uint32_t nx = (td[4 + (i + 1) / 2] >> (16 * ((i + 1) & 1))) & 0xffff;
+            end = ((nx & 0x1000) ? (td[3] & ~0xfffu) : (td[1] & ~0xfffu)) + (nx & 0xfff) - 1;
+        }
+        const uint32_t len = end >= start && end - start < 1023 ? end - start + 1 : 0;
+        static uint8_t buf[1024];
+        const bool in = ED_D(ed[0]) == 2;
+        NcUsbDev *d = find_device(o, (uint8_t)ED_FA(ed[0]));
+        const int ep = (int)ED_EN(ed[0]);
+        int r = -100;
+        if (d && d->data && ep) {
+            if (!in && len) {
+                td_copy(o, start, end, buf, len, false);
+            }
+            r = d->data(d, in, ep, buf, (int)len);
+            if (in && r > 0 && (uint32_t)r <= len) {
+                td_copy(o, start, end, buf, (uint32_t)r, true);
+            }
+        }
+        uint32_t pcc = r >= 0 ? ((uint32_t)r == len ? CC_NOERROR : CC_DATAUNDERRUN)
+                     : r == NC_USB_NAK ? CC_DATAUNDERRUN : r == NC_USB_STALL ? CC_STALL : CC_DEVICENOTRESPONDING;
+        const uint32_t out = (pcc << 12) | (uint32_t)(r > 0 ? r : 0);
+        const unsigned sh = 16 * (i & 1);
+        td[4 + i / 2] = (td[4 + i / 2] & ~(0xffffu << sh)) | (out << sh);
+        o->tds++;
+        if (i < fc) {
+            wr_words(o, td_pa + 16 + 4 * (i / 2), &td[4 + i / 2], 1);
+            return false;                   /* the next packet is the next frame's */
+        }
+    }
+    /* Retire: the TD goes onto the done queue with its code (NoError: every packet was tried; each one's own is in
+     * its PSW). */
+    td[0] = (td[0] & ~(0xfu << TD_CC_SHIFT)) | (cc << TD_CC_SHIFT);
+    ed[2] = (td[2] & PTR_MASK) | (ed[2] & (ED_H | ED_C));
+    td[2] = o->done;
+    o->done = td_pa;
+    const int di = (int)TD_DI(td[0]);
+    if (di < o->done_count) {
+        o->done_count = di;
+    }
+    if (cc != CC_NOERROR) {
+        o->done_count = 0;
+    }
+    wr_words(o, td_pa, td, 8);
+    wr_words(o, ed_pa + 8, &ed[2], 1);
+    return true;
+}
+
 /* Walk an ED list; returns whether any ED had TDs queued. */
 static bool service_list(Ohci *o, uint32_t head, bool periodic)
 {
@@ -446,7 +522,16 @@ static bool service_list(Ohci *o, uint32_t head, bool periodic)
         if (!rd_words(o, pa, ed, 4)) {
             break;
         }
-        if (!(ed[0] & (ED_K | ED_F))) {
+        if ((ed[0] & ED_F) && !(ed[0] & ED_K) && periodic) {
+            /* isochronous: one packet of the head TD, and when that was its last, the next TD's for this frame
+             * too (a TD may start at the frame the one before ended on) */
+            for (unsigned n = 0; n < 2 && !(ed[2] & ED_H) && (ed[2] & PTR_MASK) != (ed[1] & PTR_MASK); n++) {
+                active = true;
+                if (!service_iso_td(o, pa, ed)) {
+                    break;
+                }
+            }
+        } else if (!(ed[0] & (ED_K | ED_F))) {
             unsigned tds = 0;
             while (!(ed[2] & ED_H) && (ed[2] & PTR_MASK) != (ed[1] & PTR_MASK) && tds < 64) {
                 active = true;
@@ -705,6 +790,14 @@ void nc_dev_ohci_init(struct NcVm *vm)
     for (unsigned p = 0; p < 4; p++) {
         g_pad_hub[p] = nc_usb_hub_new(3);
         nc_usb_hub_attach(g_pad_hub[p], 1, p == 0 && g_sbc ? nc_xid_sbc_new() : nc_xid_gamepad_new(p));
+        if (p == 0 && g_voice) {
+            NcUsbDev *hs = nc_xid_xblc_new();
+            if (hs) {
+                nc_usb_hub_attach(g_pad_hub[0], 2, hs);     /* the first memory unit slot */
+                nc_xblc_audio_install();
+                nc_log("hakuX-native-usb", "headset: in player 1's controller (slot 1), the PC's microphone and sound");
+            }
+        }
         if (!((mask >> p) & 1)) {
             continue;
         }
@@ -739,6 +832,11 @@ void nc_dev_ohci_init(struct NcVm *vm)
     nc_log("hakuX-native-usb", "ohci: %u controller(s) (players %s%s%s%s)%s", players, mask & 1 ? "1" : "",
            mask & 2 ? "2" : "", mask & 4 ? "3" : "", mask & 8 ? "4" : "",
            front_hub ? " behind the front panel hub" : "");
+}
+
+void nc_dev_ohci_use_voice(bool on)
+{
+    g_voice = on;
 }
 
 void nc_dev_ohci_use_sbc(bool on)

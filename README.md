@@ -52,8 +52,8 @@ No BIOS, MCPX ROM or hard-disk image is needed.
 
 | Platform | File | |
 |---|---|---|
-| **Windows** 10/11 (x64) | `xbased-modern-gui-1.0.76.33-windows-x64.zip` | Unzip anywhere and run `xbased.exe`. Portable: everything stays in its folder. |
-| **Linux** (x86-64) | `xbased-1.0.76.33-x86_64.AppImage` | `chmod +x` it and run it. Needs a Vulkan driver and glibc 2.38 or newer (Ubuntu 24.04, Fedora 39, Debian 13). |
+| **Windows** 10/11 (x64) | `xbased-modern-gui-1.0.76.34-windows-x64.zip` | Unzip anywhere and run `xbased.exe`. Portable: everything stays in its folder. |
+| **Linux** (x86-64) | `xbased-1.0.76.34-x86_64.AppImage` | `chmod +x` it and run it. Needs a Vulkan driver and glibc 2.38 or newer (Ubuntu 24.04, Fedora 39, Debian 13). |
 
 Get it from **[Releases](https://github.com/Prodigy488/xbased-modern-gui/releases/latest)**.
 The Linux AppImage starts, but it has not been run with a GPU or sound on Linux (it was
@@ -204,6 +204,8 @@ xbased doesn't include any copyrighted Xbox software.
   out (Settings › Audio; stereo by default).
 - **Online**: Insignia (the community's Xbox Live replacement), XLink Kai and
   System Link on your network.
+- **Voice chat headset** (Settings > Audio, off; experimental): an Xbox Live Communicator in player 1's controller,
+  with your PC's microphone and sound output, for games with voice chat (Insignia). Not tried with a game yet.
 - **11 languages**, your system's by default. Games start in your language,
   or in English when the disc doesn't have it.
 

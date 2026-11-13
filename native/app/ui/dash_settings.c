@@ -316,6 +316,7 @@ void scr_settings(void)
         opt_int(&l, S_VOLUME, "volume", 0, 100, 5, 100, "%");
         opt_bool(&l, S_MUTE_BG, "mutebg", true, false);
         opt_bool(&l, S_UI_SOUNDS, "ui.sounds", false, false);
+        opt_bool(&l, S_VOICE, "voice", false, false);
         break;
     }
     case 2: {

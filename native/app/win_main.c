@@ -108,6 +108,7 @@ static char g_key[24];  /* the game's "<TITLE ID>.<version>" */
 static uint32_t g_title_id;  /* ... its title id */
 static int g_sbc_opt = -1;   /* sbc=1/0: the Steel Battalion controller on/off; -1: on for Steel Battalion */
 static bool g_sbc_on;        /* player 1 has it, not a gamepad */
+static bool g_voice_on;      /* the headset (Xbox Live Communicator) in player 1's controller */
 
 /* ------------------------------------------------------------ helpers */
 
@@ -1651,7 +1652,7 @@ static const char *pick_disc(void)
 }
 
 #ifndef XBASED_VERSION
-#define XBASED_VERSION "1.0.76.33"
+#define XBASED_VERSION "1.0.76.34"
 #endif
 
 static void rm_tree(const char *path)
@@ -1931,6 +1932,8 @@ int main(int argc, char *argv[])
             g_pause_bg = atoi(a + 8) != 0;
         } else if (!strncmp(a, "autosave=", 9)) {
             g_autosave = atoi(a + 9) != 0;
+        } else if (!strncmp(a, "voice=", 6)) {
+            g_voice_on = atoi(a + 6) != 0;
         } else if (!strncmp(a, "sbc=", 4)) {
             g_sbc_opt = atoi(a + 4) != 0;
         } else if (!strncmp(a, "autofix=", 8)) {
@@ -1951,6 +1954,7 @@ int main(int argc, char *argv[])
     }
     g_sbc_on = g_sbc_opt > 0 || (g_sbc_opt < 0 && g_title_id == SBC_TITLE_STEEL_BATTALION && !xbox_dash);
     nc_dev_ohci_use_sbc(g_sbc_on);
+    nc_dev_ohci_use_voice(g_voice_on);
     if (g_sbc_on) {
         nc_log("hakuX-app", "the Steel Battalion controller is player 1's: %s", sbc_layout_text());
     }

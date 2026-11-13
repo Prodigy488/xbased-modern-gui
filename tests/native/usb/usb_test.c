@@ -4,7 +4,7 @@
  * hub and its gamepad through OHCI EDs and TDs in fake guest RAM, then reads
  * a report and sends rumble.
  *
- *   gcc -O1 -I. tests/native/usb/usb_test.c native/dev/usb.c native/dev/usb_hub.c native/dev/xid.c -o usb_test
+ *   gcc -O1 -I. tests/native/usb/usb_test.c native/dev/usb.c native/dev/usb_hub.c native/dev/xid.c native/dev/xid_xblc.c -o usb_test
  */
 #include <stdarg.h>
 #include <stdio.h>
@@ -40,6 +40,21 @@ void nc_log(const char *tag, const char *fmt, ...)
 }
 
 #include "native/dev/ohci.c"
+
+/* What ohci.c links to beyond the USB stack: savestate records, the pause hooks, the headset's audio, the Steel
+ * Battalion device, the frame count. None of it is used here. */
+void nc_pause_register(const char *name) {}
+void nc_pause_idle(bool idle) {}
+int nc_paused(void) { return 0; }
+void nc_pause_wait(void) {}
+void nc_xblc_audio_install(void) {}
+NcUsbDev *nc_xid_sbc_new(void) { return NULL; }
+uint64_t hle_back_swap_count(void) { return 0; }
+void nc_buf_put(NcBuf *b, const void *p, size_t n) {}
+void nc_rec_put(NcBuf *b, const NcRecord *rec, const void *p) {}
+void nc_rec_get(NcRd *b, const NcRecord *rec, void *p, unsigned int ver) {}
+bool nc_rd_get(NcRd *b, void *p, size_t n) { return true; }
+
 
 static int g_fail;
 #define CHECK(c)                                                                                                       \
@@ -258,6 +273,132 @@ static void enumerate_on_hub_port(uint8_t hub, uint16_t port, uint8_t new_addr, 
     CHECK(control(new_addr, 0x00, 9, 1, 0, NULL, 0) == 0);
 }
 
+
+/* ---- the headset (xid_xblc.c) and isochronous transfers ---- */
+static uint8_t g_mic_n;
+static uint8_t g_spk_log[512];
+static int g_spk_len;
+static unsigned g_rate_set;
+static void hk_rate(unsigned hz)
+{
+    g_rate_set = hz;
+}
+static void hk_mic(uint8_t *buf, int len)
+{
+    for (int i = 0; i < len; i++) {
+        buf[i] = g_mic_n++;
+    }
+}
+static void hk_spk(const uint8_t *buf, int len)
+{
+    if (g_spk_len + len <= (int)sizeof(g_spk_log)) {
+        memcpy(g_spk_log + g_spk_len, buf, (size_t)len);
+        g_spk_len += len;
+    }
+}
+
+#define ED_ISO  0x11200u
+#define ITD     0x13000u
+#define ITD_TAIL 0x13040u
+#define ISOBUF  0x30000u
+
+/* One isochronous TD of `n` packets of `plen` bytes at the frame `sf`, on an ED for (addr, ep, dir 1 OUT / 2 IN);
+ * the frames run until it is on the done queue (or `max` of them); returns the done queue head (0: not done). */
+static uint32_t iso_run(uint8_t addr, unsigned ep, unsigned dir, unsigned sf, unsigned n, unsigned plen, int max)
+{
+    for (unsigned i = 0; i < 32; i++) {
+        wr(HCCA + 4 * i, ED_ISO);
+    }
+    wr(ITD, (sf & 0xffff) | ((n - 1) << 24) | (0xfu << 28));
+    wr(ITD + 4, ISOBUF);
+    wr(ITD + 8, ITD_TAIL);
+    wr(ITD + 12, ISOBUF + n * plen - 1);
+    for (unsigned i = 0; i < 8; i += 2) {
+        const uint32_t a = 0xE000u | ((i * plen) & 0xfff), b = 0xE000u | (((i + 1) * plen) & 0xfff);
+        wr(ITD + 16 + 2 * i, a | (b << 16));
+    }
+    wr(ITD_TAIL, 0);
+    wr(ED_ISO, addr | (ep << 7) | (dir << 11) | (1u << 15) | (48u << 16));
+    wr(ED_ISO + 4, ITD_TAIL);
+    wr(ED_ISO + 8, ITD);
+    wr(ED_ISO + 12, 0);
+    for (int i = 0; i < max; i++) {
+        frame(o);
+        if (reg(0x0C) & INT_WDH) {
+            const uint32_t d = rd(HCCA + 0x84);
+            wr(HCCA + 0x84, 0);
+            set_reg(0x0C, INT_WDH);
+            return d & ~1u;
+        }
+    }
+    return 0;
+}
+
+static unsigned psw(unsigned i)
+{
+    return (rd(ITD + 16 + 4 * (i / 2)) >> (16 * (i & 1))) & 0xffff;
+}
+
+static void headset_test(uint8_t hub, uint8_t addr)
+{
+    uint8_t desc[64];
+    const NcXblcAudio hooks = {hk_rate, hk_mic, hk_spk};
+    nc_xblc_set_audio(&hooks);
+    for (uint16_t p = 1; p <= 3; p++) {
+        hub_port(hub, p, 8, true);
+    }
+    enumerate_on_hub_port(hub, 2, addr, desc);
+    CHECK(nc_rd16(desc + 8) == 0x045e && nc_rd16(desc + 10) == 0x0283);
+    CHECK(control(addr, 0x80, 6, 0x0200, 0, desc, 64) == 45);
+    CHECK(desc[4] == 2 && desc[9 + 5] == 0x78 && desc[18 + 2] == 0x04 && desc[36 + 2] == 0x85);
+    /* the sample rate: vendor SET_FEATURE, wValue 0x100 | number */
+    CHECK(control(addr, 0x41, 3, 0x0102, 0, NULL, 0) == 0);
+    CHECK(g_rate_set == 16000 && nc_xblc_rate() == 16000);
+    CHECK(control(addr, 0x41, 3, 0x0105, 0, NULL, 0) == 0 && g_rate_set == 16000);   /* no such rate: unchanged */
+    CHECK(control(addr, 0x41, 3, 0x0001, 1, NULL, 0) == 0);                          /* gain control: taken */
+    CHECK(control(addr, 0xC1, 1, 0, 0, desc, 4) == -CC_STALL);                       /* other vendor requests: stall */
+
+    /* speaker: four packets of 32 bytes (16 kHz) out at the frames after this one */
+    for (int i = 0; i < 128; i++) {
+        g_ram[ISOBUF + (unsigned)i] = (uint8_t)(0xA0 + i);
+    }
+    g_spk_len = 0;
+    uint32_t done = iso_run(addr, 4, 1, (unsigned)(o->frame_number + 2), 4, 32, 12);
+    CHECK(done == ITD);
+    CHECK(rd(ITD) >> 28 == CC_NOERROR);
+    CHECK(g_spk_len == 128);
+    CHECK(!memcmp(g_spk_log, g_ram + ISOBUF, 128));
+    for (unsigned i = 0; i < 4; i++) {
+        CHECK(psw(i) == 32);                                        /* NoError, 32 bytes */
+    }
+    CHECK((rd(ED_ISO + 8) & ~0xfu) == ITD_TAIL);                    /* the ED's head: the tail */
+
+    /* microphone: four packets in, the hook's samples land in the guest's buffer, packet by packet */
+    memset(g_ram + ISOBUF, 0, 128);
+    g_mic_n = 7;
+    done = iso_run(addr, 5, 2, (unsigned)(o->frame_number + 1), 4, 32, 12);
+    CHECK(done == ITD && rd(ITD) >> 28 == CC_NOERROR);
+    for (int i = 0; i < 128; i++) {
+        if (g_ram[ISOBUF + (unsigned)i] != (uint8_t)(7 + i)) {
+            CHECK(0);
+            break;
+        }
+    }
+    for (unsigned i = 0; i < 4; i++) {
+        CHECK(psw(i) == 32);
+    }
+
+    /* one frame a packet: the TD is not done before its last frame */
+    g_mic_n = 0;
+    const unsigned sf = (unsigned)(o->frame_number + 4);
+    done = iso_run(addr, 5, 2, sf, 3, 48, 3);
+    CHECK(done == 0);                                              /* three frames: not yet its first */
+
+    /* a TD whose frames have gone by is retired whole with DataOverrun */
+    done = iso_run(addr, 5, 2, (unsigned)(o->frame_number - 30), 2, 32, 4);
+    CHECK(done == ITD && rd(ITD) >> 28 == CC_DATAOVERRUN);
+}
+
 int main(void)
 {
     setvbuf(stdout, NULL, _IONBF, 0);
@@ -272,6 +413,7 @@ int main(void)
     NcUsbDev *front = nc_usb_hub_new(4);
     NcUsbDev *pad_hub = nc_usb_hub_new(3);
     nc_usb_hub_attach(pad_hub, 1, nc_xid_gamepad_new(0));
+    nc_usb_hub_attach(pad_hub, 2, nc_xid_xblc_new());
     nc_usb_hub_attach(front, 3, pad_hub);
     o->dev[0] = front;
     soft_reset(o);
@@ -349,6 +491,8 @@ int main(void)
     uint16_t l = 0, r = 0;
     nc_pad_rumble(0, &l, &r);
     CHECK(l == 0x1234 && r == 0x5678);
+
+    headset_test(2, 4);
 
     /* An unknown address stalls nothing; it doesn't answer. Unknown requests stall. */
     CHECK(control(9, 0x80, 6, 0x0100, 0, desc, 18) == -CC_DEVICENOTRESPONDING);

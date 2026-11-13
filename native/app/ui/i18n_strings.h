@@ -444,3 +444,4 @@ XE(S_OG_HELP_READY, "The Xbox dashboard runs in its own window like a game. Pres
 XE(S_OG_HELP_INSIGNIA, "Create or manage your Insignia account here: the dashboard's Xbox Live pages. Choose Network: Insignia first (Insignia tab).")
 XE(S_AUDIO_DEVICE, "Sound device (next game start)")
 XE(S_AUDIO_DEVICE_DEFAULT, "System default")
+XE(S_VOICE, "Voice chat headset (experimental, next game start)")

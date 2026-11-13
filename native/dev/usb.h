@@ -117,6 +117,20 @@ void nc_sbc_set(const NcSbcState *s);
 void nc_sbc_lamps(uint8_t out[22]);                 /* the last panel report the title sent */
 void nc_sbc_report(const NcSbcState *s, uint8_t r[26]);
 
+/* xid_xblc.c: the Xbox Live Communicator (headset) for a controller's memory unit slot. Its samples (mono signed
+ * 16-bit, the rate it is set to) go to and come from the hooks the front end sets (xblc_audio.c). */
+typedef struct NcXblcAudio {
+    void (*set_rate)(unsigned hz);
+    void (*mic_read)(uint8_t *buf, int len);          /* len bytes of what the microphone heard, silence if none */
+    void (*speaker_write)(const uint8_t *buf, int len);
+} NcXblcAudio;
+NcUsbDev *nc_xid_xblc_new(void);
+void nc_xblc_set_audio(const NcXblcAudio *a);
+unsigned nc_xblc_rate(void);
+/* xblc_audio.c: the PC's microphone and sound output as those hooks (installs them; the devices open when the
+ * title first uses the headset). */
+void nc_xblc_audio_install(void);
+
 /* ohci.c: the Xbox's first USB controller (0xFED00000, IRQ 1), with gamepads
  * for the players in NC_PAD_MASK (or NC_PADS from player 1; default 1). */
 struct NcVm;
@@ -126,6 +140,8 @@ void nc_dev_ohci_init(struct NcVm *vm);
 void nc_dev_ohci_set_pads(unsigned mask);
 /* Before the core starts: player 1's controller is the Steel Battalion one. */
 void nc_dev_ohci_use_sbc(bool on);
+/* Before the core starts: a headset (Xbox Live Communicator) in player 1's controller's first slot. */
+void nc_dev_ohci_use_voice(bool on);
 
 #ifdef __cplusplus
 }

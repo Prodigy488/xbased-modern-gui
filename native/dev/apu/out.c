@@ -364,6 +364,12 @@ static void *drain_thread(void *arg)
     return NULL;
 }
 
+/* The device the game's sound goes to (the headset's speaker follows it). */
+SDL_AudioDeviceID nc_audio_output_device(void)
+{
+    return pick_device();
+}
+
 int apu_out_open(int capacity_bytes, int samples, pthread_cond_t *wake)
 {
     g_out.buf = calloc(1, (size_t)capacity_bytes);
