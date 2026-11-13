@@ -713,6 +713,18 @@ void nc_kernel_trace_trigger(const char *what)
         at = getenv("NC_TRACE_KCALL_AT");
         armed = at != NULL;
     }
+    /* Without the variable: the second open of a title's own save folder
+     * (UDATA\<title id>, the first is at start) starts a trace of 150 calls,
+     * what a save attempt's logs lack (which call made the folder it uses). */
+    if (!at) {
+        static unsigned udata_opens;
+        const char *u = strstr(what, "UDATA\\");
+        if (u && strlen(u) == 6 + 8 && ++udata_opens == 2 && g_trace_left <= 0) {
+            g_trace_left = 150;
+            nc_log("hakuX-ktrace", "trace starts at %s (the save folder's second open)", what);
+        }
+        return;
+    }
     if (armed && strstr(what, at)) {
         armed = false;
         const char *t = getenv("NC_TRACE_KCALL");
