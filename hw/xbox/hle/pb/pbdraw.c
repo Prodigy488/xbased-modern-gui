@@ -3963,7 +3963,7 @@ static void pick_log(const HleCmdDraw *d, unsigned b, const uint8_t *src, uint32
         regs_f(m, 0x0680, 16);
         for (unsigned r = 0; r < 4; r++) {
             for (unsigned c = 0; c < 4; c++) {
-                f[r][c] = m[c * 4 + r];     /* so o[r] below is dot(p, column r) */
+                f[r][c] = m[r * 4 + c];     /* rows x, y, z, w: it holds the viewport, so x/w, y/w are pixels */
             }
         }
     } else {
@@ -3992,7 +3992,7 @@ static void pick_log(const HleCmdDraw *d, unsigned b, const uint8_t *src, uint32
             behind++;
             continue;
         }
-        const float x = o[0] / o[3], y = o[1] / o[3], z = o[2] / o[3];      /* NDC */
+        const float x = o[0] / o[3], y = o[1] / o[3], z = o[2] / o[3];      /* pixels, depth */
         x0 = MIN(x0, x); x1 = MAX(x1, x);
         y0 = MIN(y0, y); y1 = MAX(y1, y);
         z0 = MIN(z0, z); z1 = MAX(z1, z);
@@ -4024,7 +4024,7 @@ static void pick_log(const HleCmdDraw *d, unsigned b, const uint8_t *src, uint32
         hle_log("hakuX-hle-pb", "pick: viewport scale %g %g %g %g offset %g %g %g %g (ndc below)", sc[0], sc[1], sc[2],
                 sc[3], of[0], of[1], of[2], of[3]);
     }
-    hle_log("hakuX-hle-pb", "pick: draw %llu %s ndc bbox %.3f,%.3f-%.3f,%.3f z %g-%g verts %u behind %u of %u prim %u",
+    hle_log("hakuX-hle-pb", "pick: draw %llu %s bbox %.0f,%.0f to %.0f,%.0f z %g to %g verts %u behind %u of %u prim %u",
             (unsigned long long)g_pd.draws, g_pd.ff ? "ff" : "prog", x0, y0, x1, y1, z0, z1, used, behind, g_pd.nidx, g_pd.prim);
 }
 
