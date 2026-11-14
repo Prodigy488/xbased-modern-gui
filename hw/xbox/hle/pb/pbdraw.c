@@ -3998,6 +3998,27 @@ static void pick_log(const HleCmdDraw *d, unsigned b, const uint8_t *src, uint32
         z0 = MIN(z0, z); z1 = MAX(z1, z);
         used++;
     }
+    {
+        static unsigned raw;
+        if (raw++ < 12 && g_pd.nidx) {
+            float p0[3] = { 0, 0, 0 }, mc[16], mv[16], pj[16];
+            const uint32_t v0 = g_pd.idx[0] - lo;
+            if (v0 < nv) {
+                memcpy(p0, src + (size_t)v0 * st + po, 12);
+            }
+            regs_f(mc, 0x0680, 16);
+            regs_f(mv, 0x0480, 16);
+            regs_f(pj, 0x0640, 16);
+            hle_log("hakuX-hle-pb", "pick: raw draw %llu ff %d p0 %g %g %g stride %u po %u size %u composite "
+                    "%g %g %g %g | %g %g %g %g | %g %g %g %g | %g %g %g %g modelview %g %g %g %g | %g %g %g %g | "
+                    "%g %g %g %g | %g %g %g %g r640 %g %g %g %g | %g %g %g %g",
+                    (unsigned long long)g_pd.draws, (int)g_pd.ff, p0[0], p0[1], p0[2], st, po, size,
+                    mc[0], mc[1], mc[2], mc[3], mc[4], mc[5], mc[6], mc[7], mc[8], mc[9], mc[10], mc[11], mc[12],
+                    mc[13], mc[14], mc[15], mv[0], mv[1], mv[2], mv[3], mv[4], mv[5], mv[6], mv[7], mv[8], mv[9],
+                    mv[10], mv[11], mv[12], mv[13], mv[14], mv[15], pj[0], pj[1], pj[2], pj[3], pj[4], pj[5], pj[6],
+                    pj[7]);
+        }
+    }
     static unsigned vps;
     if (vps++ < 3) {
         hle_log("hakuX-hle-pb", "pick: viewport scale %g %g %g %g offset %g %g %g %g (ndc below)", sc[0], sc[1], sc[2],
