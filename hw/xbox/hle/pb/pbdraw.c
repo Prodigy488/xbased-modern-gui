@@ -3696,7 +3696,8 @@ static void vd_log_gate(unsigned *n, bool *go)
     *go = *n <= 40 || *n % 500 == 0;
 }
 
-static void vdiag_pos(const HleCmdDraw *d, unsigned b, const uint8_t *src, uint32_t st, uint32_t lo, uint32_t hi)
+static void vdiag_pos(const HleCmdDraw *d, unsigned b, const uint8_t *src, uint32_t st, uint32_t lo, uint32_t hi,
+                      uint32_t from, uint32_t len)
 {
     static unsigned said;
     const uint32_t fmt = R(NV097_SET_VERTEX_DATA_ARRAY_FORMAT);
@@ -3729,6 +3730,31 @@ static void vdiag_pos(const HleCmdDraw *d, unsigned b, const uint8_t *src, uint3
                     "prim %u stride %u off %u size %u pgen %u",
                     (unsigned long long)g_pd.draws, bad, hi - lo + 1, first, fv[0], fv[1], fv[2], fv[3],
                     g_pd.prim, st, po, size, (unsigned)g_pd.pgen);
+            /* whose memory it is: a target's image or a writeback landing there */
+            unsigned shown = 0;
+            for (unsigned i = 0; i < g_pd.nobjs && shown < 4; i++) {
+                const uint32_t oa = g_pd.objs[i].d.pa, oe = oa + g_pd.objs[i].d.pitch * g_pd.objs[i].d.h;
+                if (g_pd.objs[i].d.pitch && oa < from + len && from < oe) {
+                    hle_log("hakuX-hle-pb", "vdiag:   vertices %08x+%u overlap object %u at %08x-%08x "
+                            "(%ux%u pitch %u fmt %x) bound %llu of %llu cpu_used %d",
+                            from, len, g_pd.objs[i].id, oa, oe, g_pd.objs[i].d.w, g_pd.objs[i].d.h,
+                            g_pd.objs[i].d.pitch, (unsigned)g_pd.objs[i].d.xfmt,
+                            (unsigned long long)g_pd.objs[i].bound, (unsigned long long)g_pd.binds,
+                            (int)g_pd.objs[i].cpu_used);
+                    shown++;
+                }
+            }
+            for (unsigned i = 0; i < WB_NOTES && shown < 8; i++) {
+                if (g_wbn[i].len && g_wbn[i].pa < from + len && from < g_wbn[i].pa + g_wbn[i].len) {
+                    hle_log("hakuX-hle-pb", "vdiag:   vertices %08x+%u overlap a writeback %08x+%u (value %llu, "
+                            "last %llu)", from, len, g_wbn[i].pa, g_wbn[i].len,
+                            (unsigned long long)g_wbn[i].v, (unsigned long long)hle_fe_last_value());
+                    shown++;
+                }
+            }
+            if (!shown) {
+                hle_log("hakuX-hle-pb", "vdiag:   vertices %08x+%u overlap no target nor writeback", from, len);
+            }
         }
     }
 }
@@ -3745,7 +3771,7 @@ static void vdiag_consts(void)
         for (unsigned c = 0; c < 4; c++) {
             float f;
             memcpy(&f, &g_pd.consts[i][c], 4);
-            if (vd_bad(f)) {
+            if (!(f > -1e9f && f < 1e9f)) {
                 bool go;
                 vd_log_gate(&said, &go);
                 if (go) {
@@ -3817,7 +3843,7 @@ static void draw_arrays(void)
         coh_pend_wait(from, len);           /* a copy queued into it lands first */
         const uint8_t *src = hle_pa_ptr(from, len);
         if (src) {
-            vdiag_pos(&d, b, src, st, lo, hi);
+            vdiag_pos(&d, b, src, st, lo, hi, from, len);
         }
         if (src && hle_quirk(HLE_QUIRK_VB_ALIGN) && vb_misaligned(&d, b, base[b])) {
             if (!vb_realign(&d, b, src, from, len, st ? hi - lo + 1 : 1)) {
