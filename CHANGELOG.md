@@ -1,9 +1,9 @@
 # xbased changelog
 
-## 1.0.76.64 (Modern GUI fork, test build)
+## 1.0.76.65 (Modern GUI fork, test build)
 
-- Test for Jedi Knight Academy: F8 reports every occlusion (z-pass) test as fully visible, and F8 again as counted,
-  to see whether the title culls geometry by our counts.
+- Test for Jedi Knight Academy: F4 reports every occlusion (z-pass) test as fully visible, and F4 again as counted,
+  to see whether the title culls geometry by our counts. (.64 put it on F8, which loads the state.)
 
 ## 1.0.76.63 (Modern GUI fork, test build)
 

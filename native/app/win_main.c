@@ -2191,16 +2191,16 @@ int main(int argc, char *argv[])
                     char msg[64];
                     snprintf(msg, sizeof(msg), "Depth bias test %d (F7)", s_zb);
                     notice(msg, NULL);
-                } else if (ev.key.key == SDLK_F8) {
+                } else if (ev.key.key == SDLK_F4 && !(ev.key.mod & SDL_KMOD_ALT)) {
                     /* a visibility A/B (debug.hakux.visall): 1 reports every occlusion test fully visible, 0 as counted */
                     static int s_va;
                     char v[8];
                     s_va = !s_va;
                     snprintf(v, sizeof(v), "%d", s_va);
                     nc_win_prop_set("debug.hakux.visall", v);
-                    nc_log("hakuX-app", "visibility test %d (F8)", s_va);
+                    nc_log("hakuX-app", "visibility test %d (F4)", s_va);
                     char msg[64];
-                    snprintf(msg, sizeof(msg), "All visible %s (F8)", s_va ? "on" : "off");
+                    snprintf(msg, sizeof(msg), "All visible %s (F4)", s_va ? "on" : "off");
                     notice(msg, NULL);
                 } else if (ev.key.key == SDLK_F10) {
                     /* a graphics A/B for a bug report (debug.hakux.fbdbg): auto (default), 0 normal, 1 programs that read their
