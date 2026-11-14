@@ -3943,6 +3943,55 @@ static void vdiag_pos(const HleCmdDraw *d, unsigned b, const uint8_t *src, uint3
     }
 }
 
+/* Draw-log helper: where a draw's referenced positions land on the screen
+ * through c0..c3 and the viewport constants (c58 scale, c59 offset), as a
+ * bounding box with how many vertices sit behind the eye and the depth
+ * range. Lined up with the draw log by draw number, it says which draws
+ * cover a given spot of a capture (Jedi Knight Academy's holes). */
+static void pick_log(const HleCmdDraw *d, unsigned b, const uint8_t *src, uint32_t st, uint32_t lo, uint32_t hi)
+{
+    const uint32_t fmt = R(NV097_SET_VERTEX_DATA_ARRAY_FORMAT);
+    const unsigned size = (fmt >> 4) & 0xF;
+    if (g_dlog_left <= 0 || !size || (fmt & 0xF) != 2 || size < 3 || ((d->attr[0] >> 8) & 0xFF) != b || !st) {
+        return;
+    }
+    const uint32_t po = d->attr[0] >> 16, nv = hi - lo + 1;
+    float f[4][4];
+    for (unsigned i = 0; i < 4; i++) {
+        for (unsigned c = 0; c < 4; c++) {
+            memcpy(&f[i][c], &g_pd.consts[i][c], 4);
+        }
+    }
+    float sc[4], of[4];
+    memcpy(sc, g_pd.consts[VPSCL], 16);
+    memcpy(of, g_pd.consts[VPOFF], 16);
+    float x0 = 1e30f, y0 = 1e30f, x1 = -1e30f, y1 = -1e30f, z0 = 1e30f, z1 = -1e30f;
+    unsigned used = 0, behind = 0;
+    for (uint32_t i = 0; i < g_pd.nidx; i++) {
+        const uint32_t v = g_pd.idx[i] - lo;
+        if (v >= nv) {
+            continue;
+        }
+        float p[4] = { 0, 0, 0, 1 };
+        memcpy(p, src + (size_t)v * st + po, 12);
+        float o[4];
+        for (unsigned r = 0; r < 4; r++) {
+            o[r] = p[0] * f[r][0] + p[1] * f[r][1] + p[2] * f[r][2] + p[3] * f[r][3];
+        }
+        if (!(o[3] > 1e-6f)) {
+            behind++;
+            continue;
+        }
+        const float x = o[0] / o[3] * sc[0] + of[0], y = o[1] / o[3] * sc[1] + of[1], z = o[2] / o[3] * sc[2] + of[2];
+        x0 = MIN(x0, x); x1 = MAX(x1, x);
+        y0 = MIN(y0, y); y1 = MAX(y1, y);
+        z0 = MIN(z0, z); z1 = MAX(z1, z);
+        used++;
+    }
+    hle_log("hakuX-hle-pb", "pick: draw %llu bbox %.0f,%.0f-%.0f,%.0f z %g-%g verts %u behind %u of %u prim %u",
+            (unsigned long long)g_pd.draws, x0, y0, x1, y1, z0, z1, used, behind, g_pd.nidx, g_pd.prim);
+}
+
 static void vdiag_consts(void)
 {
     static uint32_t last = UINT32_MAX;
@@ -4055,6 +4104,7 @@ static void draw_arrays(void)
         if (src) {
             vdiag_pos(&d, b, src, st, lo, hi, from, len);
             vdiag_zero(&d, b, src, st, lo, hi, from, len);
+            pick_log(&d, b, src, st, lo, hi);
         }
         if (src && hle_quirk(HLE_QUIRK_VB_ALIGN) && vb_misaligned(&d, b, base[b])) {
             if (!vb_realign(&d, b, src, from, len, st ? hi - lo + 1 : 1)) {
