@@ -5145,8 +5145,24 @@ static void coh_land_over(const PbObj *o, uint32_t len)
         PbObj *x = &g_pd.objs[i];
         uint32_t xl;
         if (x != o && coh_managed(x, &xl) && x->d.pa < o->d.pa + len && x->d.pa + xl > o->d.pa &&
-            x->written > x->synced && (!best || x->written > best->written)) {
-            best = x;
+            x->written > x->synced) {
+            if (xl <= 262144 && (x->d.pa < o->d.pa || x->d.pa + xl > o->d.pa + len)) {
+                /* a small old target sticking out of the new one's memory: its
+                 * image over what the title wrote beside the new target since
+                 * (Thrillville's vertices below its 320 x 240 ones) is the
+                 * stale: its image is dropped, the memory is the title's */
+                static unsigned said;
+                if (said++ < 20) {
+                    hle_log("hakuX-hle-pb", "target %u (%08x %ux%u) sticks out of the new target %u (%08x): its "
+                            "image will not land", x->id, x->d.pa, x->d.w, x->d.h, o->id, o->d.pa);
+                }
+                coh_synced(x, xl);
+                hle_barrier_unguard(x->d.pa, xl);
+                continue;
+            }
+            if (!best || x->written > best->written) {
+                best = x;
+            }
         }
     }
     g_land_why = "new target over it";

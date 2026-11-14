@@ -1,5 +1,11 @@
 # xbased changelog
 
+## 1.0.76.56 (Modern GUI fork, test build)
+
+- Thrillville's black pillars, tracks and missing objects: a new render target made over part of an old small
+  one's memory no longer lands the old black image over the part that sticks out (where the game had put its
+  vertex data). Not confirmed on a PC yet.
+
 ## 1.0.76.55 (Modern GUI fork, test build)
 
 - Diagnostics only: the log names what made each small render target's image land in memory (`landing target ...`),
