@@ -17,6 +17,7 @@
 
 <p align="center">
   <a href="#download">Download</a> ·
+  <a href="#highlights">Highlights</a> ·
   <a href="#features">Features</a> ·
   <a href="#screenshots">Screenshots</a> ·
   <a href="#getting-started">Getting started</a> ·
@@ -47,6 +48,40 @@ https://github.com/user-attachments/assets/bf62adff-002a-4dc6-9b28-eee775181646
 a high-level NV2A renderer on Vulkan and an accurate MCPX audio core, behind a
 console-style front end of its own.
 No BIOS, MCPX ROM or hard-disk image is needed.
+
+## Highlights
+
+What this build adds on top of upstream xbased, the big items first.
+
+**Sharper pictures**
+- **Automatic texture upscaling.** Real-ESRGAN comes in the download and upscales the textures a game uses 4x, in
+  the background while you play. A new area sharpens a few seconds after you enter it and is sharp from the start
+  the next time. A speed setting (Low, Medium, High) decides how much of the GPU it may take.
+- **Cleaner movies.** Game cutscenes (FMV) are found automatically in any game and cleaned before they are scaled up:
+  blocky compression noise is smoothed along the edges, flicker is calmed and the edges are made a little crisper.
+  It works with FSR, NIS and sharpening.
+- **HD texture packs.** Texture packs are loaded from PNG files, and a game's menu exports your upscaled textures as
+  a zip you can share. Drop someone else's zip into the `texture packs` folder to install it.
+- **SMAA, frame interpolation and sharpening.** A sharper anti-aliasing, a frame between each two for 30 fps games,
+  and AMD's RCAS sharpening, all in Settings > Video.
+- **Settings chosen for your PC.** The first start looks at the GPU and display and sets the render scale, filtering,
+  anti-aliasing and texture upscaling to match.
+
+**Games that work**
+- **Autofix for stalled games.** A game that stops drawing is run again with another of the emulator's nine
+  switches, and the one that gets it going is kept for that game.
+- **Fixes for individual games.** 007: From Russia with Love has no glass-shard wedges or lights through walls,
+  Jade Empire's focus mode keeps its colours, Soulcalibur II saves again, Marvel vs. Capcom 2 and Dr. Muto start,
+  and Over the Hedge plays through its cutscenes.
+- **Steel Battalion's controller.** The game's 40-button controller, levers and pedals are driven from your keyboard
+  and gamepad.
+- **Insignia setup, memory manager and xemu import.** Online play, saves with their icons, and xemu's saves brought
+  across.
+
+**Day to day**
+- **Fast start-up.** The dashboard appears at once even with a big library and many texture dumps.
+- **Updates inside the app.** A new release is offered as xbased starts and installs itself.
+- **Linux AppImage** next to the Windows zip.
 
 ## Download
 
@@ -127,6 +162,9 @@ xbased doesn't include any copyrighted Xbox software.
 
 ### Picture
 - **Internal resolution** up to 8x, aspect ratio, widescreen and video modes.
+- **Cleaner movies (FMV)**: cutscene video is detected in any game and goes through an edge-preserving smoothing,
+  a light blend with the previous frame and a gentle edge sharpening before the upscaler. It is on by default and works
+  with FSR, NIS and sharpening; `debug.hakux.vidfx=0` turns it off.
 - **FXAA**, **SMAA** (a sharper anti-aliasing for the higher render scales) and **anisotropic filtering** up to 16x.
 - **Frame interpolation** (Settings > Video, off): for a game slower than the display (30 fps on 60 Hz, 60 fps on
   120 Hz and up), a frame between each two, from the motion between them. It delays the picture by half a frame.
@@ -150,6 +188,7 @@ xbased doesn't include any copyrighted Xbox software.
   `texture packs/exported/<game> [<title id>] HD textures.zip`. To install one, put the zip into the
   `texture packs` folder and start xbased.
 - **CRT filters**: soft scanlines, a classic TV, an arcade monitor.
+- **Upscaling speed while playing**: Low, Medium or High, for how much GPU the texture upscaler may take beside the game.
 - **Settings chosen for your PC**: the first start looks at the GPU and the display and sets the render scale,
   the filtering and the anti-aliasing to match (Settings > Video has a switch to choose them again).
 - Every setting **global or per game**.
@@ -183,7 +222,7 @@ xbased doesn't include any copyrighted Xbox software.
 - **In-game menu** with F1, or **Back + Start** / the **Guide** button on a
   gamepad: states, settings, controls, restart, back to the dashboard.
 - **Shortcuts**: F5 quick save, F8 quick load, Tab fast forward, F2 pause,
-  F12 screenshot, F11 full screen; all configurable.
+  F12 screenshot (saved as PNG), F11 full screen; all configurable.
 
 </td>
 <td valign="top">
