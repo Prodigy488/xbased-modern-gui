@@ -4159,6 +4159,220 @@ static void vb_land(uint32_t from, uint32_t len)
     }
 }
 
+/* ---- near-plane clipping ----
+ * A fixed-function triangle with a vertex behind the eye (w <= 0) or in front of the near plane is clipped here, as the
+ * NV2A does, before the GPU sees it: its corners come in as new vertices (attributes blended by barycentric weights)
+ * and the triangle goes out as the 1 to 3 triangles of its clipped polygon. Jedi Knight Academy's ground is a few huge
+ * triangles that reach behind the camera, and holes opened in it where they were left to the host rasterizer.
+ * HAKUX_HLE_NOCLIP=1 leaves it off. */
+typedef struct { uint32_t v[3]; float b[3]; } ClipVtx;
+#define NC_MAX 8192
+static ClipVtx g_nc[NC_MAX];
+static uint32_t *g_nc_idx;
+static unsigned g_nc_n;
+
+typedef struct { float b[3]; double d, w; int corner; } ClipPv;
+
+/* the polygon p (n corners) cut to f >= th, f being its d (plane 0) or w (plane 1) */
+static unsigned clip_poly(ClipPv *p, unsigned n, unsigned plane, double th)
+{
+    ClipPv o[8];
+    unsigned m = 0;
+    for (unsigned i = 0; i < n; i++) {
+        const ClipPv *a = &p[i], *b = &p[(i + 1) % n];
+        const double fa = (plane ? a->w : a->d) - th, fb = (plane ? b->w : b->d) - th;
+        if (fa >= 0 && m < 8) {
+            o[m++] = *a;
+        }
+        if ((fa >= 0) != (fb >= 0) && m < 8) {
+            const double t = fa / (fa - fb);
+            ClipPv q;
+            for (unsigned k = 0; k < 3; k++) {
+                q.b[k] = (float)(a->b[k] + t * (b->b[k] - a->b[k]));
+            }
+            q.d = a->d + t * (b->d - a->d);
+            q.w = a->w + t * (b->w - a->w);
+            q.corner = -1;
+            o[m++] = q;
+        }
+    }
+    memcpy(p, o, m * sizeof(o[0]));
+    return m;
+}
+
+/* Rewrites g_pd.idx (triangles) when any triangle needs clipping; the number of new vertices, numbered after hi. */
+static unsigned near_clip(uint32_t lo, uint32_t hi)
+{
+    static int off = -1;
+    if (off < 0) {
+        off = getenv("HAKUX_HLE_NOCLIP") != NULL;
+    }
+    g_nc_n = 0;
+    if (off || g_pd.prim != 5 || g_pd.nidx < 3 || g_pd.nidx % 3 || hle_quirk(HLE_QUIRK_VB_ALIGN) ||
+        (R(NV097_SET_TRANSFORM_EXECUTION_MODE) & 3) == 2 || (R(0x0328) & 7)) {      /* programs and skinning: no */
+        return 0;
+    }
+    const uint32_t fmt = R(NV097_SET_VERTEX_DATA_ARRAY_FORMAT), st = fmt >> 8;
+    const unsigned size = (fmt >> 4) & 0xF;
+    if ((fmt & 0xF) != 2 || size < 3 || !st) {
+        return 0;
+    }
+    const uint32_t nv = hi - lo + 1, pa = R(NV097_SET_VERTEX_DATA_ARRAY_OFFSET) & 0x7FFFFFFFu;
+    const uint8_t *ps = hle_pa_ptr(pa + lo * st, (nv - 1) * st + 12);
+    if (!ps) {
+        return 0;
+    }
+    if (!g_nc_idx) {
+        g_nc_idx = g_new(uint32_t, MAX_INDICES);
+    }
+    float m[16];
+    regs_f(m, 0x0680, 16);
+    const bool zclamp = ((R(0x1D78) >> 4) & 0xF) == 1;
+    const double eps = 1e-3;
+    const uint32_t nt = g_pd.nidx / 3;
+    uint32_t out = 0, clipped = 0;
+    for (uint32_t t = 0; t < nt; t++) {
+        const uint32_t *ix = &g_pd.idx[3 * t];
+        double d[3], w[3];
+        bool bad = false, in = true;
+        for (unsigned c = 0; c < 3; c++) {
+            const uint32_t v = ix[c] - lo;
+            if (v >= nv) {
+                bad = true;
+                break;
+            }
+            float p[3];
+            memcpy(p, ps + (size_t)v * st, 12);
+            d[c] = (double)m[8] * p[0] + (double)m[9] * p[1] + (double)m[10] * p[2] + m[11];
+            w[c] = (double)m[12] * p[0] + (double)m[13] * p[1] + (double)m[14] * p[2] + m[15];
+            in &= w[c] > eps && (zclamp || d[c] >= 0);
+        }
+        if (bad || in) {
+            if (out + 3 > MAX_INDICES) {
+                return 0;
+            }
+            memcpy(&g_nc_idx[out], ix, 12);
+            out += 3;
+            continue;
+        }
+        ClipPv poly[8];
+        unsigned n = 3;
+        for (unsigned c = 0; c < 3; c++) {
+            memset(&poly[c], 0, sizeof(poly[c]));
+            poly[c].b[c] = 1.0f;
+            poly[c].d = d[c];
+            poly[c].w = w[c];
+            poly[c].corner = (int)c;
+        }
+        if (!zclamp) {
+            n = clip_poly(poly, n, 0, 0.0);
+        }
+        if (n >= 3) {
+            n = clip_poly(poly, n, 1, eps);
+        }
+        clipped++;
+        if (n < 3) {
+            continue;
+        }
+        uint32_t pi[8];
+        for (unsigned c = 0; c < n; c++) {
+            if (poly[c].corner >= 0) {
+                pi[c] = ix[poly[c].corner];
+                continue;
+            }
+            if (g_nc_n >= NC_MAX || hi - lo + 1 + g_nc_n >= 0xFFFF) {
+                return 0;
+            }
+            ClipVtx *cv = &g_nc[g_nc_n];
+            for (unsigned k = 0; k < 3; k++) {
+                cv->v[k] = ix[k];
+                cv->b[k] = poly[c].b[k];
+            }
+            pi[c] = hi + 1 + g_nc_n++;
+        }
+        if (out + 3 * (n - 2) > MAX_INDICES) {
+            return 0;
+        }
+        for (unsigned c = 1; c + 1 < n; c++) {
+            g_nc_idx[out++] = pi[0];
+            g_nc_idx[out++] = pi[c];
+            g_nc_idx[out++] = pi[c + 1];
+        }
+    }
+    if (!clipped) {
+        return 0;
+    }
+    static unsigned said;
+    if (said++ < 12) {
+        hle_log("hakuX-hle-pb", "near clip: draw %llu: %u of %u triangles clipped, %u new vertices, %u triangles out",
+                (unsigned long long)g_pd.draws, clipped, nt, g_nc_n, out / 3);
+    }
+    memcpy(g_pd.idx, g_nc_idx, (size_t)out * 4);
+    g_pd.nidx = out;
+    return g_nc_n;
+}
+
+/* The new vertices' attributes, in each binding's copy (vertex nvo + k): the original corners' blended. */
+static void near_clip_fill(const HleCmdDraw *d, uint8_t *const *dstp, uint32_t lo, uint32_t nvo, unsigned xtra)
+{
+    for (unsigned a = 0; a < HLE_DRAW_ATTRS; a++) {
+        const uint32_t fmt = R(NV097_SET_VERTEX_DATA_ARRAY_FORMAT + 4 * a);
+        const unsigned size = (fmt >> 4) & 0xF, type = fmt & 0xF;
+        if (!size || (d->attr[a] & 0xFF) != (fmt & 0xFF)) {
+            continue;
+        }
+        const unsigned b = (d->attr[a] >> 8) & 0xFF, off = d->attr[a] >> 16;
+        const uint32_t st = d->bind_stride[b];
+        uint8_t *base = dstp[b];
+        if (!base || !st) {
+            continue;
+        }
+        for (unsigned k = 0; k < xtra; k++) {
+            const ClipVtx *c = &g_nc[k];
+            uint8_t *o = base + (size_t)(nvo + k) * st + off;
+            const uint8_t *s[3];
+            unsigned best = 0;
+            for (unsigned i = 0; i < 3; i++) {
+                s[i] = base + (size_t)(c->v[i] - lo) * st + off;
+                if (c->b[i] > c->b[best]) {
+                    best = i;
+                }
+            }
+            if (type == 2) {
+                for (unsigned j = 0; j < size; j++) {
+                    float f[3], r = 0;
+                    for (unsigned i = 0; i < 3; i++) {
+                        memcpy(&f[i], s[i] + 4 * j, 4);
+                        r += c->b[i] * f[i];
+                    }
+                    memcpy(o + 4 * j, &r, 4);
+                }
+            } else if (type == 0 || type == 4) {
+                for (unsigned j = 0; j < size; j++) {
+                    float r = 0;
+                    for (unsigned i = 0; i < 3; i++) {
+                        r += c->b[i] * s[i][j];
+                    }
+                    o[j] = (uint8_t)(r < 0 ? 0 : r > 255 ? 255 : r + 0.5f);
+                }
+            } else if (type == 1 || type == 5) {
+                for (unsigned j = 0; j < size; j++) {
+                    float r = 0;
+                    for (unsigned i = 0; i < 3; i++) {
+                        int16_t h;
+                        memcpy(&h, s[i] + 2 * j, 2);
+                        r += c->b[i] * h;
+                    }
+                    const int16_t h = (int16_t)(r < -32768 ? -32768 : r > 32767 ? 32767 : r);
+                    memcpy(o + 2 * j, &h, 2);
+                }
+            } else {
+                memcpy(o, s[best], attr_bytes(fmt));
+            }
+        }
+    }
+}
+
 /* The vertex arrays the indices reach, read in place or copied to the
  * arena, the indices converted for the primitive and rebased. */
 static void draw_arrays(void)
@@ -4173,6 +4387,13 @@ static void draw_arrays(void)
         skip(SK_DRAW_ARRAYS_SPAN);
         return;
     }
+    const uint32_t hi_o = hi;
+    const unsigned xtra = near_clip(lo, hi);
+    if (xtra) {
+        hi = hi_o + xtra;
+        n = g_pd.nidx;
+    }
+    uint8_t *dstp[HLE_DRAW_MAX_BIND] = { 0 };
     HleCmdDraw d;
     memset(&d, 0, sizeof(d));
     vdiag_consts();
@@ -4214,14 +4435,15 @@ static void draw_arrays(void)
     for (unsigned b = 0; b < d.nbind; b++) {
         uint32_t st = d.bind_stride[b];
         uint32_t from = base[b] + (st ? lo * st : 0);
-        uint32_t len = st ? (hi - lo) * st + MAX(end[b], 1u) : end[b];
+        uint32_t len = st ? (hi_o - lo) * st + MAX(end[b], 1u) : end[b];
+        const uint32_t lenx = st && xtra ? (hi_o - lo + 1 + xtra) * st : len;
         vb_land(from, len);
         coh_pend_wait(from, len);           /* a copy queued into it lands first */
         const uint8_t *src = hle_pa_ptr(from, len);
         if (src) {
-            vdiag_pos(&d, b, src, st, lo, hi, from, len);
-            vdiag_zero(&d, b, src, st, lo, hi, from, len);
-            pick_log(&d, b, src, st, lo, hi);
+            vdiag_pos(&d, b, src, st, lo, hi_o, from, len);
+            vdiag_zero(&d, b, src, st, lo, hi_o, from, len);
+            pick_log(&d, b, src, st, lo, hi_o);
         }
         if (src && hle_quirk(HLE_QUIRK_VB_ALIGN) && vb_misaligned(&d, b, base[b])) {
             if (!vb_realign(&d, b, src, from, len, st ? hi - lo + 1 : 1)) {
@@ -4230,7 +4452,7 @@ static void draw_arrays(void)
             }
             continue;
         }
-        if (src && vb_in_place() && !hle_barrier_contended(from, len)) {
+        if (src && !xtra && vb_in_place() && !hle_barrier_contended(from, len)) {
             hle_barrier_arm(from, len, hle_fe_last_value() + 1);
             d.guest_vb |= 1u << b;
             d.bind_off[b] = from;
@@ -4238,7 +4460,7 @@ static void draw_arrays(void)
             continue;
         }
         uint8_t *dst;
-        uint32_t off = src ? arena(len, &dst) : HLE_ARENA_FULL;
+        uint32_t off = src ? arena(lenx, &dst) : HLE_ARENA_FULL;
         if (off == HLE_ARENA_FULL) {
             skip(SK_DRAW_ARRAYS_ARENA);
             return;
@@ -4247,6 +4469,10 @@ static void draw_arrays(void)
             hle_barrier_arm_copied(from, len);
         }
         memcpy(dst, src, len);
+        if (lenx > len) {
+            memset(dst + len, 0, lenx - len);
+        }
+        dstp[b] = dst;
         d.bind_off[b] = off;
         g_pd.vb_copied++;
         bool pos = ((R(NV097_SET_VERTEX_DATA_ARRAY_FORMAT) >> 4) & 0xF) && ((d.attr[0] >> 8) & 0xFF) == b;
@@ -4254,10 +4480,13 @@ static void draw_arrays(void)
             const unsigned psz = (R(NV097_SET_VERTEX_DATA_ARRAY_FORMAT) >> 4) & 0xF;
             const uint32_t po = d.attr[0] >> 16;
             if (psz >= 2 && psz <= 4 && po + 4 * psz <= st) {
-                vp_mend(dst, st, po, psz, hi - lo + 1);
+                vp_mend(dst, st, po, psz, hi_o - lo + 1);
             }
         }
         vbrace(from, len, st, pos ? (int)(d.attr[0] >> 16) : -1, dst);
+    }
+    if (xtra) {
+        near_clip_fill(&d, dstp, lo, hi_o - lo + 1, xtra);
     }
     uint32_t pt = g_pd.prim;
     /* One run of vertices in order, of a primitive Vulkan draws as it is

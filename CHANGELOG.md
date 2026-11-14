@@ -1,5 +1,11 @@
 # xbased changelog
 
+## 1.0.76.76 (Modern GUI fork, test build)
+
+- Test for Jedi Knight Academy: fixed-function triangles that reach behind the eye or in front of the near plane are
+  clipped by the decoder, as the NV2A does, before the GPU draws them (HAKUX_HLE_NOCLIP=1 turns it off). The ground
+  holes sit where such triangles are.
+
 ## 1.0.76.75 (Modern GUI fork, test build)
 
 - Diagnostics only: a capture also logs, per draw, the triangles that cross behind the eye and still reach the lower
