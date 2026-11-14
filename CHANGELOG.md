@@ -1,5 +1,13 @@
 # xbased changelog
 
+## 1.0.76.43 (Modern GUI fork)
+
+- 007: From Russia with Love: the fix now removes the whole glow effect (modes 1 and 6 together, new F6 mode 8), so
+  the wedges and the lights through walls are both gone on a first play as well as after a resume.
+- Movies (FMV) look cleaner: a movie is found by its pattern (one or two draws a frame and a new picture each frame)
+  and its picture is smoothed along edges and sharpened a little before it is scaled up. Any game; works with FSR,
+  NIS and the sharpen setting. debug.hakux.vidfx=0 turns it off.
+
 ## 1.0.76.42 (Modern GUI fork)
 
 - 007: From Russia with Love: the glass-shard wedges and lights showing through walls are gone. The game's full-screen
