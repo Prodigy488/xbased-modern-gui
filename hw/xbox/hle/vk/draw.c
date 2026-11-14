@@ -1256,6 +1256,12 @@ bool hle_draw_is_psh(void)
  * coordinates, not fetched at the fragment's pixel; 2: those draws are skipped */
 int g_hle_fbdbg;
 
+/* debug.hakux.zbias (the front end's F7 cycles it): how far the passes that test depth without writing it
+ * (LESSEQUAL / GREATEREQUAL, over surfaces already drawn) are moved toward the eye. 0: one depth step
+ * (the default); 1: and one slope step; 2: four steps and two slope steps; 3: sixteen and eight. The slope
+ * part grows with a polygon's tilt, which is where large near walls differ most between two passes. */
+static int g_zbias;
+
 void hle_draw_counts(uint64_t *verts, uint64_t *pipes)
 {
     *verts = g_dr.verts;
@@ -3019,6 +3025,14 @@ void hle_draw_psframe_poll(uint64_t swap)
         }
     }
     v[0] = 0;
+    hle_prop_get("debug.hakux.zbias", v);
+    if (atoi(v) != g_zbias) {
+        g_zbias = atoi(v) < 0 ? 0 : atoi(v) > 3 ? 3 : atoi(v);
+        hle_draw_state_lost();
+        hle_log("hakuX-hle-pipe", "zbias=%d (0: one depth step toward the eye for no-write LESSEQUAL passes; 1: plus a "
+                "slope step; 2: 4 steps, 2 slope; 3: 16 steps, 8 slope)", g_zbias);
+    }
+    v[0] = 0;
     hle_prop_get("debug.hakux.probe", v);
     {
         uint64_t pv[PROBE_PROGS] = { 0 };
@@ -3943,8 +3957,10 @@ void hle_draw_cmd_draw(const HleCmdDraw *c, VkCommandBuffer cb, uint32_t rt_id, 
      * One step toward the eye absorbs it. */
     if (zt && tri && !(dbgf & 4) && !s->rs[RS_ZWRITEENABLE] &&
         (s->rs[RS_ZFUNC] == 0x203 || s->rs[RS_ZFUNC] == 0x206)) {
-        zslope = bias ? zslope : 0.0f;
-        zofs = (bias ? zofs : 0.0f) + (s->rs[RS_ZFUNC] == 0x203 ? -1.0f : 1.0f);
+        static const float zb_ofs[4] = { 1.0f, 1.0f, 4.0f, 16.0f }, zb_slope[4] = { 0.0f, 1.0f, 2.0f, 8.0f };
+        const float sg = s->rs[RS_ZFUNC] == 0x203 ? -1.0f : 1.0f;
+        zslope = (bias ? zslope : 0.0f) + sg * zb_slope[g_zbias];
+        zofs = (bias ? zofs : 0.0f) + sg * zb_ofs[g_zbias];
         bias = true;
     }
     /* EQUAL passes that do not write need that depth bit for bit (Halo's

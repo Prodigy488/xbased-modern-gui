@@ -2163,6 +2163,18 @@ int main(int argc, char *argv[])
                     nc_win_prop_set("debug.hakux.pbdraws", v);
                     nc_log("hakuX-app", "capture %d: the next frame's render targets and 2600 draws", s_cap);
                     notice("Graphics capture taken (F9): see the log and hle_shadow", NULL);
+                } else if (ev.key.key == SDLK_F7) {
+                    /* a depth-bias A/B for a bug report (debug.hakux.zbias): 0 the default, 1 to 3 move the passes that
+                     * redraw surfaces without writing depth further toward the eye (wedges over large near walls) */
+                    static int s_zb;
+                    char v[8];
+                    s_zb = (s_zb + 1) & 3;
+                    snprintf(v, sizeof(v), "%d", s_zb);
+                    nc_win_prop_set("debug.hakux.zbias", v);
+                    nc_log("hakuX-app", "depth bias test %d (F7)", s_zb);
+                    char msg[64];
+                    snprintf(msg, sizeof(msg), "Depth bias test %d (F7)", s_zb);
+                    notice(msg, NULL);
                 } else if (ev.key.key == SDLK_F10) {
                     /* a graphics A/B for a bug report (debug.hakux.fbdbg): auto (default), 0 normal, 1 programs that read their
                      * own target use a copy of it, 2 those draws skipped, 3 draws reading depth skipped */
