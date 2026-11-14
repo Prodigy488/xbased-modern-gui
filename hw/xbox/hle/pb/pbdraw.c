@@ -3788,7 +3788,17 @@ static void vdiag_pos(const HleCmdDraw *d, unsigned b, const uint8_t *src, uint3
     for (unsigned i = 0; i < g_pd.nobjs && shown < 3; i++) {
         const uint32_t oa = g_pd.objs[i].d.pa, oe = oa + g_pd.objs[i].d.pitch * g_pd.objs[i].d.h;
         if (g_pd.objs[i].d.pitch && oa < from + len && from < oe) {
-            hle_log("hakuX-hle-pb", "vdiag:   overlaps object %u at %08x-%08x", g_pd.objs[i].id, oa, oe);
+            const PbObj *q = &g_pd.objs[i];
+            uint32_t ql = 0;
+            hle_log("hakuX-hle-pb", "vdiag:   overlaps object %u at %08x-%08x %ux%u pitch %u fmt %02x: "
+                    "managed %d cpu_used %d display %d written %llu synced %llu land_last %llu land_v %llu "
+                    "done %llu snap %d mem_pend %llu superseded %d",
+                    q->id, oa, oe, q->d.w, q->d.h, q->d.pitch, (unsigned)q->d.xfmt,
+                    (int)coh_managed(q, &ql), (int)q->cpu_used, (int)q->display,
+                    (unsigned long long)q->written, (unsigned long long)q->synced,
+                    (unsigned long long)q->land_last, (unsigned long long)q->land_v,
+                    (unsigned long long)hle_tl_completed(), (int)q->snap.valid,
+                    (unsigned long long)q->mem_pend, (int)obj_superseded(q));
             shown++;
         }
     }
