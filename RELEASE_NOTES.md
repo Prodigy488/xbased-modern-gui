@@ -8,6 +8,9 @@ New in 1.0.76.41
   (the clean-up of update leftovers walked the whole data folder; first frame 59.6 s before, 0.7 s after).
 - Upscaling while playing is gentler (lower priority, fewer threads, smaller batches), and has a new setting,
   "Upscaling speed while playing": Low, Medium or High (High shows sharp textures sooner and may cost frames).
+- 007: From Russia with Love: the glass-shard wedges and lights through walls are fixed (the glow passes that
+  read the depth buffer are left out for this game, so there is no light bloom).
+- Screenshots (F12) are saved as PNG.
 
 Fixes that apply to every game
 - Games that use MMX instructions with an operand-size prefix (0x66) no longer crash; the

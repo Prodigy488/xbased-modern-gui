@@ -1249,7 +1249,7 @@ bool g_hle_fbbar_off;
 int g_hle_gpucut;
 /* debug.hakux.dskip (the front end's F6 cycles it): draws left out, to find which ones make a picture
  * artifact. 1: vertices of 4 bytes or less (packed sprite lists); 2: draws with the depth test off and
- * blending on; 3: draws with the depth test off, blended or not; 4: draws of 132 vertices or more. */
+ * blending on; 3: draws with the depth test off, blended or not; 4: draws of 132 vertices or more; 5, 6, 7: depth off and blended, with vertices of 28 bytes, of 256 or more, of any other size above 4. */
 static int g_dskip;
 bool hle_draw_dskip(const void *p)
 {
@@ -1264,6 +1264,9 @@ bool hle_draw_dskip(const void *p)
     case 2: return !rs[RS_ZENABLE] && rs[RS_ALPHABLENDENABLE];
     case 3: return !rs[RS_ZENABLE];
     case 4: return c->count >= 132;
+    case 5: return !rs[RS_ZENABLE] && rs[RS_ALPHABLENDENABLE] && stride == 28;
+    case 6: return !rs[RS_ZENABLE] && rs[RS_ALPHABLENDENABLE] && stride >= 256;
+    case 7: return !rs[RS_ZENABLE] && rs[RS_ALPHABLENDENABLE] && stride > 4 && stride != 28 && stride < 256;
     }
     return false;
 }
@@ -3046,10 +3049,19 @@ void hle_draw_psframe_poll(uint64_t swap)
     }
     v[0] = 0;
     hle_prop_get("debug.hakux.dskip", v);
-    if (atoi(v) != g_dskip) {
-        g_dskip = atoi(v) < 0 ? 0 : atoi(v) > 4 ? 4 : atoi(v);
-        hle_log("hakuX-hle-pipe", "dskip=%d (1: vertices of 4 bytes or less left out, 2: depth test off and blending, "
-                "3: depth test off, 4: 132 vertices or more)", g_dskip);
+    {
+        /* unset or "auto": mode 6 for From Russia with Love, else 0. Its light glows and the glass-shard
+         * wedges come from the full-screen glow passes (vertices of 256 bytes, depth test off, blended), which
+         * read the depth buffer as a texture to hide lights behind walls; without them the picture is right */
+        const bool autom = !v[0] || !strcmp(v, "auto");
+        int want = autom ? (g_hle.title.xbe.title_id == 0x45410079u ? 6 : 0) : atoi(v);
+        want = want < 0 ? 0 : want > 7 ? 7 : want;
+        if (want != g_dskip) {
+            g_dskip = want;
+            hle_log("hakuX-hle-pipe", "dskip=%d%s (1: vertices of 4 bytes or less left out, 2: depth test off and "
+                    "blending, 3: depth test off, 4: 132 vertices or more, 5-7: depth off and blended by vertex size)",
+                    g_dskip, autom ? " (auto)" : "");
+        }
     }
     v[0] = 0;
     hle_prop_get("debug.hakux.zbias", v);

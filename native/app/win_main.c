@@ -2164,10 +2164,10 @@ int main(int argc, char *argv[])
                     nc_log("hakuX-app", "capture %d: the next frame's render targets and 2600 draws", s_cap);
                     notice("Graphics capture taken (F9): see the log and hle_shadow", NULL);
                 } else if (ev.key.key == SDLK_F6) {
-                    /* which draws make an artifact (debug.hakux.dskip): 0 none left out, 1 to 4 a class of draws left out */
+                    /* which draws make an artifact (debug.hakux.dskip): 0 none left out, 1 to 7 a class of draws left out */
                     static int s_ds;
                     char v[8];
-                    s_ds = (s_ds + 1) % 5;
+                    s_ds = (s_ds + 1) % 8;
                     snprintf(v, sizeof(v), "%d", s_ds);
                     nc_win_prop_set("debug.hakux.dskip", v);
                     nc_log("hakuX-app", "draw class test %d (F6)", s_ds);
