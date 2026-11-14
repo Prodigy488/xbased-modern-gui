@@ -29,6 +29,9 @@
  * ANativeWindow (the activity's surface made again) gets a new surface and
  * swapchain, none drops them.
  */
+#define STB_IMAGE_WRITE_STATIC
+#define STB_IMAGE_WRITE_IMPLEMENTATION
+#include "native/third_party/stb/stb_image_write.h"
 #include "hw/xbox/hle/base.h"
 #include "hw/xbox/hle/hle.h"
 #include "hw/xbox/hle/shader/glsl_compile.h"
@@ -1366,11 +1369,30 @@ static bool shot_buf(VkDeviceSize size)
     return true;
 }
 
-/* The picture copied out (the pass done) as a 32-bit top-down BMP. */
+/* The picture copied out (the pass done) as a PNG (a path ending ".png") or a 32-bit top-down BMP. */
 static void shot_write(uint32_t w, uint32_t h)
 {
     void *map = NULL;
     if (T.vkMapMemory(g_hvk.dev, g_ps.shot_mem, 0, VK_WHOLE_SIZE, 0, &map) != VK_SUCCESS) {
+        return;
+    }
+    const size_t pl = strlen(g_ps.shot_path);
+    if (pl > 4 && !strcmp(g_ps.shot_path + pl - 4, ".png")) {
+        /* a screenshot (win_main.c): PNG, smaller than the BMP and what pictures are shared as */
+        const bool rgba = g_ps.fmt == VK_FORMAT_R8G8B8A8_UNORM || g_ps.fmt == VK_FORMAT_R8G8B8A8_SRGB;
+        const uint8_t *src = map;
+        uint8_t *px = g_malloc((size_t)w * h * 4);
+        for (size_t i = 0; i < (size_t)w * h; i++) {
+            px[i * 4 + 0] = src[i * 4 + (rgba ? 0 : 2)];
+            px[i * 4 + 1] = src[i * 4 + 1];
+            px[i * 4 + 2] = src[i * 4 + (rgba ? 2 : 0)];
+            px[i * 4 + 3] = 255;
+        }
+        if (stbi_write_png(g_ps.shot_path, (int)w, (int)h, 4, px, (int)w * 4)) {
+            hle_log("hakuX-hle-back", "present: picture %ux%u in %s", w, h, g_ps.shot_path);
+        }
+        g_free(px);
+        T.vkUnmapMemory(g_hvk.dev, g_ps.shot_mem);
         return;
     }
     FILE *f = fopen(g_ps.shot_path, "wb");

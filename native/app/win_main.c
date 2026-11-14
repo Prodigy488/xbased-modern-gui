@@ -951,7 +951,7 @@ static bool g_quit_pending;    /* the exit's save is running; the loop leaves wh
 static bool g_quit_close;      /* ... leaving the program, not just the game */
 static uint64_t g_quit_deadline;
 
-/* screenshots\<title>-<date>.bmp beside the executable */
+/* screenshots\<title>-<date>.png beside the executable */
 static void screenshot(void)
 {
     char dir[MAX_PATH + 32], p[MAX_PATH + 128];
@@ -959,7 +959,7 @@ static void screenshot(void)
     mkdir(dir, 0775);
     SYSTEMTIME t;
     GetLocalTime(&t);
-    snprintf(p, sizeof(p), "%s/%s-%04d%02d%02d-%02d%02d%02d.bmp", dir, g_key, t.wYear, t.wMonth, t.wDay, t.wHour,
+    snprintf(p, sizeof(p), "%s/%s-%04d%02d%02d-%02d%02d%02d.png", dir, g_key, t.wYear, t.wMonth, t.wDay, t.wHour,
              t.wMinute, t.wSecond);
     hle_present_shot_full(p);       /* at the render scale's resolution, not the window's */
     notice(T(S_SHOT_SAVED), p);
