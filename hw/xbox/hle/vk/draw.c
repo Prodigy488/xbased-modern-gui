@@ -3019,7 +3019,7 @@ static int probe_begin(VkCommandBuffer cb, const HleCmdDraw *c, uint32_t vfirst,
 }
 
 /* Video (FMV) frames: a game's movies are decoded by its own code and sent to the screen as a texture that is
- * written anew every frame. A frame with a few draws, none with the depth test on, that uploaded a big texture,
+ * written anew every frame. A frame with a few draws that uploaded a big texture (007 leaves the depth test on for its movie),
  * four frames running, is taken as video; the presenter then runs a cleanup pass over it (swapchain.c, k_fs_vid:
  * a smoothing that keeps edges, to take out the blocks of the movie's compression before the picture is scaled).
  * It ends after six frames that are not video. debug.hakux.vidfx=0 turns it off. */
@@ -3028,11 +3028,11 @@ static bool g_vf_enabled = true;
 
 static void video_frame_end(void)
 {
-    const bool vid = g_vf_enabled && g_vf_draws >= 1 && g_vf_draws <= 8 && !g_vf_zdraws && g_vf_upl >= 128u * 128u;
+    const bool vid = g_vf_enabled && g_vf_draws >= 1 && g_vf_draws <= 8 && g_vf_upl >= 128u * 128u;
     static int s_near;
-    if (!vid && g_vf_enabled && g_vf_draws >= 1 && g_vf_draws <= 8 && !g_vf_zdraws && g_vf_upl && s_near < 8) {
+    if (!vid && g_vf_enabled && g_vf_upl >= 64u * 64u && s_near < 12) {
         s_near++;       /* a frame that looked like video but for the upload's size: logged, to tune the rule */
-        hle_log("hakuX-hle-pipe", "video: a near miss (draws %u, upload %llu pixels)", g_vf_draws,
+        hle_log("hakuX-hle-pipe", "video: a near miss (draws %u, with depth %u, upload %llu pixels)", g_vf_draws, g_vf_zdraws,
                 (unsigned long long)g_vf_upl);
     }
     if (vid) {
