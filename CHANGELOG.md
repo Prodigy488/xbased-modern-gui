@@ -1,5 +1,10 @@
 # xbased changelog
 
+## 1.0.76.55 (Modern GUI fork, test build)
+
+- Diagnostics only: the log names what made each small render target's image land in memory (`landing target ...`),
+  and the `vdiag:` lines say which landing it was, to find what still blanks Thrillville's vertex data.
+
 ## 1.0.76.54 (Modern GUI fork, test build)
 
 - Thrillville's missing objects and black pillars: a new render target made over an old small one's memory made

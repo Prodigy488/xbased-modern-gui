@@ -128,6 +128,8 @@ typedef struct PbObj {
     /* its memory against its image (coh_*, colour targets) */
     uint64_t synced;                    /* written when the two last matched */
     CohSnap snap;                       /* its memory's write counts then */
+    const char *land_why;               /* what asked for its last landing (a diagnostic) */
+    uint64_t land_draw;                 /* the draw count then */
     uint64_t land_v, land_w;            /* its image's landing asked for: value, written then */
     uint64_t land_last;                 /* its latest landing's value (in flight till completed) */
     uint64_t shown_seq;                 /* g_coh.shows when it or a frame over it was last shown */
@@ -289,6 +291,7 @@ static bool coh_mem_newer(PbObj *o);
 static void coh_pend_wait(uint32_t pa, uint32_t len);
 static void coh_pend_wait_inplace(uint32_t pa, uint32_t len);
 static void coh_wait(uint64_t v);
+static const char *g_land_why = "?";
 static uint64_t coh_land(PbObj *o);
 static void coh_serve(void);
 static void coh_shown(PbObj *o);
@@ -3092,6 +3095,7 @@ static unsigned writeback_range(uint32_t pa, uint32_t end, bool gpu_newer, const
             continue;
         }
         if (coh_managed(next, &len)) {
+            g_land_why = "read as a texture/source";
             const uint64_t l = coh_land(next);
             *lv = MAX(*lv, l);
             n += l != 0;
@@ -3795,13 +3799,14 @@ static void vdiag_pos(const HleCmdDraw *d, unsigned b, const uint8_t *src, uint3
             uint32_t ql = 0;
             hle_log("hakuX-hle-pb", "vdiag:   overlaps object %u at %08x-%08x %ux%u pitch %u fmt %02x: "
                     "managed %d cpu_used %d display %d written %llu synced %llu land_last %llu land_v %llu "
-                    "done %llu snap %d mem_pend %llu superseded %d",
+                    "done %llu snap %d mem_pend %llu superseded %d landed-at-draw %llu by: %s",
                     q->id, oa, oe, q->d.w, q->d.h, q->d.pitch, (unsigned)q->d.xfmt,
                     (int)coh_managed(q, &ql), (int)q->cpu_used, (int)q->display,
                     (unsigned long long)q->written, (unsigned long long)q->synced,
                     (unsigned long long)q->land_last, (unsigned long long)q->land_v,
                     (unsigned long long)hle_tl_completed(), (int)q->snap.valid,
-                    (unsigned long long)q->mem_pend, (int)obj_superseded(q));
+                    (unsigned long long)q->mem_pend, (int)obj_superseded(q), (unsigned long long)q->land_draw,
+                    q->land_why ? q->land_why : "-");
             shown++;
         }
     }
@@ -4768,6 +4773,15 @@ static uint64_t coh_land(PbObj *o)
         queued = hle_tl_land_note(v, coh_landed, token);
     }
     o->land_last = v;                       /* (the readback runs anyway) */
+    o->land_why = g_land_why;
+    o->land_draw = g_pd.draws;
+    {
+        static unsigned said;
+        if (len <= 262144 && (said++ < 30 || said % 20 == 0)) {
+            hle_log("hakuX-hle-pb", "landing target %u %08x %ux%u (%u bytes) at draw %llu: %s", o->id, o->d.pa,
+                    o->d.w, o->d.h, len, (unsigned long long)g_pd.draws, g_land_why);
+        }
+    }
     if (!queued) {
         __atomic_store_n(&l->state, 0, __ATOMIC_RELEASE);
         return 0;
@@ -4894,6 +4908,7 @@ uint64_t hle_pbd_copy_begin(uint32_t slo, uint32_t sp, uint32_t dlo, uint32_t dp
             const bool src = o->d.pa < s1 && o->d.pa + len > s0;
             const bool dst = o->d.pa < d1 && o->d.pa + len > d0 && !copy_covers(o, len, dlo, dp, row, rows, d0, d1);
             if (src || (dst && (pass || o != rd))) {
+                g_land_why = "copy source/destination";
                 v = MAX(v, coh_land(o));
             }
         }
@@ -5033,6 +5048,7 @@ static void coh_serve(void)
              * rest of it there): landed at fences from now on */
             best->learned = true;
         }
+        g_land_why = g_fill.read ? "guest read" : "guest write";
         v = coh_land(best);
     }
     g_fill.v = v;
@@ -5079,6 +5095,7 @@ void hle_pbd_fence(void)
         if (o->want) {
             o->want = false;
             if (o->learned) {
+                g_land_why = "fence (learned)";
                 coh_land(o);
             }
         }
@@ -5132,6 +5149,7 @@ static void coh_land_over(const PbObj *o, uint32_t len)
             best = x;
         }
     }
+    g_land_why = "new target over it";
     uint64_t v = best ? coh_land(best) : 0;
     const uint64_t done = hle_tl_completed();
     for (unsigned i = 0; i < WB_NOTES; i++) {
