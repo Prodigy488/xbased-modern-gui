@@ -1212,6 +1212,9 @@ static void apply_cfg(const Config *global, const Config *game, bool sound)
         if ((v = cfg_get(c, "sharpen"))) {
             nc_present_set_sharpen(atoi(v));
         }
+        if ((v = cfg_get(c, "vidfx"))) {
+            nc_present_set_vidfx(atoi(v));
+        }
         if ((v = cfg_get(c, "integer"))) {
             nc_present_set_integer(atoi(v) != 0);
         }
@@ -1906,6 +1909,8 @@ int main(int argc, char *argv[])
             nc_present_set_interp(atoi(a + 7) != 0);
         } else if (!strncmp(a, "sharpen=", 8)) {
             nc_present_set_sharpen(atoi(a + 8));
+        } else if (!strncmp(a, "vidfx=", 6)) {
+            nc_present_set_vidfx(atoi(a + 6));
         } else if (!strncmp(a, "integer=", 8)) {
             nc_present_set_integer(atoi(a + 8) != 0);
         } else if (!strncmp(a, "upscale=", 8)) {

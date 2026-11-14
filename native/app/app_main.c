@@ -577,6 +577,9 @@ EXPORT int SDL_main(int argc, char *argv[])
         if (!strncmp(argv[i], "sharpen=", 8)) {
             nc_present_set_sharpen(atoi(argv[i] + 8));
         }
+        if (!strncmp(argv[i], "vidfx=", 6)) {
+            nc_present_set_vidfx(atoi(argv[i] + 6));
+        }
         if (!strncmp(argv[i], "integer=", 8)) {
             nc_present_set_integer(atoi(argv[i] + 8) != 0);
         }

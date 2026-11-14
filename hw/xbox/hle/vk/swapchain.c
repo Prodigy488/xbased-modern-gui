@@ -552,6 +552,7 @@ static const char k_fs_vid[] =
     "vec3 F(vec2 p) { return texelFetch(u_tex, clamp(ivec2(p), ivec2(0), textureSize(u_tex, 0) - 1), 0).rgb; }\n"
     "void main() {\n"
     "  float st = max(1.0, float(textureSize(u_tex, 0).x) / 640.0);\n"
+    "  float S = pc.extra.x;\n"
     "  vec2 px = v_uv * vec2(textureSize(u_tex, 0));\n"
     "  vec3 c = F(px);\n"
     "  const vec3 K[12] = vec3[12](vec3(1, 0, 1.0), vec3(-1, 0, 1.0), vec3(0, 1, 1.0), vec3(0, -1, 1.0),\n"
@@ -561,7 +562,7 @@ static const char k_fs_vid[] =
     "  for (int i = 0; i < 12; i++) {\n"
     "    vec3 t = F(px + K[i].xy * st);\n"
     "    vec3 d = t - c;\n"
-    "    float w = K[i].z * exp(-dot(d, d) * 400.0);\n"
+    "    float w = K[i].z * exp(-dot(d, d) * 400.0 / S);\n"
     "    acc += t * w; ws += w;\n"
     "  }\n"
     "  vec3 sm = acc / ws;\n"
@@ -569,7 +570,7 @@ static const char k_fs_vid[] =
     "  vec3 mn = min(min(a, b), min(d2, e)), mx = max(max(a, b), max(d2, e));\n"
     "  vec3 blur = (a + b + d2 + e) * 0.25;\n"
     "  vec3 sh = clamp(sm + (sm - blur) * 0.6, min(mn, sm), max(mx, sm));\n"
-    "  o = vec4(clamp(sh + (c - sm) * 0.5, 0.0, 1.0), 1.0);\n"
+    "  o = vec4(clamp(sh + (c - sm) * clamp(0.5 / S, 0.25, 1.0), 0.0, 1.0), 1.0);\n"
     "}\n";
 
 
@@ -590,7 +591,7 @@ static const char k_fs_vidt[] =
     "    df += (d.r + d.g + d.b) * (1.0 / 3.0);\n"
     "  }\n"
     "  float t = df * 0.2 / 0.03;\n"
-    "  float w = 0.4 * exp(-t * t);\n"
+    "  float w = min(0.4 * pc.extra.x, 0.65) * exp(-t * t);\n"
     "  o = vec4(mix(F(u_tex, px), F(u_tex2, px), w), 1.0);\n"
     "}\n";
 
@@ -625,7 +626,7 @@ static const char k_fs_vidw[] =
     "  vec2 dir = -dm / (dl + 1e-4);\n"
     "  float amt = smoothstep(0.08, 0.25, gm) * smoothstep(0.008, 0.04, dl);\n"
     "  vec3 c0 = F(px);\n"
-    "  vec3 w = texture(u_tex, (px + dir * st * 0.5 * amt) / sz).rgb;\n"
+    "  vec3 w = texture(u_tex, (px + dir * st * 0.5 * pc.extra.x * amt) / sz).rgb;\n"
     "  vec3 mn = c0, mx = c0;\n"
     "  for (int j = -1; j <= 1; j++) {\n"
     "    for (int i = -1; i <= 1; i++) { vec3 n = F(px + vec2(float(i), float(j)) * st); mn = min(mn, n); mx = max(mx, n); }\n"
@@ -2640,6 +2641,7 @@ void hle_present_end(float sx, float sy, bool fxaa, int upscale, bool average, u
     const bool smaa = (upscale >> 16) & 1;          /* SMAA in place of FXAA */
     const bool interp = (upscale >> 17) & 1;        /* an in-between frame for a slow game */
     const unsigned sharpen = (upscale >> 19) & 3;   /* sharpening without an upscaler: 0 off, 1 to 3 */
+    const unsigned vidfx = (upscale >> 21) & 3;     /* the movie cleanup: 0 off, 1 light, 2 medium, 3 strong */
     upscale &= 0xFF;
     g_ps.shown = false;
     PsFrame *f = &g_ps.fr[g_ps.cur];
@@ -2812,7 +2814,7 @@ void hle_present_end(float sx, float sy, bool fxaa, int upscale, bool average, u
         fsr = nis = false;
     }
     /* A movie's frame (draw.c, g_hle_video): cleaned up at its own size before anything scales or sharpens it */
-    if (g_ps.have && g_hle_video && !g_crt && g_ps.pipe[P_VID]) {
+    if (g_ps.have && g_hle_video && vidfx && !g_crt && g_ps.pipe[P_VID]) {
         const uint32_t fw = g_ps.f.w, fh = g_ps.f.h;
         const bool t_on = g_ps.pipe[P_VID_T] || vid2_ready();
         const bool w_on = g_ps.pipe[P_VID_W] != VK_NULL_HANDLE;
@@ -2820,11 +2822,14 @@ void hle_present_end(float sx, float sy, bool fxaa, int upscale, bool average, u
             (!t_on || (img_target(&g_ps.vt[0], fw, fh, VK_FORMAT_R8G8B8A8_UNORM, "video blend") &&
                        img_target(&g_ps.vt[1], fw, fh, VK_FORMAT_R8G8B8A8_UNORM, "video blend"))) &&
             (!w_on || img_target(&g_ps.vw, fw, fh, VK_FORMAT_R8G8B8A8_UNORM, "video edges"))) {
-            if (g_ps.vd.serial != content + 1 || g_ps.vd.fxaa != aa_done || (w_on && g_ps.vw.serial != content + 1)) {
-                const float k[4] = { 0.0f, 0.0f, 0.0f, 0.0f };
+            if (g_ps.vd.serial != content + 1 || g_ps.vd.fxaa != aa_done || g_ps.vd.kind != vidfx ||
+                (w_on && g_ps.vw.serial != content + 1)) {
+                /* how much: light 0.5, medium 1 (what the shaders were tuned at), strong 1.6 */
+                const float k[4] = { vidfx == 1 ? 0.5f : vidfx == 3 ? 1.6f : 1.0f, 0.0f, 0.0f, 0.0f };
                 img_pass(cb, f, SET_VID, &g_ps.vd, g_ps.pipe[P_VID], src, k);
                 g_ps.vd.serial = content + 1;
                 g_ps.vd.fxaa = aa_done;
+                g_ps.vd.kind = vidfx;
                 VkImageView last = g_ps.vd.view;
                 if (t_on) {
                     PsImg *hist = &g_ps.vt[g_ps.vt_i], *dst = &g_ps.vt[g_ps.vt_i ^ 1u];

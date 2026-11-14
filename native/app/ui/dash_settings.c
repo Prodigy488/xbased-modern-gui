@@ -72,6 +72,7 @@ static void rows_video(List *l)
     static const char *shv[] = {"0", "1", "2", "3"};
     const char *shn[] = {T(S_OFF), T(S_SHARP_LOW), T(S_SHARP_MED), T(S_SHARP_HIGH)};
     opt_choice(l, S_SHARPEN, "sharpen", shv, shn, 4, "0");
+    opt_choice(l, S_VIDFX, "vidfx", shv, shn, 4, "2");
     static const char *cv[] = {"0", "1", "2", "3"};
     const char *cn[] = {T(S_OFF), T(S_CRT_SOFT), T(S_CRT_TV), T(S_CRT_ARCADE)};
     opt_choice(l, S_CRT, "crt", cv, cn, 4, "0");

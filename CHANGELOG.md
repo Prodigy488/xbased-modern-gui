@@ -1,5 +1,14 @@
 # xbased changelog
 
+## 1.0.76.45 (Modern GUI fork, test build)
+
+- Movie cleanup is a setting now (Settings > Video, "Movie cleanup"): Off, Low, Medium or High. Medium is what
+  1.0.76.44 did and is the default; Low keeps more of the movie's own grain and blends less with the frame before;
+  High smooths and steepens edges more. Also `vidfx=0` to `vidfx=3` in xbased.ini or on the command line, global or
+  per game.
+- Updates are checked against the SHA-256 that GitHub lists for the package: a download that does not match is
+  thrown away and not installed. A release without a listed digest is let through, and the log says so.
+
 ## 1.0.76.44 (Modern GUI fork)
 
 - Movies (FMV) look much cleaner in every game. A movie is found by its pattern, then its picture goes through three
