@@ -1274,6 +1274,7 @@ bool hle_draw_dskip(const void *p)
     case 5: return !rs[RS_ZENABLE] && rs[RS_ALPHABLENDENABLE] && stride == 28;
     case 6: return !rs[RS_ZENABLE] && rs[RS_ALPHABLENDENABLE] && stride >= 256;
     case 7: return !rs[RS_ZENABLE] && rs[RS_ALPHABLENDENABLE] && stride > 4 && stride != 28 && stride < 256;
+    case 8: return stride <= 4 || (!rs[RS_ZENABLE] && rs[RS_ALPHABLENDENABLE] && stride >= 256);
     }
     return false;
 }
@@ -3103,12 +3104,12 @@ void hle_draw_psframe_poll(uint64_t swap)
          * wedges come from the full-screen glow passes (vertices of 256 bytes, depth test off, blended), which
          * read the depth buffer as a texture to hide lights behind walls; without them the picture is right */
         const bool autom = !v[0] || !strcmp(v, "auto");
-        int want = autom ? (g_hle.title.xbe.title_id == 0x45410079u ? 6 : 0) : atoi(v);
-        want = want < 0 ? 0 : want > 7 ? 7 : want;
+        int want = autom ? (g_hle.title.xbe.title_id == 0x45410079u ? 8 : 0) : atoi(v);
+        want = want < 0 ? 0 : want > 8 ? 8 : want;
         if (want != g_dskip) {
             g_dskip = want;
             hle_log("hakuX-hle-pipe", "dskip=%d%s (1: vertices of 4 bytes or less left out, 2: depth test off and "
-                    "blending, 3: depth test off, 4: 132 vertices or more, 5-7: depth off and blended by vertex size)",
+                    "blending, 3: depth test off, 4: 132 vertices or more, 5-7: depth off and blended by vertex size, 8: modes 1 and 6 together)",
                     g_dskip, autom ? " (auto)" : "");
         }
     }
