@@ -1,5 +1,12 @@
 # xbased changelog
 
+## 1.0.76.54 (Modern GUI fork, test build)
+
+- Thrillville's missing objects and black pillars: a new render target made over an old small one's memory made
+  the old black image land first, over vertices the game had written beside it. The check that keeps memory the
+  game changed (1.0.76.51) was skipped when an earlier "unchanged" verdict was still cached for that moment; the
+  bytes are now compared each time. Not confirmed on a PC yet.
+
 ## 1.0.76.53 (Modern GUI fork, test build)
 
 - Thrillville's missing objects: memory a small render target's old image covered (a dead 160 x 120 target the

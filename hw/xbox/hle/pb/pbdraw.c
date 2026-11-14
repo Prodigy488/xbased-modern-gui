@@ -4561,7 +4561,24 @@ static bool coh_mem_newer(PbObj *o)
     }
     const uint32_t ep = hle_mem_write_epoch() + 1;      /* (0: not judged) */
     if (o->mn_epoch == ep) {
-        return o->mn;
+        /* a verdict "not newer" held for the epoch's stores the counts saw;
+         * the title's vertex stores into a dead target's pages are not among
+         * them (Thrillville: a new target made over an old one's memory
+         * landed its black image over vertices written since): its bytes
+         * tell, each time */
+        if (o->mn || !o->snap.hasfull) {
+            return o->mn;
+        }
+        if (span_hash(o->d.pa, len) != o->snap.full) {
+            static unsigned said;
+            if (said++ < 20) {
+                hle_log("hakuX-hle-pb", "target %u (%08x %ux%u): its memory changed under a verdict that it had "
+                        "not; its image stays off it", o->id, o->d.pa, o->d.w, o->d.h);
+            }
+            o->mn = true;
+            return true;
+        }
+        return false;
     }
     o->mn_epoch = ep;
     /* its bytes against the snapshot's, before the write counts: the title
