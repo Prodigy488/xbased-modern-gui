@@ -2191,6 +2191,19 @@ int main(int argc, char *argv[])
                     char msg[64];
                     snprintf(msg, sizeof(msg), "Depth bias test %d (F7)", s_zb);
                     notice(msg, NULL);
+                } else if (ev.key.key == SDLK_F12) {
+                    /* which state hides geometry (debug.hakux.dbgf): 0 as drawn, 1 culling off, 2 alpha test off,
+                     * 3 depth test off, 4 stencil test off, 5 all four off */
+                    static int s_df;
+                    static const int k_bits[6] = { 0, 32, 128, 64, 1, 32 | 128 | 64 | 1 };
+                    char v[8];
+                    s_df = (s_df + 1) % 6;
+                    snprintf(v, sizeof(v), "%d", k_bits[s_df]);
+                    nc_win_prop_set("debug.hakux.dbgf", v);
+                    nc_log("hakuX-app", "render state test %d (F12)", s_df);
+                    char msg[64];
+                    snprintf(msg, sizeof(msg), "Render state test %d (F12)", s_df);
+                    notice(msg, NULL);
                 } else if (ev.key.key == SDLK_F4 && !(ev.key.mod & SDL_KMOD_ALT)) {
                     /* a visibility A/B (debug.hakux.visall): 1 reports every occlusion test fully visible, 0 as counted */
                     static int s_va;

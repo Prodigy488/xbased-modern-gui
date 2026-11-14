@@ -1,5 +1,10 @@
 # xbased changelog
 
+## 1.0.76.67 (Modern GUI fork, test build)
+
+- Test for Jedi Knight Academy: F12 cycles render-state overrides to see which one hides geometry: 1 culling off,
+  2 alpha test off, 3 depth test off, 4 stencil test off, 5 all four.
+
 ## 1.0.76.66 (Modern GUI fork, test build)
 
 - Diagnostics only, for Jedi Knight Academy: a draw whose referenced vertex positions are a quarter or more exactly

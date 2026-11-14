@@ -1292,6 +1292,8 @@ int g_hle_fbdbg;
  * (the default); 1: and one slope step; 2: four steps and two slope steps; 3: sixteen and eight. The slope
  * part grows with a polygon's tilt, which is where large near walls differ most between two passes. */
 static int g_zbias;
+/* debug.hakux.dbgf (the front end's F12 cycles it): HAKUX_HLE_DBGFLAGS, live */
+static int g_dbgf_live;
 
 void hle_draw_counts(uint64_t *verts, uint64_t *pipes)
 {
@@ -3108,6 +3110,13 @@ void hle_draw_psframe_poll(uint64_t swap)
         }
     }
     v[0] = 0;
+    if (hle_prop_get("debug.hakux.dbgf", v) > 0 && v[0] && (int)strtol(v, NULL, 0) != g_dbgf_live) {
+        g_dbgf_live = (int)strtol(v, NULL, 0);
+        hle_draw_state_lost();
+        hle_log("hakuX-hle-pipe", "dbgf=%d live (1 stencil off, 2, 4, 8, 16 fog off, 32 culling off, 64 depth test off, "
+                "128 alpha test off)", g_dbgf_live);
+    }
+    v[0] = 0;
     hle_prop_get("debug.hakux.zbias", v);
     if (atoi(v) != g_zbias) {
         g_zbias = atoi(v) < 0 ? 0 : atoi(v) > 3 ? 3 : atoi(v);
@@ -3984,10 +3993,17 @@ void hle_draw_cmd_draw(const HleCmdDraw *c, VkCommandBuffer cb, uint32_t rt_id, 
     /* HAKUX_HLE_DBGFLAGS (debug): 1 stencil test off, 2 depth test off on
      * stencil-tested draws, 4 polygon offset off, 8 W-buffering off, 16 fog
      * off, 32 culling off */
-    static int dbgf = -1;
+    static int dbgf_s = -1;
+    int dbgf = dbgf_s;
     if (dbgf < 0) {
         const char *e = getenv("HAKUX_HLE_DBGFLAGS");
         dbgf = e ? (int)strtol(e, NULL, 0) : 0;
+        dbgf_s = dbgf;
+    }
+    dbgf |= g_dbgf_live;
+    if (dbgf & 128) {                   /* debug: alpha test off */
+        k.pk.alpha_test = false;
+        k.ps.alpha_test = false;
     }
     if (dbgf & 16) {
         k.pk.fog = 0;
@@ -4025,7 +4041,7 @@ void hle_draw_cmd_draw(const HleCmdDraw *c, VkCommandBuffer cb, uint32_t rt_id, 
      * which are Vulkan's constant (one depth step) and slope factors; under
      * W-buffering the pixel stage adds them to w. Filled polygons only. */
     bool stn_req = s->rs[RS_STENCILENABLE] && s->rs[RS_STENCILFUNC] != 0x207;
-    bool zt = ds && s->rs[RS_ZENABLE] != 0 && !((dbgf & 2) && stn_req);
+    bool zt = ds && s->rs[RS_ZENABLE] != 0 && !((dbgf & 2) && stn_req) && !(dbgf & 64);
     float zslope, zofs;
     memcpy(&zslope, &s->rs[RS_ZSLOPESCALE], 4);
     memcpy(&zofs, &s->rs[RS_ZOFFSET], 4);
