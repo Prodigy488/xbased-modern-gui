@@ -3696,65 +3696,100 @@ static void vd_log_gate(unsigned *n, bool *go)
     *go = *n <= 40 || *n % 500 == 0;
 }
 
+static bool vd_vbad(const uint8_t *src, uint32_t v, uint32_t st, uint32_t po, unsigned size)
+{
+    float f[4];
+    memcpy(f, src + v * st + po, MIN(size, 4u) * 4);
+    for (unsigned c = 0; c < MIN(size, 4u); c++) {
+        if (vd_bad(f[c])) {
+            return true;
+        }
+    }
+    return false;
+}
+
+static void vd_dump(const char *what, const uint8_t *src, uint32_t v, uint32_t st)
+{
+    char t[16 * 9 + 1];
+    unsigned o = 0;
+    for (uint32_t k = 0; k < MIN(st / 4, 16u); k++) {
+        uint32_t w;
+        memcpy(&w, src + v * st + k * 4, 4);
+        o += snprintf(t + o, sizeof(t) - o, "%08x ", w);
+    }
+    hle_log("hakuX-hle-pb", "vdiag:   %s vertex #%u: %s", what, v, t);
+}
+
 static void vdiag_pos(const HleCmdDraw *d, unsigned b, const uint8_t *src, uint32_t st, uint32_t lo, uint32_t hi,
                       uint32_t from, uint32_t len)
 {
-    static unsigned said;
+    /* ranges seen bad, to say when one is later read good (a title that
+     * fills its vertices late, or a copy that landed late) */
+    static struct { uint32_t from, len; uint64_t draw; } seen[32];
+    static unsigned nseen, said;
     const uint32_t fmt = R(NV097_SET_VERTEX_DATA_ARRAY_FORMAT);
     const unsigned size = (fmt >> 4) & 0xF;
     if (!size || (fmt & 0xF) != 2 || ((d->attr[0] >> 8) & 0xFF) != b || !st) {
         return;
     }
     const uint32_t po = d->attr[0] >> 16;
-    unsigned bad = 0, first = 0;
-    float fv[4] = { 0, 0, 0, 0 };
-    for (uint32_t v = 0; v <= hi - lo; v++) {
-        float f[4];
-        memcpy(f, src + v * st + po, MIN(size, 4u) * 4);
-        for (unsigned c = 0; c < MIN(size, 4u); c++) {
-            if (vd_bad(f[c])) {
-                if (!bad) {
-                    first = v;
-                    memcpy(fv, f, sizeof(fv));
-                }
-                bad++;
-                break;
+    const uint32_t nv = hi - lo + 1;
+    unsigned bad_all = 0, bad_ref = 0, nref = g_pd.nidx;
+    uint32_t first_ref = 0, good_ref = UINT32_MAX;
+    for (uint32_t v = 0; v < nv; v++) {
+        bad_all += vd_vbad(src, v, st, po, size);
+    }
+    for (uint32_t i = 0; i < nref; i++) {
+        const uint32_t v = g_pd.idx[i] - lo;
+        if (v >= nv) {
+            continue;
+        }
+        if (vd_vbad(src, v, st, po, size)) {
+            if (!bad_ref++) {
+                first_ref = v;
             }
+        } else if (good_ref == UINT32_MAX) {
+            good_ref = v;
         }
     }
+    unsigned k = 0;
+    while (k < nseen && !(seen[k].from == from && seen[k].len == len)) {
+        k++;
+    }
+    if (!bad_ref) {
+        if (k < nseen) {
+            hle_log("hakuX-hle-pb", "vdiag: draw %llu vertices %08x+%u read good now (bad at draw %llu, %u of %u "
+                    "unreferenced bad)", (unsigned long long)g_pd.draws, from, len,
+                    (unsigned long long)seen[k].draw, bad_all, nv);
+            seen[k] = seen[--nseen];
+        }
+        return;
+    }
+    if (k == nseen && nseen < 32) {
+        seen[nseen].from = from;
+        seen[nseen].len = len;
+        seen[nseen].draw = g_pd.draws;
+        nseen++;
+    }
     bool go;
-    if (bad) {
-        vd_log_gate(&said, &go);
-        if (go) {
-            hle_log("hakuX-hle-pb", "vdiag: draw %llu bad positions %u of %u (first #%u %g %g %g %g) "
-                    "prim %u stride %u off %u size %u pgen %u",
-                    (unsigned long long)g_pd.draws, bad, hi - lo + 1, first, fv[0], fv[1], fv[2], fv[3],
-                    g_pd.prim, st, po, size, (unsigned)g_pd.pgen);
-            /* whose memory it is: a target's image or a writeback landing there */
-            unsigned shown = 0;
-            for (unsigned i = 0; i < g_pd.nobjs && shown < 4; i++) {
-                const uint32_t oa = g_pd.objs[i].d.pa, oe = oa + g_pd.objs[i].d.pitch * g_pd.objs[i].d.h;
-                if (g_pd.objs[i].d.pitch && oa < from + len && from < oe) {
-                    hle_log("hakuX-hle-pb", "vdiag:   vertices %08x+%u overlap object %u at %08x-%08x "
-                            "(%ux%u pitch %u fmt %x) bound %llu of %llu cpu_used %d",
-                            from, len, g_pd.objs[i].id, oa, oe, g_pd.objs[i].d.w, g_pd.objs[i].d.h,
-                            g_pd.objs[i].d.pitch, (unsigned)g_pd.objs[i].d.xfmt,
-                            (unsigned long long)g_pd.objs[i].bound, (unsigned long long)g_pd.binds,
-                            (int)g_pd.objs[i].cpu_used);
-                    shown++;
-                }
-            }
-            for (unsigned i = 0; i < WB_NOTES && shown < 8; i++) {
-                if (g_wbn[i].len && g_wbn[i].pa < from + len && from < g_wbn[i].pa + g_wbn[i].len) {
-                    hle_log("hakuX-hle-pb", "vdiag:   vertices %08x+%u overlap a writeback %08x+%u (value %llu, "
-                            "last %llu)", from, len, g_wbn[i].pa, g_wbn[i].len,
-                            (unsigned long long)g_wbn[i].v, (unsigned long long)hle_fe_last_value());
-                    shown++;
-                }
-            }
-            if (!shown) {
-                hle_log("hakuX-hle-pb", "vdiag:   vertices %08x+%u overlap no target nor writeback", from, len);
-            }
+    vd_log_gate(&said, &go);
+    if (!go) {
+        return;
+    }
+    hle_log("hakuX-hle-pb", "vdiag: draw %llu REFERENCED bad positions %u of %u indices (%u of %u vertices bad "
+            "in the range) prim %u idx %u stride %u off %u size %u pgen %u at %08x+%u",
+            (unsigned long long)g_pd.draws, bad_ref, nref, bad_all, nv, g_pd.prim, nref, st, po, size,
+            (unsigned)g_pd.pgen, from, len);
+    vd_dump("bad", src, first_ref, st);
+    if (good_ref != UINT32_MAX) {
+        vd_dump("good", src, good_ref, st);
+    }
+    unsigned shown = 0;
+    for (unsigned i = 0; i < g_pd.nobjs && shown < 3; i++) {
+        const uint32_t oa = g_pd.objs[i].d.pa, oe = oa + g_pd.objs[i].d.pitch * g_pd.objs[i].d.h;
+        if (g_pd.objs[i].d.pitch && oa < from + len && from < oe) {
+            hle_log("hakuX-hle-pb", "vdiag:   overlaps object %u at %08x-%08x", g_pd.objs[i].id, oa, oe);
+            shown++;
         }
     }
 }
