@@ -2447,6 +2447,7 @@ int dash_run(SDL_Window *win, const char *exe)
             SDL_Log("xbased: %s", note);
         }
     }
+    const Uint64 t_start = SDL_GetTicks();
     i18n_set(cfg_get(&D.global, "ui.lang"));
     cc_sync(&D.global);     /* the EEPROM changed by hand or by a title meanwhile */
     {
@@ -2457,6 +2458,7 @@ int dash_run(SDL_Window *win, const char *exe)
             dash_toast(note);
         }
     }
+    const Uint64 t_tex = SDL_GetTicks();
     upd_cleanup();
     if (cfg_bool(&D.global, "update.check", true)) {
         upd_check_start(XBASED_VERSION);
@@ -2471,7 +2473,11 @@ int dash_run(SDL_Window *win, const char *exe)
      * focus); while a game runs their events are only drained (the loop
      * below), the game's process reads them */
     SDL_SetHint(SDL_HINT_JOYSTICK_ALLOW_BACKGROUND_EVENTS, "1");
+    const Uint64 t_ui = SDL_GetTicks();
     snd_init();
+    SDL_Log("xbased: start-up: texture packs %llu ms, update cleanup and window/fonts %llu ms, sounds %llu ms",
+            (unsigned long long)(t_tex - t_start), (unsigned long long)(t_ui - t_tex),
+            (unsigned long long)(SDL_GetTicks() - t_ui));
     const char **fv;
     int fn;
     folders(&fv, &fn);
