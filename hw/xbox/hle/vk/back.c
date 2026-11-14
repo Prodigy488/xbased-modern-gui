@@ -2512,6 +2512,9 @@ static void dispatch(const HleCmdHdr *h)
         /* a draw reading the target it renders: the pass renders in
          * RENDERING_LOCAL_READ (reopened once when it was not) */
         unsigned fb = hle_draw_fb_stages(p, g_back.rt);
+        if (hle_draw_dskip(p)) {
+            break;                      /* debug: a class of draws left out (debug.hakux.dskip) */
+        }
         if (g_hle_fbdbg == 2 && fb && hle_draw_is_psh()) {
             break;                      /* debug: the programs that read their own target skipped */
         }

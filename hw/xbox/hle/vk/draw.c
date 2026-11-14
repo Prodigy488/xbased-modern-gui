@@ -1247,6 +1247,26 @@ unsigned hle_draw_fb_stages(const HleCmdDraw *c, uint32_t rt_id)
 
 bool g_hle_fbbar_off;
 int g_hle_gpucut;
+/* debug.hakux.dskip (the front end's F6 cycles it): draws left out, to find which ones make a picture
+ * artifact. 1: vertices of 4 bytes or less (packed sprite lists); 2: draws with the depth test off and
+ * blending on; 3: draws with the depth test off, blended or not; 4: draws of 132 vertices or more. */
+static int g_dskip;
+bool hle_draw_dskip(const void *p)
+{
+    const HleCmdDraw *c = p;
+    if (!g_dskip || !g_dr.st_valid) {
+        return false;
+    }
+    const uint32_t *rs = g_dr.st.rs;
+    const uint32_t stride = c->nbind ? c->bind_stride[0] : c->stride;
+    switch (g_dskip) {
+    case 1: return stride <= 4;
+    case 2: return !rs[RS_ZENABLE] && rs[RS_ALPHABLENDENABLE];
+    case 3: return !rs[RS_ZENABLE];
+    case 4: return c->count >= 132;
+    }
+    return false;
+}
 bool hle_draw_is_psh(void)
 {
     return g_dr.st_valid && g_dr.st.psh;
@@ -3023,6 +3043,13 @@ void hle_draw_psframe_poll(uint64_t swap)
             hle_log("hakuX-hle-pipe", "fbdbg=%d%s (1: target reads through a copy, 2: skipped, 3: depth reads "
                     "skipped)", g_hle_fbdbg, autom ? " (auto)" : "");
         }
+    }
+    v[0] = 0;
+    hle_prop_get("debug.hakux.dskip", v);
+    if (atoi(v) != g_dskip) {
+        g_dskip = atoi(v) < 0 ? 0 : atoi(v) > 4 ? 4 : atoi(v);
+        hle_log("hakuX-hle-pipe", "dskip=%d (1: vertices of 4 bytes or less left out, 2: depth test off and blending, "
+                "3: depth test off, 4: 132 vertices or more)", g_dskip);
     }
     v[0] = 0;
     hle_prop_get("debug.hakux.zbias", v);

@@ -2163,6 +2163,17 @@ int main(int argc, char *argv[])
                     nc_win_prop_set("debug.hakux.pbdraws", v);
                     nc_log("hakuX-app", "capture %d: the next frame's render targets and 2600 draws", s_cap);
                     notice("Graphics capture taken (F9): see the log and hle_shadow", NULL);
+                } else if (ev.key.key == SDLK_F6) {
+                    /* which draws make an artifact (debug.hakux.dskip): 0 none left out, 1 to 4 a class of draws left out */
+                    static int s_ds;
+                    char v[8];
+                    s_ds = (s_ds + 1) % 5;
+                    snprintf(v, sizeof(v), "%d", s_ds);
+                    nc_win_prop_set("debug.hakux.dskip", v);
+                    nc_log("hakuX-app", "draw class test %d (F6)", s_ds);
+                    char msg[64];
+                    snprintf(msg, sizeof(msg), "Draw class test %d (F6)", s_ds);
+                    notice(msg, NULL);
                 } else if (ev.key.key == SDLK_F7) {
                     /* a depth-bias A/B for a bug report (debug.hakux.zbias): 0 the default, 1 to 3 move the passes that
                      * redraw surfaces without writing depth further toward the eye (wedges over large near walls) */
