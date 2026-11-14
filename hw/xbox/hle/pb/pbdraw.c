@@ -3681,6 +3681,83 @@ static bool vb_realign(HleCmdDraw *d, unsigned b, const uint8_t *src, uint32_t f
     return true;
 }
 
+/* Diagnostic for the vertex explosions (Thrillville, Jedi Knight Academy;
+ * xemu #747): says, rate limited, when a draw's float positions or the
+ * vertex program's constants hold NaN, Inf or absurd values, so a capture
+ * shows whether bad data or bad constants make the stretched polygons. */
+static bool vd_bad(float f)
+{
+    return !(f > -1e7f && f < 1e7f);
+}
+
+static void vd_log_gate(unsigned *n, bool *go)
+{
+    *n += 1;
+    *go = *n <= 40 || *n % 500 == 0;
+}
+
+static void vdiag_pos(const HleCmdDraw *d, unsigned b, const uint8_t *src, uint32_t st, uint32_t lo, uint32_t hi)
+{
+    static unsigned said;
+    const uint32_t fmt = R(NV097_SET_VERTEX_DATA_ARRAY_FORMAT);
+    const unsigned size = (fmt >> 4) & 0xF;
+    if (!size || (fmt & 0xF) != 2 || ((d->attr[0] >> 8) & 0xFF) != b || !st) {
+        return;
+    }
+    const uint32_t po = d->attr[0] >> 16;
+    unsigned bad = 0, first = 0;
+    float fv[4] = { 0, 0, 0, 0 };
+    for (uint32_t v = 0; v <= hi - lo; v++) {
+        float f[4];
+        memcpy(f, src + v * st + po, MIN(size, 4u) * 4);
+        for (unsigned c = 0; c < MIN(size, 4u); c++) {
+            if (vd_bad(f[c])) {
+                if (!bad) {
+                    first = v;
+                    memcpy(fv, f, sizeof(fv));
+                }
+                bad++;
+                break;
+            }
+        }
+    }
+    bool go;
+    if (bad) {
+        vd_log_gate(&said, &go);
+        if (go) {
+            hle_log("hakuX-hle-pb", "vdiag: draw %llu bad positions %u of %u (first #%u %g %g %g %g) "
+                    "prim %u stride %u off %u size %u pgen %u",
+                    (unsigned long long)g_pd.draws, bad, hi - lo + 1, first, fv[0], fv[1], fv[2], fv[3],
+                    g_pd.prim, st, po, size, (unsigned)g_pd.pgen);
+        }
+    }
+}
+
+static void vdiag_consts(void)
+{
+    static uint32_t last = UINT32_MAX;
+    static unsigned said;
+    if (last == (uint32_t)g_pd.cgen) {
+        return;
+    }
+    last = (uint32_t)g_pd.cgen;
+    for (unsigned i = 0; i < HLE_VSH_CONSTANTS; i++) {
+        for (unsigned c = 0; c < 4; c++) {
+            float f;
+            memcpy(&f, &g_pd.consts[i][c], 4);
+            if (vd_bad(f)) {
+                bool go;
+                vd_log_gate(&said, &go);
+                if (go) {
+                    hle_log("hakuX-hle-pb", "vdiag: draw %llu constant c%u.%c = %g (%08x) pgen %u cgen %u",
+                            (unsigned long long)g_pd.draws, i, "xyzw"[c], f, g_pd.consts[i][c],
+                            (unsigned)g_pd.pgen, (unsigned)g_pd.cgen);
+                }
+            }
+        }
+    }
+}
+
 /* The vertex arrays the indices reach, read in place or copied to the
  * arena, the indices converted for the primitive and rebased. */
 static void draw_arrays(void)
@@ -3697,6 +3774,7 @@ static void draw_arrays(void)
     }
     HleCmdDraw d;
     memset(&d, 0, sizeof(d));
+    vdiag_consts();
     /* bindings: attributes of one stride whose data lie within one stride
      * of a binding's start share it (interleaved vertices) */
     uint32_t base[HLE_DRAW_MAX_BIND], end[HLE_DRAW_MAX_BIND];
@@ -3738,6 +3816,9 @@ static void draw_arrays(void)
         uint32_t len = st ? (hi - lo) * st + MAX(end[b], 1u) : end[b];
         coh_pend_wait(from, len);           /* a copy queued into it lands first */
         const uint8_t *src = hle_pa_ptr(from, len);
+        if (src) {
+            vdiag_pos(&d, b, src, st, lo, hi);
+        }
         if (src && hle_quirk(HLE_QUIRK_VB_ALIGN) && vb_misaligned(&d, b, base[b])) {
             if (!vb_realign(&d, b, src, from, len, st ? hi - lo + 1 : 1)) {
                 skip(SK_DRAW_ARRAYS_ARENA);
