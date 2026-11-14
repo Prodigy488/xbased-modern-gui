@@ -197,6 +197,18 @@ int hle_host_texpack(void)
     return g_texpack;
 }
 
+static int g_texlive_speed = 1;
+
+void nc_hle_set_texlive_speed(int s)
+{
+    g_texlive_speed = s < 0 ? 0 : s > 2 ? 2 : s;
+}
+
+int hle_host_texlive_speed(void)
+{
+    return g_texlive_speed;
+}
+
 static int g_texpack_cap;
 
 void nc_hle_set_texpack_cap(int px)

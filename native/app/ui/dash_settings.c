@@ -62,6 +62,9 @@ static void rows_video(List *l)
     opt_bool(l, S_TEXDUMP, "texdump", false, false);
     opt_bool(l, S_TEXAUTO, "texauto", false, false);
     opt_bool(l, S_TEXLIVE, "texlive", true, false);
+    static const char *tsv[] = {"0", "1", "2"};
+    const char *tsn[] = {T(S_SHARP_LOW), T(S_SHARP_MED), T(S_SHARP_HIGH)};
+    opt_choice(l, S_TEXSPEED, "texspeed", tsv, tsn, 3, "1");
     static const char *uv[] = {"bilinear", "fsr", "nis", "nearest"};
     const char *un[] = {T(S_BILINEAR), "AMD FSR 1", "NVIDIA NIS", T(S_NEAREST)};
     opt_choice(l, S_UPSCALE, "upscale", uv, un, 4, "bilinear");

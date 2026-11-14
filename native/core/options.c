@@ -81,6 +81,8 @@ bool nc_option(NcOptions *o, const char *arg)
         nc_log("hakuX-app", "texture packs %s", atoi(v) ? "on" : "off");
     } else if ((v = value(arg, "texlive="))) {
         nc_hle_set_texpack(8, atoi(v) != 0);
+    } else if ((v = value(arg, "texspeed="))) {
+        nc_hle_set_texlive_speed(atoi(v));
     } else if ((v = value(arg, "texcap="))) {
         nc_hle_set_texpack_cap(atoi(v));
     } else if ((v = value(arg, "texauto="))) {

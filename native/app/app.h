@@ -43,6 +43,7 @@ bool nc_texscan_start(const char *disc, const char *dir);
 /* Automatic texture upscaling (texauto.c): the textures a game wrote out into `dir` (the title's folder, with its
  * ending slash) that have no upscaled picture yet, handed to Real-ESRGAN, which runs on by itself. Returns how
  * many (0 none to do, -1 the program missing or not started); note says which, for the log. */
+void nc_texauto_set_live(int speed);  /* a game is running: runs sized, threaded and prioritised by the speed (0 low, 1 medium, 2 high) */
 void nc_texauto_set_budget(int pixels); /* input pixels one run takes (0: all); beside a game it is kept small */
 int nc_texauto_run(const char *dir, const char *exe_dir, const char *data_dir, char *note, size_t note_n); /* the display's refresh rate (frame interpolation's limits) */
 /* The frame rate in the window's corner. */

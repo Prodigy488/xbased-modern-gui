@@ -350,7 +350,7 @@ static int SDLCALL texlive_thread(void *arg)
 {
     (void)arg;
     char note[2600];
-    nc_texauto_set_budget(2000000);     /* about 8 textures of 512 a side: a second or so of the GPU, then it lets go */
+    nc_texauto_set_live(hle_host_texlive_speed()); /* a run of a second or so of the GPU, then it lets go; the speed sets how much */
     const int n = nc_texauto_run(hle_texpack_dir(), g_exe_dir, g_data_dir, note, sizeof(note));
     if (n > 0) {
         nc_log("hakuX-app", "texture upscaling (while playing): %s", note);

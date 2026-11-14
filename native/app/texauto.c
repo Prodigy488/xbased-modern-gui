@@ -59,11 +59,34 @@ static SDL_AtomicInt g_in;
 /* How much one run takes: input pixels (0: all that is waiting). A run beside a game is kept small, so that it
  * holds the GPU for a second or so and then lets go; the run when a game ends takes everything. */
 static int g_budget;
+/* How fast the upscaler goes beside a game (the setting "texspeed", 0 low, 1 medium, 2 high): input pixels a run
+ * takes, textures a run takes at most, its process priority, and its threads (-j, NULL: its default). */
+static int g_speed = 1;
+#ifndef _WIN32
+#define IDLE_PRIORITY_CLASS 0
+#define BELOW_NORMAL_PRIORITY_CLASS 0
+#define NORMAL_PRIORITY_CLASS 0
+#endif
+static const struct {
+    int px, todo, prio;
+    const char *jobs;
+} SPEED[3] = {
+    { 1000000, 50, IDLE_PRIORITY_CLASS, "1:1:1" },       /* low: the gentlest, the slowest to sharpen */
+    { 2000000, 150, BELOW_NORMAL_PRIORITY_CLASS, "1:2:2" }, /* medium */
+    { 6000000, 600, NORMAL_PRIORITY_CLASS, NULL },         /* high: the fastest, may cost frames */
+};
 static char g_prev[80];        /* what the batch before ended with, if badly, for the next note */
 
 void nc_texauto_set_budget(int pixels)
 {
     g_budget = pixels;
+}
+
+/* A game is running: the runs are kept to the speed's size, and the upscaler's threads and priority follow it. */
+void nc_texauto_set_live(int speed)
+{
+    g_speed = speed < 0 ? 0 : speed > 2 ? 2 : speed;
+    g_budget = SPEED[g_speed].px;
 }
 
 /* The picture's size from its PNG header (8 bytes of signature, then IHDR: width and height, big-endian). */
@@ -200,7 +223,7 @@ static int run_one(const char *dir, const char *exe_dir, const char *data_dir, c
         if (g_budget > 0 && todo && used_px + cand[i].px > g_budget) {
             continue;           /* too much for this run: a later one (a smaller one may still fit) */
         }
-        if (g_budget > 0 && todo >= 150) {
+        if (g_budget > 0 && todo >= SPEED[g_speed].todo) {
             break;              /* beside a game: not thousands of small files in one run (each is read, */
         }                       /* written and compressed on the CPU the game runs on) */
         if (!todo && !SDL_CreateDirectory(queue)) {
@@ -226,7 +249,11 @@ static int run_one(const char *dir, const char *exe_dir, const char *data_dir, c
      * where its own choice (1:2:2) and normal priority took CPU time from the game and the window's thread:
      * a Half-Life 2 log had some 30 hitches of 100 to 320 ms ("UI missed N front frames") over 35 batches. */
     const char *args[] = { tool, "-i", queue, "-o", aut, "-n", "realesrgan-x4plus", "-s", "4", "-f", "png",
-                           "-m", models, "-t", "128", g_budget > 0 ? "-j" : NULL, "1:1:1", NULL };
+                           "-m", models, "-t", "128", NULL, NULL, NULL };
+    if (g_budget > 0 && SPEED[g_speed].jobs) {
+        args[15] = "-j";                /* the NULLs after "128" */
+        args[16] = SPEED[g_speed].jobs;
+    }
     SDL_PropertiesID p = SDL_CreateProperties();
     SDL_SetPointerProperty(p, SDL_PROP_PROCESS_CREATE_ARGS_POINTER, (void *)args);
     /* nothing of its output wanted (it writes its progress); not a "background" process, whose end can't be
@@ -251,7 +278,7 @@ static int run_one(const char *dir, const char *exe_dir, const char *data_dir, c
         HANDLE hp = OpenProcess(PROCESS_SET_INFORMATION, FALSE,
                                 (DWORD)SDL_GetNumberProperty(SDL_GetProcessProperties(pr), SDL_PROP_PROCESS_PID_NUMBER, 0));
         if (hp) {
-            SetPriorityClass(hp, IDLE_PRIORITY_CLASS);
+            SetPriorityClass(hp, SPEED[g_speed].prio);
             CloseHandle(hp);
         }
     }

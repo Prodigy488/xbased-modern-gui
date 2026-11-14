@@ -44,6 +44,8 @@ void nc_hle_set_anisotropy(int level);
  * after the game) on or off. */
 void nc_hle_set_texpack(int bits, bool on);
 void nc_hle_set_mvstat(int on);         /* count the draws that have a twin a frame before (the log) */
+void nc_hle_set_texlive_speed(int s);   /* how fast upscaling goes beside a game: 0 low, 1 medium, 2 high */
+int hle_host_texlive_speed(void);
 void nc_hle_set_texpack_cap(int px);    /* a pack picture's largest side (0: 2048) */
 /* Before boot: the app's "Asynchronous shader compilation" and "Build cached
  * shaders before starting" settings (hw/xbox/hle/vk/pipeasync.h). */
