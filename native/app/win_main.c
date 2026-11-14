@@ -2193,11 +2193,11 @@ int main(int argc, char *argv[])
                     notice(msg, NULL);
                 } else if (ev.key.key == SDLK_F12) {
                     /* which state hides geometry (debug.hakux.dbgf): 0 as drawn, 1 culling off, 2 alpha test off,
-                     * 3 depth test off, 4 stencil test off, 5 all four off */
+                     * 3 depth test off, 4 stencil test off, 5 all four off, 6 depth clamped, not clipped */
                     static int s_df;
-                    static const int k_bits[6] = { 0, 32, 128, 64, 1, 32 | 128 | 64 | 1 };
+                    static const int k_bits[7] = { 0, 32, 128, 64, 1, 32 | 128 | 64 | 1, 256 };
                     char v[8];
-                    s_df = (s_df + 1) % 6;
+                    s_df = (s_df + 1) % 7;
                     snprintf(v, sizeof(v), "%d", k_bits[s_df]);
                     nc_win_prop_set("debug.hakux.dbgf", v);
                     nc_log("hakuX-app", "render state test %d (F12)", s_df);

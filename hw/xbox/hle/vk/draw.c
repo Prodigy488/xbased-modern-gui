@@ -4022,7 +4022,7 @@ void hle_draw_cmd_draw(const HleCmdDraw *c, VkCommandBuffer cb, uint32_t rt_id, 
     /* NV2A ZCLAMP_EN CLAMP: depth past the near and far planes is clamped to
      * them instead of clipping the primitive (MechAssault 2's sky, drawn past
      * the far plane, was black): the rasterizer's depth clamp */
-    bool zclamp = ds && s->rs[RS_ZENABLE] != 0 && s->zclamp;
+    bool zclamp = ds && s->rs[RS_ZENABLE] != 0 && (s->zclamp || (dbgf & 256));   /* 256: debug, always clamp */
     if (prog) {
         k.vk.wbuf = wbuf;
         k.vk.zfree = !ds || s->rs[RS_ZENABLE] == 0;

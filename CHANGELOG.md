@@ -1,5 +1,11 @@
 # xbased changelog
 
+## 1.0.76.73 (Modern GUI fork, test build)
+
+- Test for Jedi Knight Academy: F12 has a sixth step that clamps depth instead of clipping at the near and far
+  planes for every draw. The ground draw in a capture has vertices behind the camera plane, and the holes sit where
+  it should be.
+
 ## 1.0.76.72 (Modern GUI fork, test build)
 
 - Diagnostics only, for Jedi Knight Academy: a graphics capture (F9) now also logs `pick:` lines, one per draw, with
