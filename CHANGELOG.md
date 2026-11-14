@@ -1,5 +1,14 @@
 # xbased changelog
 
+## 1.0.76.42 (Modern GUI fork)
+
+- 007: From Russia with Love: the glass-shard wedges and lights showing through walls are gone. The game's full-screen
+  glow passes read the depth buffer as a texture, which the renderer does not do right, so for this title they are
+  left out (the light bloom goes with them). Other games are not changed.
+- Screenshots (F12) are saved as PNG.
+- Debug keys for bug reports: F6 leaves out a class of draws (modes 1 to 7), F7 cycles a depth-bias test, and F9 now
+  logs 2600 draws (a whole frame).
+
 ## 1.0.76.41 (Modern GUI fork)
 
 - Start-up: the dashboard took about a minute to appear on a copy with many texture dumps and upscaled pictures. The
@@ -11,12 +20,6 @@
 - New setting "Upscaling speed while playing" (Low, Medium, High; key texspeed). High shows sharp textures sooner and
   may cost frames; Low is the gentlest.
 - The log records the start-up stages' times and the time of the first frame.
-- 007: From Russia with Love: the glass-shard wedges and lights showing through walls are gone. The game's full-screen
-  glow passes read the depth buffer as a texture, which the renderer does not do right, so for this title they are
-  left out (the light bloom goes with them). Other games are not changed.
-- Screenshots (F12) are saved as PNG.
-- Debug keys for bug reports: F6 leaves out a class of draws (modes 1 to 7), F7 cycles a depth-bias test, and F9 now
-  logs 2600 draws (a whole frame).
 
 ## 1.0.76.40 (Modern GUI fork)
 

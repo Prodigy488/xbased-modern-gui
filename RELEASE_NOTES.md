@@ -1,16 +1,18 @@
-# xbased Modern GUI 1.0.76.41: fast start-up, upscaling speed setting, game compatibility fixes, Autofix for stalled games, Linux AppImage
+# xbased Modern GUI 1.0.76.42: From Russia with Love graphics fix, fast start-up, upscaling speed setting, game compatibility fixes, Autofix for stalled games, Linux AppImage
 
 ```
 Changes since 1.0.76.2
 ----------------------
+New in 1.0.76.42
+- 007: From Russia with Love: the glass-shard wedges and lights through walls are fixed (the glow passes that
+  read the depth buffer are left out for this game, so there is no light bloom).
+- Screenshots (F12) are saved as PNG.
+
 New in 1.0.76.41
 - Start-up: the dashboard no longer takes a minute to appear with many texture dumps and upscaled pictures
   (the clean-up of update leftovers walked the whole data folder; first frame 59.6 s before, 0.7 s after).
 - Upscaling while playing is gentler (lower priority, fewer threads, smaller batches), and has a new setting,
   "Upscaling speed while playing": Low, Medium or High (High shows sharp textures sooner and may cost frames).
-- 007: From Russia with Love: the glass-shard wedges and lights through walls are fixed (the glow passes that
-  read the depth buffer are left out for this game, so there is no light bloom).
-- Screenshots (F12) are saved as PNG.
 
 Fixes that apply to every game
 - Games that use MMX instructions with an operand-size prefix (0x66) no longer crash; the
@@ -112,7 +114,7 @@ New
 - Settings > System > "Scan games for missing kernel functions": reads every game's default.xbe
   and writes compat_report.txt (the games with the most gaps first, and each missing function with
   how many games need it). "Open the scan report" opens it.
-- Linux: an AppImage (xbased-1.0.76.41-x86_64.AppImage). Needs a Vulkan driver and glibc 2.38 or newer (Ubuntu 24.04, Fedora 39, Debian 13); not run with a GPU or sound yet.
+- Linux: an AppImage (xbased-1.0.76.42-x86_64.AppImage). Needs a Vulkan driver and glibc 2.38 or newer (Ubuntu 24.04, Fedora 39, Debian 13); not run with a GPU or sound yet.
   Settings, saves and states are in ~/.local/share/xbased.
 
 Logs (to find out why a game stops or is silent)
@@ -126,4 +128,4 @@ Known
   missing: the game never asks the audio chip to play them. Not fixed yet.
 ```
 
-Downloads: `xbased-modern-gui-1.0.76.41-windows-x64.zip` (Windows 10/11 x64, Vulkan 1.1) and `xbased-1.0.76.41-x86_64.AppImage` (Linux x86-64). There is no macOS build: the emulator has no macOS port yet.
+Downloads: `xbased-modern-gui-1.0.76.42-windows-x64.zip` (Windows 10/11 x64, Vulkan 1.1) and `xbased-1.0.76.42-x86_64.AppImage` (Linux x86-64). There is no macOS build: the emulator has no macOS port yet.
