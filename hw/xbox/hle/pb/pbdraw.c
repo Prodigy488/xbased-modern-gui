@@ -2247,6 +2247,25 @@ bool hle_pbd_blit_images(uint32_t sbase, uint32_t sp, uint32_t dbase, uint32_t d
         rt_cpu_sync(dst);
         return false;
     }
+    {
+        /* the bytes are memory's: a rectangle past either target (a copy of
+         * bytes, not of pixels), or a source whose image holds nothing newer
+         * than its memory (a dead target's memory the title reused: its data
+         * is there, and copied as images it never reached the destination's
+         * memory: Thrillville's vertex data, drawn half another mesh's) */
+        const bool fits = ix + w <= so->d.w && iy + h <= so->d.h && ox + w <= dd->d.w && oy + h <= dd->d.h;
+        const bool src_mem = so->written <= so->synced || coh_mem_newer(so);
+        if (!fits || src_mem) {
+            static unsigned said;
+            if (said++ < 30 || said % 200 == 0) {
+                hle_log("hakuX-hle-pb", "blit %08x -> %08x %ux%u (targets %u -> %u): copied in memory (%s)", sbase,
+                        dbase, w, h, src, dst, !fits ? "past a target" : "the source's memory is current");
+            }
+            rt_cpu_sync(src);
+            rt_cpu_sync(dst);
+            return false;
+        }
+    }
     coh_first_write(so, false);
     coh_first_write(dd, !ox && !oy && ox + w >= dd->d.w && oy + h >= dd->d.h);
     HleCmdCopy *c = begin(HLE_OP_COPY, sizeof(*c));

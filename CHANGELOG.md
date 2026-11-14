@@ -1,5 +1,12 @@
 # xbased changelog
 
+## 1.0.76.59 (Modern GUI fork, test build)
+
+- Thrillville's remaining stretched polygons: a blit between two addresses that both had a render target was
+  copied between their images only, so data the game copied that way (into memory it had reused) never reached
+  memory. Such a blit is now a copy in memory when its rectangle runs past a target or the source's memory is
+  current. Not confirmed on a PC yet.
+
 ## 1.0.76.58 (Modern GUI fork, test build)
 
 - Diagnostics only: the `vdiag:` lines say whether one of the emulator's own writes into the game's memory (an
