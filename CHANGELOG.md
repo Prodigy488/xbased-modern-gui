@@ -1,5 +1,12 @@
 # xbased changelog
 
+## 1.0.76.46 (Modern GUI fork, test build)
+
+- Thrillville, Jedi Knight Academy and the "vertex explosions" they share with xemu (its issue #747): the vertex
+  shaders' dot products (DP3, DP4, DPH) and DST now give zero for a zero factor against an infinite or NaN value,
+  as MUL and MAD already did and as the console does. A bone-matrix row nobody set no longer turns a vertex into a
+  NaN that stretches across the screen. Not confirmed on a PC yet.
+
 ## 1.0.76.45 (Modern GUI fork, test build)
 
 - Movie cleanup is a setting now (Settings > Video, "Movie cleanup"): Off, Low, Medium or High. Medium is what
