@@ -50,14 +50,14 @@
 #define PS_FRAMES 3             /* the presenter's submits in flight */
 /* a frame's descriptor sets: the first five of the plain layout, the rest (SMAA's weights and blend, the
  * interpolation's motion and mix) of the one with the extra samplers, made at first use (x_init) */
-enum { SET_WINDOW, SET_FXAA, SET_EASU, SET_OSD, SET_COPY, SET_SHARP, SET_X0, SET_X1, SET_X2, SET_X3, SET_X4, SET_X5, SET_X6, SET_X7,
+enum { SET_WINDOW, SET_FXAA, SET_EASU, SET_OSD, SET_COPY, SET_SHARP, SET_VID, SET_X0, SET_X1, SET_X2, SET_X3, SET_X4, SET_X5, SET_X6, SET_X7,
        PS_SETS };
 #define PS_RAMP 1024            /* a frame's share of the ramp buffer (768 used) */
 
 /* the window's pipelines, then those into images of ours (R8G8B8A8) */
 enum { P_BILINEAR, P_AREA, P_RCAS, P_CRT, P_OSD, P_KDOWN, P_KUP, P_FXAA, P_EASU, P_NIS,
        P_SM_EDGE, P_SM_WT, P_SM_BLEND, P_IL_ME, P_IL_MIX, P_COPY, P_IL_DOWN, P_IL_HALF, P_IL_LV,
-       P_SHARP, P_COUNT };   /* from P_SM_EDGE on: made at first use */
+       P_SHARP, P_VID, P_COUNT };   /* from P_SM_EDGE on: made at first use */
 
 /* An image of ours a pass draws into and the window's pass samples. */
 typedef struct PsImg {
@@ -130,6 +130,7 @@ static struct {
     uint64_t serial;            /* frames taken */
     /* FXAA's image (the frame's size), FSR's (the frame's in the window) */
     PsImg fx, up;
+    PsImg vd;                   /* a movie's frame cleaned up (P_VID)  */
     PsImg sh;                   /* the frame sharpened (P_SHARP), when no upscaler does it; kind: the strength */
     /* SMAA (smaa.inc): its edges and blend weights (the frame's size) and lookup tables, uploaded once */
     PsImg sm_edge, sm_wt, sm_area, sm_search;
@@ -534,6 +535,30 @@ static const char k_fs_sharp[] =
     "  vec3 lobeC = max(-hitMin, hitMax);\n"
     "  float lobe = max(-(0.25 - 1.0 / 16.0), min(max(lobeC.r, max(lobeC.g, lobeC.b)), 0.0)) * pc.extra.x;\n"
     "  o = vec4(clamp((lobe * (b + d + h + f) + e) / (4.0 * lobe + 1.0), 0.0, 1.0), 1.0);\n"
+    "}\n";
+
+/* A movie's frame, cleaned up before it is scaled: a smoothing that keeps edges (nine taps one source pixel
+ * apart, each weighted by how near its colour is to the centre's), to take out the blocks and the mosquito noise
+ * of the movie's compression; a third of the difference is put back so it is not left soft. The taps are
+ * spaced by the render scale (the frame is 640 wide at 1x). */
+static const char k_fs_vid[] =
+    "void main() {\n"
+    "  ivec2 sz = textureSize(u_tex, 0);\n"
+    "  float st = max(1.0, float(sz.x) / 640.0);\n"
+    "  vec2 px = v_uv * vec2(sz);\n"
+    "  vec3 c = texelFetch(u_tex, clamp(ivec2(px), ivec2(0), sz - 1), 0).rgb;\n"
+    "  vec3 acc = c; float ws = 1.0;\n"
+    "  for (int j = -1; j <= 1; j++) {\n"
+    "    for (int i = -1; i <= 1; i++) {\n"
+    "      if (i == 0 && j == 0) continue;\n"
+    "      vec3 s = texelFetch(u_tex, clamp(ivec2(px + vec2(i, j) * st), ivec2(0), sz - 1), 0).rgb;\n"
+    "      vec3 d = s - c;\n"
+    "      float w = exp(-dot(d, d) * 90.0);\n"
+    "      acc += s * w; ws += w;\n"
+    "    }\n"
+    "  }\n"
+    "  vec3 sm = acc / ws;\n"
+    "  o = vec4(clamp(sm + (c - sm) * 0.33, 0.0, 1.0), 1.0);\n"
     "}\n";
 
 #include "hw/xbox/hle/vk/nis_coef.inc"
@@ -1053,6 +1078,8 @@ static bool init(void)
     g_ps.pipe[P_NIS] = pipeline(g_ps.fs[P_NIS], VK_FORMAT_R8G8B8A8_UNORM);
     g_ps.fs[P_SHARP] = module(HLE_SHADER_FRAGMENT, k_fs_head, k_fs_sharp);
     g_ps.pipe[P_SHARP] = pipeline(g_ps.fs[P_SHARP], VK_FORMAT_R8G8B8A8_UNORM);
+    g_ps.fs[P_VID] = module(HLE_SHADER_FRAGMENT, k_fs_head, k_fs_vid);
+    g_ps.pipe[P_VID] = pipeline(g_ps.fs[P_VID], VK_FORMAT_R8G8B8A8_UNORM);
     hle_log("hakuX-hle-back", "present: ready (shaders: bilinear %d, averaging %d, FSR %d, FXAA %d, NIS %d)",
             g_ps.fs[P_BILINEAR] != VK_NULL_HANDLE, g_ps.fs[P_AREA] != VK_NULL_HANDLE,
             g_ps.fs[P_RCAS] != VK_NULL_HANDLE && g_ps.pipe[P_EASU] != VK_NULL_HANDLE,
@@ -2512,6 +2539,8 @@ static bool shot_internal(VkCommandBuffer cb, PsFrame *f, VkImageView src)
     return true;
 }
 
+extern bool g_hle_video;
+
 void hle_present_end(float sx, float sy, bool fxaa, int upscale, bool average, uint64_t key)
 {
     const int nis_sharp = (upscale >> 8) & 0xFF;     /* NIS's sharpness (percent) rides above the kind */
@@ -2688,6 +2717,20 @@ void hle_present_end(float sx, float sy, bool fxaa, int upscale, bool average, u
                                     nis ? "NIS" : "FSR")) {
         g_ps.pipe[P_EASU] = g_ps.pipe[P_NIS] = VK_NULL_HANDLE;   /* no image for it: bilinear */
         fsr = nis = false;
+    }
+    /* A movie's frame (draw.c, g_hle_video): cleaned up at its own size before anything scales or sharpens it */
+    if (g_ps.have && g_hle_video && !g_crt && g_ps.pipe[P_VID]) {
+        if (img_target(&g_ps.vd, g_ps.f.w, g_ps.f.h, VK_FORMAT_R8G8B8A8_UNORM, "video cleanup")) {
+            if (g_ps.vd.serial != content + 1 || g_ps.vd.fxaa != aa_done) {
+                const float k[4] = { 0.0f, 0.0f, 0.0f, 0.0f };
+                img_pass(cb, f, SET_VID, &g_ps.vd, g_ps.pipe[P_VID], src, k);
+                g_ps.vd.serial = content + 1;
+                g_ps.vd.fxaa = aa_done;
+            }
+            src = g_ps.vd.view;
+        } else {
+            g_ps.pipe[P_VID] = VK_NULL_HANDLE;      /* no image for it: off */
+        }
     }
     /* Sharpening when no upscaler does it (FSR and NIS sharpen their own; a CRT filter has its look): the frame
      * (anti-aliased, or the in-between one) sharpened at its own size, then placed as it would have been. */

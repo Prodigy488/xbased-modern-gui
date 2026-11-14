@@ -38,6 +38,10 @@
 #define HLE_CONST_BYTES  ((HLE_VSH_CONSTANTS + HLE_VSH_CUR_REGS) * 16)  /* c[], vcur[] */
 
 /* 5659 render-state indices (D3DRENDERSTATETYPE) */
+bool g_hle_video;                  /* the frame is part of a movie (see video_frame_end) */
+static unsigned g_vf_draws, g_vf_zdraws;
+static uint64_t g_vf_upl;
+
 enum {
     RS_ZFUNC = 57, RS_ALPHAFUNC = 58, RS_ALPHABLENDENABLE = 59, RS_ALPHATESTENABLE = 60,
     RS_ALPHAREF = 61, RS_SRCBLEND = 62, RS_DESTBLEND = 63, RS_ZWRITEENABLE = 64,
@@ -1048,6 +1052,7 @@ void hle_draw_cmd_tex(const HleCmdTex *c, VkCommandBuffer cb)
     }
     T.vkCmdCopyBufferToImage(cb, g_harena.buf, t->img, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
                              nr, r);
+    g_vf_upl += (uint64_t)c->w * c->h;
     b.srcStageMask = VK_PIPELINE_STAGE_2_COPY_BIT;
     b.srcAccessMask = VK_ACCESS_2_TRANSFER_WRITE_BIT;
     b.dstStageMask = VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT;
@@ -1254,6 +1259,8 @@ static int g_dskip;
 bool hle_draw_dskip(const void *p)
 {
     const HleCmdDraw *c = p;
+    g_vf_draws++;
+    g_vf_zdraws += g_dr.st_valid && g_dr.st.rs[RS_ZENABLE];
     if (!g_dskip || !g_dr.st_valid) {
         return false;
     }
@@ -3011,8 +3018,41 @@ static int probe_begin(VkCommandBuffer cb, const HleCmdDraw *c, uint32_t vfirst,
     return q;
 }
 
+/* Video (FMV) frames: a game's movies are decoded by its own code and sent to the screen as a texture that is
+ * written anew every frame. A frame with a few draws, none with the depth test on, that uploaded a big texture,
+ * four frames running, is taken as video; the presenter then runs a cleanup pass over it (swapchain.c, k_fs_vid:
+ * a smoothing that keeps edges, to take out the blocks of the movie's compression before the picture is scaled).
+ * It ends after six frames that are not video. debug.hakux.vidfx=0 turns it off. */
+static int g_vf_streak, g_vf_off = 6;
+static bool g_vf_enabled = true;
+
+static void video_frame_end(void)
+{
+    const bool vid = g_vf_enabled && g_vf_draws >= 1 && g_vf_draws <= 8 && !g_vf_zdraws && g_vf_upl >= 320u * 200u;
+    if (vid) {
+        g_vf_off = 0;
+        if (g_vf_streak < 1000) {
+            g_vf_streak++;
+        }
+    } else {
+        g_vf_streak = 0;
+        if (g_vf_off < 6) {
+            g_vf_off++;
+        }
+    }
+    const bool now = g_vf_streak >= 4 || (g_hle_video && g_vf_off < 6);
+    if (now != g_hle_video) {
+        g_hle_video = now;
+        hle_log("hakuX-hle-pipe", "video: %s (draws %u, upload %llu pixels)", now ? "cleanup on" : "cleanup off",
+                g_vf_draws, (unsigned long long)g_vf_upl);
+    }
+    g_vf_draws = g_vf_zdraws = 0;
+    g_vf_upl = 0;
+}
+
 void hle_draw_psframe_poll(uint64_t swap)
 {
+    video_frame_end();
     if (g_psf_frame == -2) {
         const char *e = getenv("HAKUX_HLE_PSFRAME");
         g_psf_frame = e ? atoll(e) : -1;
@@ -3047,6 +3087,9 @@ void hle_draw_psframe_poll(uint64_t swap)
                     "skipped)", g_hle_fbdbg, autom ? " (auto)" : "");
         }
     }
+    v[0] = 0;
+    hle_prop_get("debug.hakux.vidfx", v);
+    g_vf_enabled = !(v[0] == '0');
     v[0] = 0;
     hle_prop_get("debug.hakux.dskip", v);
     {
