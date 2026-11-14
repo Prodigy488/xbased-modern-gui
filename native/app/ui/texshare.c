@@ -335,17 +335,43 @@ static int import_zip(const char *zip, const char *data_dir)
     return done;
 }
 
+struct Zl {
+    char **v;
+    int n;
+};
+
+static SDL_EnumerationResult SDLCALL zip_name_cb(void *ud, const char *dirname, const char *fname)
+{
+    (void)dirname;
+    struct Zl *z = ud;
+    const size_t l = SDL_strlen(fname);
+    if (l > 4 && !SDL_strcasecmp(fname + l - 4, ".zip")) {
+        char **nv = SDL_realloc(z->v, (z->n + 2) * sizeof(char *));
+        if (nv) {
+            z->v = nv;
+            z->v[z->n++] = SDL_strdup(fname);
+            z->v[z->n] = NULL;
+        }
+    }
+    return SDL_ENUM_CONTINUE;
+}
+
 int texshare_import_all(const char *data_dir, char *note, size_t note_n)
 {
     char dir[1200], inst[1300];
     note[0] = 0;
     SDL_snprintf(dir, sizeof(dir), "%stexture packs", data_dir);
     int n = 0, zips = 0, pictures = 0, bad = 0;
-    char **names = SDL_GlobDirectory(dir, "*.zip", SDL_GLOB_CASEINSENSITIVE, &n);
+    /* only the zips lying directly in the folder: SDL_GlobDirectory walks every folder below too, and the
+     * exported and installed packs there hold thousands of pictures, read at each start of the dashboard */
+    char **names = NULL;
+    {
+        struct Zl zl = { NULL, 0 };
+        SDL_EnumerateDirectory(dir, zip_name_cb, &zl);
+        names = zl.v;
+        n = zl.n;
+    }
     for (int i = 0; names && i < n; i++) {
-        if (strchr(names[i], '/') || strchr(names[i], '\\')) {
-            continue;           /* its own folders' (exported, installed) */
-        }
         char from[1500], to[1500];
         SDL_snprintf(from, sizeof(from), "%s/%s", dir, names[i]);
         const int got = import_zip(from, data_dir);
@@ -360,6 +386,9 @@ int texshare_import_all(const char *data_dir, char *note, size_t note_n)
         SDL_snprintf(to, sizeof(to), "%s/%s", inst, names[i]);
         SDL_RemovePath(to);
         SDL_RenamePath(from, to);
+    }
+    for (int i = 0; names && i < n; i++) {
+        SDL_free(names[i]);
     }
     SDL_free(names);
     if (zips || bad) {
