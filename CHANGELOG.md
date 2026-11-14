@@ -1,5 +1,10 @@
 # xbased changelog
 
+## 1.0.76.58 (Modern GUI fork, test build)
+
+- Diagnostics only: the `vdiag:` lines say whether one of the emulator's own writes into the game's memory (an
+  image landing, a writeback, an image copy) covered the bad vertices, or none did.
+
 ## 1.0.76.57 (Modern GUI fork, test build)
 
 - Thrillville's remaining stretched polygons: a few vertices hold a stray pixel (NaN) in a position float the game

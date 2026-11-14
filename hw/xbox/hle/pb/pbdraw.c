@@ -292,6 +292,11 @@ static void coh_pend_wait(uint32_t pa, uint32_t len);
 static void coh_pend_wait_inplace(uint32_t pa, uint32_t len);
 static void coh_wait(uint64_t v);
 static const char *g_land_why = "?";
+/* (a diagnostic) the emulator's own writes into guest memory asked for
+ * lately: what a draw's bad vertices lie under */
+static struct { uint32_t pa, len; const char *why; uint64_t draw; } g_emuwr[256];
+static unsigned g_nemuwr;
+static void emu_wr(uint32_t pa, uint32_t len, const char *why);
 static uint64_t coh_land(PbObj *o);
 static void coh_serve(void);
 static void coh_shown(PbObj *o);
@@ -1025,6 +1030,7 @@ static void writeback(uint32_t id)
     rb->pa = d->pa;
     rb->pitch = d->pitch;
     rb->arena_off = HLE_RB_DIRECT;
+    emu_wr(d->pa, len, "writeback (old path)");
     hle_res_rb_land(rb, fb, len, hle_fe_last_value() + 1);     /* the next submission */
     hle_barrier_arm_landing(d->pa, len, hle_fe_last_value() + 1);
     hle_fe_commit();
@@ -3119,6 +3125,7 @@ static unsigned writeback_range(uint32_t pa, uint32_t end, bool gpu_newer, const
         rb->pa = next->d.pa;
         rb->pitch = next->d.pitch;
         rb->arena_off = HLE_RB_DIRECT;
+        emu_wr(next->d.pa, len, "readback before a texture/source read");
         hle_res_rb_land(rb, fb, len, v);
         hle_barrier_arm_landing(next->d.pa, len, v);
         hle_fe_commit();
@@ -3765,6 +3772,15 @@ static void vp_mend(uint8_t *dst, uint32_t st, uint32_t po, unsigned size, uint3
     }
 }
 
+static void emu_wr(uint32_t pa, uint32_t len, const char *why)
+{
+    const unsigned k = g_nemuwr++ & 255u;
+    g_emuwr[k].pa = pa;
+    g_emuwr[k].len = len;
+    g_emuwr[k].why = why;
+    g_emuwr[k].draw = g_pd.draws;
+}
+
 static void vdiag_pos(const HleCmdDraw *d, unsigned b, const uint8_t *src, uint32_t st, uint32_t lo, uint32_t hi,
                       uint32_t from, uint32_t len)
 {
@@ -3847,6 +3863,21 @@ static void vdiag_pos(const HleCmdDraw *d, unsigned b, const uint8_t *src, uint3
                     q->land_why ? q->land_why : "-");
             shown++;
         }
+    }
+    unsigned ne = 0;
+    const uint32_t bpa = from + first_ref * st;
+    for (unsigned j = 0; j < 256 && j < g_nemuwr && ne < 4; j++) {
+        const unsigned k = (g_nemuwr - 1 - j) & 255u;
+        if (g_emuwr[k].pa < from + len && from < g_emuwr[k].pa + g_emuwr[k].len) {
+            hle_log("hakuX-hle-pb", "vdiag:   emulator wrote %08x+%u at draw %llu (%s)%s", g_emuwr[k].pa,
+                    g_emuwr[k].len, (unsigned long long)g_emuwr[k].draw, g_emuwr[k].why,
+                    bpa >= g_emuwr[k].pa && bpa < g_emuwr[k].pa + g_emuwr[k].len ? ": covers the bad vertex" : "");
+            ne++;
+        }
+    }
+    if (!ne) {
+        hle_log("hakuX-hle-pb", "vdiag:   no emulator write over it among the last %u (bad vertex at %08x)",
+                MIN(g_nemuwr, 256u), bpa);
     }
 }
 
@@ -4819,6 +4850,7 @@ static uint64_t coh_land(PbObj *o)
     }
     o->land_last = v;                       /* (the readback runs anyway) */
     o->land_why = g_land_why;
+    emu_wr(o->d.pa, len, g_land_why);
     o->land_draw = g_pd.draws;
     {
         static unsigned said;
@@ -4998,6 +5030,7 @@ void hle_pbd_copy_done(uint32_t dlo, uint32_t dp, uint32_t row, uint32_t rows, u
     }
     const int64_t dl = (int64_t)(int32_t)dp * (rows - 1);
     const uint32_t d0 = (uint32_t)MIN((int64_t)dlo, (int64_t)dlo + dl), d1 = (uint32_t)MAX((int64_t)dlo, (int64_t)dlo + dl) + row;
+    emu_wr(d0, d1 - d0, dep ? "image copy (blit), deferred" : "image copy (blit), at once");
     if (dep) {
         /* the guest's access waits for it (its landing drops the guard) */
         hle_barrier_guard(d0, d1 - d0);
