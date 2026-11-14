@@ -1,5 +1,10 @@
 # xbased changelog
 
+## 1.0.76.64 (Modern GUI fork, test build)
+
+- Test for Jedi Knight Academy: F8 reports every occlusion (z-pass) test as fully visible, and F8 again as counted,
+  to see whether the title culls geometry by our counts.
+
 ## 1.0.76.63 (Modern GUI fork, test build)
 
 - Diagnostics only, for Jedi Knight Academy: each upload of the CPU's writes into a render target's image is
