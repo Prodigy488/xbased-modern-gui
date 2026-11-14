@@ -12,6 +12,7 @@
 #include "native/app/ui/sound.h"
 #include "native/app/ui/update.h"
 
+#include "native/core/nc.h"
 #include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -2448,6 +2449,7 @@ int dash_run(SDL_Window *win, const char *exe)
         }
     }
     const Uint64 t_start = SDL_GetTicks();
+    nc_log("hakuX-app", "start-up: dashboard begins %llu ms after SDL started", (unsigned long long)t_start);
     i18n_set(cfg_get(&D.global, "ui.lang"));
     cc_sync(&D.global);     /* the EEPROM changed by hand or by a title meanwhile */
     {
@@ -2459,6 +2461,7 @@ int dash_run(SDL_Window *win, const char *exe)
         }
     }
     const Uint64 t_tex = SDL_GetTicks();
+    nc_log("hakuX-app", "start-up: settings, hardware tuning and texture packs took %llu ms", (unsigned long long)(t_tex - t_start));
     upd_cleanup();
     if (cfg_bool(&D.global, "update.check", true)) {
         upd_check_start(XBASED_VERSION);
@@ -2474,10 +2477,9 @@ int dash_run(SDL_Window *win, const char *exe)
      * below), the game's process reads them */
     SDL_SetHint(SDL_HINT_JOYSTICK_ALLOW_BACKGROUND_EVENTS, "1");
     const Uint64 t_ui = SDL_GetTicks();
+    nc_log("hakuX-app", "start-up: update check, window and fonts took %llu ms", (unsigned long long)(t_ui - t_tex));
     snd_init();
-    SDL_Log("xbased: start-up: texture packs %llu ms, update cleanup and window/fonts %llu ms, sounds %llu ms",
-            (unsigned long long)(t_tex - t_start), (unsigned long long)(t_ui - t_tex),
-            (unsigned long long)(SDL_GetTicks() - t_ui));
+    nc_log("hakuX-app", "start-up: sounds took %llu ms", (unsigned long long)(SDL_GetTicks() - t_ui));
     const char **fv;
     int fn;
     folders(&fv, &fn);
@@ -2486,6 +2488,7 @@ int dash_run(SDL_Window *win, const char *exe)
         /* box art for games without, once the scan is done (lib_poll) */
     }
     bool was_scanning = true;
+    bool first_frame = true;
     while (!D.quit) {
         lib_set_busy(child_running());  /* the scan goes on while a game plays, gently */
         if (child_running()) {
@@ -2508,6 +2511,10 @@ int dash_run(SDL_Window *win, const char *exe)
             wait_child();
             SDL_Delay(50);
             continue;
+        }
+        if (first_frame) {
+            first_frame = false;
+            nc_log("hakuX-app", "start-up: first frame at %llu ms", (unsigned long long)SDL_GetTicks());
         }
         poll_input();
         auto_poll();
