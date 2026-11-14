@@ -1170,10 +1170,7 @@ static uint64_t MmQueryStatistics(NcKernel *k, NcFrame *f, const uint32_t *a)
             }
         }
     }
-    /* test (1.0.76.61): 2 MiB fewer pages reported free, to see whether a title
-     * that sizes its heap from this (Jedi Academy) then leaves room for the
-     * 640 x 480 textures it is refused later */
-    const uint32_t avail = total - used > 512 ? total - used - 512 : 0;
+    const uint32_t avail = total - used;
     {
         static unsigned said;
         if (said++ < 12) {
