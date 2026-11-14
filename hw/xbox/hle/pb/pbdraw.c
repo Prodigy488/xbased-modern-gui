@@ -3803,6 +3803,46 @@ static void emu_wr(uint32_t pa, uint32_t len, const char *why)
     g_emuwr[k].draw = g_pd.draws;
 }
 
+/* Draws whose referenced positions are mostly exactly zero: memory the title
+ * has not filled yet (or one a copy of ours has not landed in) reads as valid
+ * floats at 0, 0, 0, which vdiag's bad-value check passes and which draws as
+ * degenerate triangles: terrain and rocks missing (Jedi Knight Academy). */
+static void vdiag_zero(const HleCmdDraw *d, unsigned b, const uint8_t *src, uint32_t st, uint32_t lo, uint32_t hi,
+                       uint32_t from, uint32_t len)
+{
+    static unsigned seen_draws, said;
+    const uint32_t fmt = R(NV097_SET_VERTEX_DATA_ARRAY_FORMAT);
+    const unsigned size = (fmt >> 4) & 0xF;
+    if (!size || (fmt & 0xF) != 2 || ((d->attr[0] >> 8) & 0xFF) != b || !st || size < 3) {
+        return;
+    }
+    const uint32_t po = d->attr[0] >> 16;
+    const uint32_t nv = hi - lo + 1;
+    unsigned zero = 0, nref = g_pd.nidx;
+    for (uint32_t i = 0; i < nref; i++) {
+        const uint32_t v = g_pd.idx[i] - lo;
+        if (v >= nv || (uint64_t)v * st + po + 12 > len) {
+            continue;
+        }
+        uint32_t w[3];
+        memcpy(w, src + (size_t)v * st + po, 12);
+        if (!w[0] && !w[1] && !w[2]) {
+            zero++;
+        }
+    }
+    if (nref < 6 || zero * 4 < nref) {
+        return;
+    }
+    seen_draws++;
+    if (said < 40 || seen_draws % 50 == 0) {
+        said++;
+        hle_log("hakuX-hle-pb", "vdiag: draw %llu ZERO positions: %u of %u referenced are 0,0,0 (%u vertices in the "
+                "range) prim %u stride %u off %u at %08x+%u swap %llu (draw #%u of this kind)",
+                (unsigned long long)g_pd.draws, zero, nref, nv, g_pd.prim, st, po, from, len,
+                (unsigned long long)g_pd.swaps, seen_draws);
+    }
+}
+
 static void vdiag_pos(const HleCmdDraw *d, unsigned b, const uint8_t *src, uint32_t st, uint32_t lo, uint32_t hi,
                       uint32_t from, uint32_t len)
 {
@@ -4014,6 +4054,7 @@ static void draw_arrays(void)
         const uint8_t *src = hle_pa_ptr(from, len);
         if (src) {
             vdiag_pos(&d, b, src, st, lo, hi, from, len);
+            vdiag_zero(&d, b, src, st, lo, hi, from, len);
         }
         if (src && hle_quirk(HLE_QUIRK_VB_ALIGN) && vb_misaligned(&d, b, base[b])) {
             if (!vb_realign(&d, b, src, from, len, st ? hi - lo + 1 : 1)) {

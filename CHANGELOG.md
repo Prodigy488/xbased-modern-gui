@@ -1,5 +1,10 @@
 # xbased changelog
 
+## 1.0.76.66 (Modern GUI fork, test build)
+
+- Diagnostics only, for Jedi Knight Academy: a draw whose referenced vertex positions are a quarter or more exactly
+  0, 0, 0 (memory not filled yet) is logged as `vdiag: ... ZERO positions`.
+
 ## 1.0.76.65 (Modern GUI fork, test build)
 
 - Test for Jedi Knight Academy: F4 reports every occlusion (z-pass) test as fully visible, and F4 again as counted,
