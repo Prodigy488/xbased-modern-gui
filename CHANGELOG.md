@@ -1,5 +1,10 @@
 # xbased changelog
 
+## 1.0.76.60 (Modern GUI fork, test build)
+
+- Diagnostics only, for Jedi Knight Academy: a failed contiguous allocation names who asked for it, and a
+  skipped indexed draw says why.
+
 ## 1.0.76.59 (Modern GUI fork, test build)
 
 - Thrillville's remaining stretched polygons: a blit between two addresses that both had a render target was

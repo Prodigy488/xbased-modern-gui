@@ -732,6 +732,8 @@ static uint32_t contig_alloc(NcKernel *k, uint32_t size, uint32_t lo, uint32_t h
             nc_vm_free_runs(k->vm, runs, sizeof(runs));
             nc_log("hakuX-native", "mm: contiguous allocation of %u KiB failed (#%u; free %u KiB:%s)", size >> 10, n,
                    nc_vm_free_bytes(k->vm) >> 10, runs);
+            nc_log("hakuX-native", "mm:   asked by %08x: range %08x-%08x align %u protect %x", ra, lo, hi, align,
+                   protect);
             log_splitters(k);
             log_phys_map(k);
             log_holders(k, "contiguous allocation failed");

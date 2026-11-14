@@ -4074,6 +4074,14 @@ static void draw_arrays(void)
     uint8_t *ib;
     uint32_t ib_off = cnt ? arena_idx(2 * cnt + 4, &ib) : HLE_ARENA_FULL;
     if (ib_off == HLE_ARENA_FULL) {
+        {
+            static unsigned said;
+            if (said++ < 12) {
+                hle_log("hakuX-hle-pb", "draw %llu skipped: %s (prim %u, %u indices, vertices %u-%u)",
+                        (unsigned long long)g_pd.draws, cnt ? "no room for its indices" : "nothing to draw", pt, n,
+                        lo, hi);
+            }
+        }
         skip(SK_DRAW_ARRAYS_ARENA2);
         return;
     }
