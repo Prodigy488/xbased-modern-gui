@@ -1,5 +1,10 @@
 # xbased changelog
 
+## 1.0.76.63 (Modern GUI fork, test build)
+
+- Diagnostics only, for Jedi Knight Academy: each upload of the CPU's writes into a render target's image is
+  logged (the first 60, then every 40th), with the draw it came before.
+
 ## 1.0.76.62 (Modern GUI fork, test build)
 
 - Same as .60 (diagnostics for Jedi Knight Academy), plus the kernel logs each free-memory query. The 2 MiB

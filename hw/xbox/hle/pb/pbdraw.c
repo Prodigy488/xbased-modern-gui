@@ -921,10 +921,13 @@ static void rt_upload(PbObj *o, uint32_t id, bool used)
     o->written = ++g_pd.wseq;
     o->cpu_used |= used;
     g_pd.rt_uploads++;
-    if (rtlog_on()) {
-        hle_log("hakuX-hle-pb", "rt upload %u: %08x %ux%u pitch %u fmt %02x swap %llu", id,
-                o->d.pa, o->d.w, o->d.h, o->d.pitch, o->d.xfmt, (unsigned long long)g_pd.swaps);
+    static unsigned s_ups;
+    if (rtlog_on() || s_ups < 60 || s_ups % 40 == 0) {
+        hle_log("hakuX-hle-pb", "rt upload %u (#%u): %08x %ux%u pitch %u fmt %02x swap %llu draw %llu used %d "
+                "display %d", id, s_ups, o->d.pa, o->d.w, o->d.h, o->d.pitch, o->d.xfmt,
+                (unsigned long long)g_pd.swaps, (unsigned long long)g_pd.draws, (int)used, (int)o->display);
     }
+    s_ups++;
 }
 
 /* The CPU wrote render target id's memory since it was last looked at (a
