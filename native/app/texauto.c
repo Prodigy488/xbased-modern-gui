@@ -8,6 +8,9 @@
  * then in the data folder. Each run gets a folder of its own for its input (dump/queue-<time>), so two runs
  * never take each other's files; those of runs a day old are removed.
  */
+#ifdef _WIN32
+#include <windows.h>
+#endif
 #include <SDL3/SDL.h>
 #include <stdio.h>
 #include <string.h>
@@ -197,6 +200,9 @@ static int run_one(const char *dir, const char *exe_dir, const char *data_dir, c
         if (g_budget > 0 && todo && used_px + cand[i].px > g_budget) {
             continue;           /* too much for this run: a later one (a smaller one may still fit) */
         }
+        if (g_budget > 0 && todo >= 150) {
+            break;              /* beside a game: not thousands of small files in one run (each is read, */
+        }                       /* written and compressed on the CPU the game runs on) */
         if (!todo && !SDL_CreateDirectory(queue)) {
             break;
         }
@@ -216,8 +222,11 @@ static int run_one(const char *dir, const char *exe_dir, const char *data_dir, c
     /* "-t 128": small tiles, so that each GPU dispatch of the upscaler is short. With its own choice (large
      * tiles) a batch can hold the GPU for seconds beside a game drawn at 4x, and Windows resets a GPU that
      * does not answer in about 2 s (VK_ERROR_DEVICE_LOST in the game's vkQueueSubmit2). */
+    /* Beside a game ("-j 1:1:1", and the lowest priority below): one thread each to read, upscale and write,
+     * where its own choice (1:2:2) and normal priority took CPU time from the game and the window's thread:
+     * a Half-Life 2 log had some 30 hitches of 100 to 320 ms ("UI missed N front frames") over 35 batches. */
     const char *args[] = { tool, "-i", queue, "-o", aut, "-n", "realesrgan-x4plus", "-s", "4", "-f", "png",
-                           "-m", models, "-t", "128", NULL };
+                           "-m", models, "-t", "128", g_budget > 0 ? "-j" : NULL, "1:1:1", NULL };
     SDL_PropertiesID p = SDL_CreateProperties();
     SDL_SetPointerProperty(p, SDL_PROP_PROCESS_CREATE_ARGS_POINTER, (void *)args);
     /* nothing of its output wanted (it writes its progress); not a "background" process, whose end can't be
@@ -237,6 +246,16 @@ static int run_one(const char *dir, const char *exe_dir, const char *data_dir, c
         SDL_snprintf(note, note_n, "%s did not start: %s", tool, SDL_GetError());
         return -1;
     }
+#ifdef _WIN32
+    if (g_budget > 0) {
+        HANDLE hp = OpenProcess(PROCESS_SET_INFORMATION, FALSE,
+                                (DWORD)SDL_GetNumberProperty(SDL_GetProcessProperties(pr), SDL_PROP_PROCESS_PID_NUMBER, 0));
+        if (hp) {
+            SetPriorityClass(hp, IDLE_PRIORITY_CLASS);
+            CloseHandle(hp);
+        }
+    }
+#endif
     g_job = pr;                         /* it runs on; its end is asked for at the next call */
     SDL_snprintf(note, note_n, "%s%d textures to %s (into %s)", g_prev, todo, tool, aut);
     g_prev[0] = 0;
