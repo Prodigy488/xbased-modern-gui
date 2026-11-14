@@ -3832,6 +3832,32 @@ static void vdiag_consts(void)
     }
 }
 
+/* Vertices drawn from memory a render target's image is newer than: a title
+ * that renders positions into a small target and draws them from its memory
+ * (Thrillville's 160 x 120 ones: its meshes read as black, so they weren't
+ * drawn). The image lands over the range first, unless the title wrote
+ * the memory since (coh_mem_newer), and the decoder waits for it. */
+static void vb_land(uint32_t from, uint32_t len)
+{
+    for (unsigned i = 0; i < g_pd.nobjs; i++) {
+        PbObj *o = &g_pd.objs[i];
+        uint32_t ol;
+        if (o->written <= o->synced || o->d.pa >= from + len || o->d.pa + o->d.pitch * o->d.h <= from ||
+            !coh_managed(o, &ol) || o->d.pa + ol <= from) {
+            continue;
+        }
+        const uint64_t v = coh_land(o);
+        if (v) {
+            coh_wait(v);
+            static unsigned said;
+            if (said++ < 20) {
+                hle_log("hakuX-hle-pb", "vertices %08x+%u read from target %u (%08x %ux%u): its image landed "
+                        "first", from, len, o->id, o->d.pa, o->d.w, o->d.h);
+            }
+        }
+    }
+}
+
 /* The vertex arrays the indices reach, read in place or copied to the
  * arena, the indices converted for the primitive and rebased. */
 static void draw_arrays(void)
@@ -3888,6 +3914,7 @@ static void draw_arrays(void)
         uint32_t st = d.bind_stride[b];
         uint32_t from = base[b] + (st ? lo * st : 0);
         uint32_t len = st ? (hi - lo) * st + MAX(end[b], 1u) : end[b];
+        vb_land(from, len);
         coh_pend_wait(from, len);           /* a copy queued into it lands first */
         const uint8_t *src = hle_pa_ptr(from, len);
         if (src) {

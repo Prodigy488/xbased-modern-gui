@@ -1,5 +1,12 @@
 # xbased changelog
 
+## 1.0.76.52 (Modern GUI fork, test build)
+
+- Thrillville's missing objects: vertices drawn from the memory of a small render target (the game renders
+  positions into a 160 x 120 target and draws them from there) were read before the target's image reached
+  memory, so they were black and the meshes vanished. The image now lands first when the game hasn't written
+  that memory since. Not confirmed on a PC yet.
+
 ## 1.0.76.51 (Modern GUI fork, test build)
 
 - Thrillville's stretched black polygons and black textures: a small render target's old image (a cleared black
