@@ -3957,14 +3957,24 @@ static void pick_log(const HleCmdDraw *d, unsigned b, const uint8_t *src, uint32
     }
     const uint32_t po = d->attr[0] >> 16, nv = hi - lo + 1;
     float f[4][4];
-    for (unsigned i = 0; i < 4; i++) {
-        for (unsigned c = 0; c < 4; c++) {
-            memcpy(&f[i][c], &g_pd.consts[i][c], 4);
+    float sc[4], of[4];
+    if (g_pd.ff) {      /* fixed function: the composite matrix (row vectors) */
+        float m[16];
+        regs_f(m, 0x0680, 16);
+        for (unsigned r = 0; r < 4; r++) {
+            for (unsigned c = 0; c < 4; c++) {
+                f[r][c] = m[c * 4 + r];     /* so o[r] below is dot(p, column r) */
+            }
+        }
+    } else {
+        for (unsigned i = 0; i < 4; i++) {
+            for (unsigned c = 0; c < 4; c++) {
+                memcpy(&f[i][c], &g_pd.consts[i][c], 4);
+            }
         }
     }
-    float sc[4], of[4];
-    memcpy(sc, g_pd.consts[VPSCL], 16);
-    memcpy(of, g_pd.consts[VPOFF], 16);
+    regs_f(sc, NV097_SET_VIEWPORT_SCALE, 4);
+    regs_f(of, NV097_SET_VIEWPORT_OFFSET, 4);
     float x0 = 1e30f, y0 = 1e30f, x1 = -1e30f, y1 = -1e30f, z0 = 1e30f, z1 = -1e30f;
     unsigned used = 0, behind = 0;
     for (uint32_t i = 0; i < g_pd.nidx; i++) {
@@ -3988,8 +3998,8 @@ static void pick_log(const HleCmdDraw *d, unsigned b, const uint8_t *src, uint32
         z0 = MIN(z0, z); z1 = MAX(z1, z);
         used++;
     }
-    hle_log("hakuX-hle-pb", "pick: draw %llu bbox %.0f,%.0f-%.0f,%.0f z %g-%g verts %u behind %u of %u prim %u",
-            (unsigned long long)g_pd.draws, x0, y0, x1, y1, z0, z1, used, behind, g_pd.nidx, g_pd.prim);
+    hle_log("hakuX-hle-pb", "pick: draw %llu %s bbox %.0f,%.0f-%.0f,%.0f z %g-%g verts %u behind %u of %u prim %u",
+            (unsigned long long)g_pd.draws, g_pd.ff ? "ff" : "prog", x0, y0, x1, y1, z0, z1, used, behind, g_pd.nidx, g_pd.prim);
 }
 
 static void vdiag_consts(void)

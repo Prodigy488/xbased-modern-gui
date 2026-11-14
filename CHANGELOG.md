@@ -1,6 +1,6 @@
 # xbased changelog
 
-## 1.0.76.68 (Modern GUI fork, test build)
+## 1.0.76.69 (Modern GUI fork, test build)
 
 - Diagnostics only, for Jedi Knight Academy: a graphics capture (F9) now also logs `pick:` lines, one per draw, with
   the draw's screen-space bounding box, depth range and how many vertices are behind the eye, so the draws covering
