@@ -537,28 +537,34 @@ static const char k_fs_sharp[] =
     "  o = vec4(clamp((lobe * (b + d + h + f) + e) / (4.0 * lobe + 1.0), 0.0, 1.0), 1.0);\n"
     "}\n";
 
-/* A movie's frame, cleaned up before it is scaled: a smoothing that keeps edges (nine taps one source pixel
- * apart, each weighted by how near its colour is to the centre's), to take out the blocks and the mosquito noise
- * of the movie's compression; a third of the difference is put back so it is not left soft. The taps are
- * spaced by the render scale (the frame is 640 wide at 1x). */
+/* A movie's frame, cleaned up before it is scaled. Two steps: a smoothing that keeps edges (thirteen taps, up to two
+ * source pixels away, each weighted by how near its colour is to the centre's and by its distance), which takes
+ * out the blocks and the mosquito noise of the movie's compression; then a sharpening of what is left (the
+ * smoothed pixel against its four neighbours, held between their smallest and largest so no halo forms), so the
+ * picture is cleaner and not softer. A fifth of the removed fine grain is put back so skin and cloth keep their
+ * texture. The taps are spaced by the render scale (the frame is 640 wide at 1x). */
 static const char k_fs_vid[] =
+    "vec3 F(vec2 p) { return texelFetch(u_tex, clamp(ivec2(p), ivec2(0), textureSize(u_tex, 0) - 1), 0).rgb; }\n"
     "void main() {\n"
-    "  ivec2 sz = textureSize(u_tex, 0);\n"
-    "  float st = max(1.0, float(sz.x) / 640.0);\n"
-    "  vec2 px = v_uv * vec2(sz);\n"
-    "  vec3 c = texelFetch(u_tex, clamp(ivec2(px), ivec2(0), sz - 1), 0).rgb;\n"
+    "  float st = max(1.0, float(textureSize(u_tex, 0).x) / 640.0);\n"
+    "  vec2 px = v_uv * vec2(textureSize(u_tex, 0));\n"
+    "  vec3 c = F(px);\n"
+    "  const vec3 K[12] = vec3[12](vec3(1, 0, 1.0), vec3(-1, 0, 1.0), vec3(0, 1, 1.0), vec3(0, -1, 1.0),\n"
+    "                              vec3(1, 1, 0.8), vec3(-1, 1, 0.8), vec3(1, -1, 0.8), vec3(-1, -1, 0.8),\n"
+    "                              vec3(2, 0, 0.6), vec3(-2, 0, 0.6), vec3(0, 2, 0.6), vec3(0, -2, 0.6));\n"
     "  vec3 acc = c; float ws = 1.0;\n"
-    "  for (int j = -1; j <= 1; j++) {\n"
-    "    for (int i = -1; i <= 1; i++) {\n"
-    "      if (i == 0 && j == 0) continue;\n"
-    "      vec3 s = texelFetch(u_tex, clamp(ivec2(px + vec2(i, j) * st), ivec2(0), sz - 1), 0).rgb;\n"
-    "      vec3 d = s - c;\n"
-    "      float w = exp(-dot(d, d) * 90.0);\n"
-    "      acc += s * w; ws += w;\n"
-    "    }\n"
+    "  for (int i = 0; i < 12; i++) {\n"
+    "    vec3 t = F(px + K[i].xy * st);\n"
+    "    vec3 d = t - c;\n"
+    "    float w = K[i].z * exp(-dot(d, d) * 70.0);\n"
+    "    acc += t * w; ws += w;\n"
     "  }\n"
     "  vec3 sm = acc / ws;\n"
-    "  o = vec4(clamp(sm + (c - sm) * 0.33, 0.0, 1.0), 1.0);\n"
+    "  vec3 a = F(px + vec2(0, -st)), b = F(px + vec2(-st, 0)), d2 = F(px + vec2(st, 0)), e = F(px + vec2(0, st));\n"
+    "  vec3 mn = min(min(a, b), min(d2, e)), mx = max(max(a, b), max(d2, e));\n"
+    "  vec3 blur = (a + b + d2 + e) * 0.25;\n"
+    "  vec3 sh = clamp(sm + (sm - blur) * 0.6, min(mn, sm), max(mx, sm));\n"
+    "  o = vec4(clamp(sh + (c - sm) * 0.2, 0.0, 1.0), 1.0);\n"
     "}\n";
 
 #include "hw/xbox/hle/vk/nis_coef.inc"
@@ -1080,6 +1086,7 @@ static bool init(void)
     g_ps.pipe[P_SHARP] = pipeline(g_ps.fs[P_SHARP], VK_FORMAT_R8G8B8A8_UNORM);
     g_ps.fs[P_VID] = module(HLE_SHADER_FRAGMENT, k_fs_head, k_fs_vid);
     g_ps.pipe[P_VID] = pipeline(g_ps.fs[P_VID], VK_FORMAT_R8G8B8A8_UNORM);
+    hle_log("hakuX-hle-back", "present: movie cleanup shader %s", g_ps.pipe[P_VID] != VK_NULL_HANDLE ? "ready" : "failed (off)");
     hle_log("hakuX-hle-back", "present: ready (shaders: bilinear %d, averaging %d, FSR %d, FXAA %d, NIS %d)",
             g_ps.fs[P_BILINEAR] != VK_NULL_HANDLE, g_ps.fs[P_AREA] != VK_NULL_HANDLE,
             g_ps.fs[P_RCAS] != VK_NULL_HANDLE && g_ps.pipe[P_EASU] != VK_NULL_HANDLE,

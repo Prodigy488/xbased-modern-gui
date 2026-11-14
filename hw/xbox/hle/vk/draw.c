@@ -3028,7 +3028,13 @@ static bool g_vf_enabled = true;
 
 static void video_frame_end(void)
 {
-    const bool vid = g_vf_enabled && g_vf_draws >= 1 && g_vf_draws <= 8 && !g_vf_zdraws && g_vf_upl >= 320u * 200u;
+    const bool vid = g_vf_enabled && g_vf_draws >= 1 && g_vf_draws <= 8 && !g_vf_zdraws && g_vf_upl >= 128u * 128u;
+    static int s_near;
+    if (!vid && g_vf_enabled && g_vf_draws >= 1 && g_vf_draws <= 8 && !g_vf_zdraws && g_vf_upl && s_near < 8) {
+        s_near++;       /* a frame that looked like video but for the upload's size: logged, to tune the rule */
+        hle_log("hakuX-hle-pipe", "video: a near miss (draws %u, upload %llu pixels)", g_vf_draws,
+                (unsigned long long)g_vf_upl);
+    }
     if (vid) {
         g_vf_off = 0;
         if (g_vf_streak < 1000) {
