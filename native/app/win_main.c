@@ -2159,9 +2159,9 @@ int main(int argc, char *argv[])
                     char v[16];
                     snprintf(v, sizeof(v), "%d", ++s_cap);
                     nc_win_prop_set("debug.hakux.rtdump", v);
-                    snprintf(v, sizeof(v), "%d", 800 + s_cap);
+                    snprintf(v, sizeof(v), "%d", 2600 + s_cap);   /* a frame is ~1800 draws in 007: all of them */
                     nc_win_prop_set("debug.hakux.pbdraws", v);
-                    nc_log("hakuX-app", "capture %d: the next frame's render targets and 800 draws", s_cap);
+                    nc_log("hakuX-app", "capture %d: the next frame's render targets and 2600 draws", s_cap);
                     notice("Graphics capture taken (F9): see the log and hle_shadow", NULL);
                 } else if (ev.key.key == SDLK_F10) {
                     /* a graphics A/B for a bug report (debug.hakux.fbdbg): auto (default), 0 normal, 1 programs that read their
