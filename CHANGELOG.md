@@ -1,5 +1,12 @@
 # xbased changelog
 
+## 1.0.76.57 (Modern GUI fork, test build)
+
+- Thrillville's remaining stretched polygons: a few vertices hold a stray pixel (NaN) in a position float the game
+  leaves unset. Positions that are NaN, infinite or beyond 1e18 are mended when the vertices are copied for a draw
+  (z as 0, x and y as the previous vertex's), so a wedge to infinity becomes a degenerate triangle. Not confirmed
+  on a PC yet.
+
 ## 1.0.76.56 (Modern GUI fork, test build)
 
 - Thrillville's black pillars, tracks and missing objects: a new render target made over part of an old small

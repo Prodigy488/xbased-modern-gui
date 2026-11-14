@@ -3727,6 +3727,44 @@ static void vd_dump(const char *what, const uint8_t *src, uint32_t v, uint32_t s
     hle_log("hakuX-hle-pb", "vdiag:   %s vertex #%u: %s", what, v, t);
 }
 
+/* A position float no vertex has: NaN, an infinity or a huge one (a pixel the
+ * title never overwrote in a vertex field it leaves unset, or a black one:
+ * Thrillville's stretched wedges). */
+static bool vp_junk(float f)
+{
+    return !(f > -1e18f && f < 1e18f);
+}
+
+/* The copied vertices' positions with such floats mended: z (the third) as 0,
+ * x and y as the previous vertex's (the next one's for the first), a
+ * degenerate triangle where there was a wedge to infinity. */
+static void vp_mend(uint8_t *dst, uint32_t st, uint32_t po, unsigned size, uint32_t nv)
+{
+    static unsigned said;
+    unsigned fixed = 0;
+    for (uint32_t v = 0; v < nv; v++) {
+        float *f = (float *)(dst + (size_t)v * st + po);
+        bool bad = false;
+        for (unsigned c = 0; c < size && !bad; c++) {
+            bad = vp_junk(f[c]);
+        }
+        if (!bad) {
+            continue;
+        }
+        const float *n = (const float *)(dst + (size_t)(v ? v - 1 : MIN(v + 1, nv - 1)) * st + po);
+        for (unsigned c = 0; c < size; c++) {
+            if (vp_junk(f[c])) {
+                f[c] = c == 2 || n == f || vp_junk(n[c]) ? 0.0f : n[c];
+            }
+        }
+        fixed++;
+    }
+    if (fixed && said++ < 20) {
+        hle_log("hakuX-hle-pb", "draw %llu: %u of %u vertices' positions held NaN or huge values, mended",
+                (unsigned long long)g_pd.draws, fixed, nv);
+    }
+}
+
 static void vdiag_pos(const HleCmdDraw *d, unsigned b, const uint8_t *src, uint32_t st, uint32_t lo, uint32_t hi,
                       uint32_t from, uint32_t len)
 {
@@ -3951,6 +3989,13 @@ static void draw_arrays(void)
         d.bind_off[b] = off;
         g_pd.vb_copied++;
         bool pos = ((R(NV097_SET_VERTEX_DATA_ARRAY_FORMAT) >> 4) & 0xF) && ((d.attr[0] >> 8) & 0xFF) == b;
+        if (pos && st && (R(NV097_SET_VERTEX_DATA_ARRAY_FORMAT) & 0xF) == 2) {
+            const unsigned psz = (R(NV097_SET_VERTEX_DATA_ARRAY_FORMAT) >> 4) & 0xF;
+            const uint32_t po = d.attr[0] >> 16;
+            if (psz >= 2 && psz <= 4 && po + 4 * psz <= st) {
+                vp_mend(dst, st, po, psz, hi - lo + 1);
+            }
+        }
         vbrace(from, len, st, pos ? (int)(d.attr[0] >> 16) : -1, dst);
     }
     uint32_t pt = g_pd.prim;
