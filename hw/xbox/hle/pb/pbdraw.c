@@ -3832,28 +3832,27 @@ static void vdiag_consts(void)
     }
 }
 
-/* Vertices drawn from memory a render target's image is newer than: a title
- * that renders positions into a small target and draws them from its memory
- * (Thrillville's 160 x 120 ones: its meshes read as black, so they weren't
- * drawn). The image lands over the range first, unless the title wrote
- * the memory since (coh_mem_newer), and the decoder waits for it. */
+/* Vertices drawn from memory a render target's image is newer than (a dead
+ * target the title reused for vertex data: Thrillville's 160 x 120 ones):
+ * the memory is the title's, so the image is synced to it, never to land.
+ * Landed over it, the image (a black clear the decoder met after the title
+ * had written its vertices there) made stretched black polygons and left
+ * meshes black, so unseen. */
 static void vb_land(uint32_t from, uint32_t len)
 {
     for (unsigned i = 0; i < g_pd.nobjs; i++) {
         PbObj *o = &g_pd.objs[i];
         uint32_t ol;
         if (o->written <= o->synced || o->d.pa >= from + len || o->d.pa + o->d.pitch * o->d.h <= from ||
-            !coh_managed(o, &ol) || o->d.pa + ol <= from) {
+            !coh_managed(o, &ol) || o->d.pa + ol <= from || o->land_last > hle_tl_completed()) {
             continue;
         }
-        const uint64_t v = coh_land(o);
-        if (v) {
-            coh_wait(v);
-            static unsigned said;
-            if (said++ < 20) {
-                hle_log("hakuX-hle-pb", "vertices %08x+%u read from target %u (%08x %ux%u): its image landed "
-                        "first", from, len, o->id, o->d.pa, o->d.w, o->d.h);
-            }
+        coh_synced(o, ol);
+        hle_barrier_unguard(o->d.pa, ol);
+        static unsigned said;
+        if (said++ < 20) {
+            hle_log("hakuX-hle-pb", "vertices %08x+%u drawn from target %u (%08x %ux%u): its memory is the "
+                    "title's, its image will not land", from, len, o->id, o->d.pa, o->d.w, o->d.h);
         }
     }
 }
