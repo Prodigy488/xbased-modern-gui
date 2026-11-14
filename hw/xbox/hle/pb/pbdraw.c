@@ -4024,6 +4024,27 @@ static void pick_log(const HleCmdDraw *d, unsigned b, const uint8_t *src, uint32
         hle_log("hakuX-hle-pb", "pick: viewport scale %g %g %g %g offset %g %g %g %g (ndc below)", sc[0], sc[1], sc[2],
                 sc[3], of[0], of[1], of[2], of[3]);
     }
+    if ((x1 - x0 > 3000.0f || y1 - y0 > 3000.0f || behind) && g_pd.nidx <= 96) {
+        /* a draw that reaches past the screen or behind the eye: each index with its position, its clip
+         * coordinates and the pixel it lands on (Jedi Knight Academy's ground holes) */
+        static unsigned said;
+        if (said++ < 12) {
+            for (uint32_t i = 0; i < g_pd.nidx; i++) {
+                const uint32_t v = g_pd.idx[i] - lo;
+                if (v >= nv) {
+                    continue;
+                }
+                float p[4] = { 0, 0, 0, 1 }, o[4];
+                memcpy(p, src + (size_t)v * st + po, 12);
+                for (unsigned r = 0; r < 4; r++) {
+                    o[r] = p[0] * f[r][0] + p[1] * f[r][1] + p[2] * f[r][2] + p[3] * f[r][3];
+                }
+                hle_log("hakuX-hle-pb", "pick: draw %llu idx %u v %u pos %g %g %g clip %g %g %g w %g px %g %g",
+                        (unsigned long long)g_pd.draws, i, g_pd.idx[i], p[0], p[1], p[2], o[0], o[1], o[2], o[3],
+                        o[3] != 0.0f ? o[0] / o[3] : 0.0f, o[3] != 0.0f ? o[1] / o[3] : 0.0f);
+            }
+        }
+    }
     hle_log("hakuX-hle-pb", "pick: draw %llu %s bbox %.0f,%.0f to %.0f,%.0f z %g to %g verts %u behind %u of %u prim %u",
             (unsigned long long)g_pd.draws, g_pd.ff ? "ff" : "prog", x0, y0, x1, y1, z0, z1, used, behind, g_pd.nidx, g_pd.prim);
 }

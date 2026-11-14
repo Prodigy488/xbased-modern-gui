@@ -1,5 +1,10 @@
 # xbased changelog
 
+## 1.0.76.74 (Modern GUI fork, test build)
+
+- Diagnostics only: a capture (F9) also logs each index, position and clip coordinate of the first draws that reach
+  behind the eye or far off screen.
+
 ## 1.0.76.73 (Modern GUI fork, test build)
 
 - Test for Jedi Knight Academy: F12 has a sixth step that clamps depth instead of clipping at the near and far
