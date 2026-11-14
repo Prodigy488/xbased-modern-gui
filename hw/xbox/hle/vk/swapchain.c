@@ -50,14 +50,14 @@
 #define PS_FRAMES 3             /* the presenter's submits in flight */
 /* a frame's descriptor sets: the first five of the plain layout, the rest (SMAA's weights and blend, the
  * interpolation's motion and mix) of the one with the extra samplers, made at first use (x_init) */
-enum { SET_WINDOW, SET_FXAA, SET_EASU, SET_OSD, SET_COPY, SET_SHARP, SET_VID, SET_X0, SET_X1, SET_X2, SET_X3, SET_X4, SET_X5, SET_X6, SET_X7,
+enum { SET_WINDOW, SET_FXAA, SET_EASU, SET_OSD, SET_COPY, SET_SHARP, SET_VID, SET_VID2, SET_X0, SET_X1, SET_X2, SET_X3, SET_X4, SET_X5, SET_X6, SET_X7, SET_X8,
        PS_SETS };
 #define PS_RAMP 1024            /* a frame's share of the ramp buffer (768 used) */
 
 /* the window's pipelines, then those into images of ours (R8G8B8A8) */
 enum { P_BILINEAR, P_AREA, P_RCAS, P_CRT, P_OSD, P_KDOWN, P_KUP, P_FXAA, P_EASU, P_NIS,
        P_SM_EDGE, P_SM_WT, P_SM_BLEND, P_IL_ME, P_IL_MIX, P_COPY, P_IL_DOWN, P_IL_HALF, P_IL_LV,
-       P_SHARP, P_VID, P_COUNT };   /* from P_SM_EDGE on: made at first use */
+       P_SHARP, P_VID, P_VID_T, P_VID_W, P_COUNT };   /* from P_SM_EDGE on: made at first use */
 
 /* An image of ours a pass draws into and the window's pass samples. */
 typedef struct PsImg {
@@ -131,6 +131,11 @@ static struct {
     /* FXAA's image (the frame's size), FSR's (the frame's in the window) */
     PsImg fx, up;
     PsImg vd;                   /* a movie's frame cleaned up (P_VID)  */
+    PsImg vt[2];                /* then blended with the frame before it (P_VID_T): the last one and the one before */
+    PsImg vw;                   /* then its edges steepened (P_VID_W): what is shown */
+    VkImageView vid_last;       /* what the movie's passes made last (shown again while the frame stays) */
+    unsigned vt_i;              /* the one of vt that holds the last frame */
+    bool vid2_tried;
     PsImg sh;                   /* the frame sharpened (P_SHARP), when no upscaler does it; kind: the strength */
     /* SMAA (smaa.inc): its edges and blend weights (the frame's size) and lookup tables, uploaded once */
     PsImg sm_edge, sm_wt, sm_area, sm_search;
@@ -556,7 +561,7 @@ static const char k_fs_vid[] =
     "  for (int i = 0; i < 12; i++) {\n"
     "    vec3 t = F(px + K[i].xy * st);\n"
     "    vec3 d = t - c;\n"
-    "    float w = K[i].z * exp(-dot(d, d) * 70.0);\n"
+    "    float w = K[i].z * exp(-dot(d, d) * 400.0);\n"
     "    acc += t * w; ws += w;\n"
     "  }\n"
     "  vec3 sm = acc / ws;\n"
@@ -564,7 +569,70 @@ static const char k_fs_vid[] =
     "  vec3 mn = min(min(a, b), min(d2, e)), mx = max(max(a, b), max(d2, e));\n"
     "  vec3 blur = (a + b + d2 + e) * 0.25;\n"
     "  vec3 sh = clamp(sm + (sm - blur) * 0.6, min(mn, sm), max(mx, sm));\n"
-    "  o = vec4(clamp(sh + (c - sm) * 0.2, 0.0, 1.0), 1.0);\n"
+    "  o = vec4(clamp(sh + (c - sm) * 0.5, 0.0, 1.0), 1.0);\n"
+    "}\n";
+
+
+/* A movie's frame, second step: blended with the one before it. The movie's compression noise differs from frame
+ * to frame while the picture under it stays, so where a pixel and its four neighbours are within a little of
+ * what the last frame showed there, the last frame counts for up to 40 % (a recursive average of about one and a
+ * half frames); where the picture moved, the difference is large and the new frame stands alone, so nothing
+ * trails. u_tex: the cleaned frame; u_tex2: the last blended frame. */
+static const char k_fs_vidt[] =
+    "vec3 F(sampler2D t, vec2 p) { return texelFetch(t, clamp(ivec2(p), ivec2(0), textureSize(t, 0) - 1), 0).rgb; }\n"
+    "void main() {\n"
+    "  float st = max(1.0, float(textureSize(u_tex, 0).x) / 640.0);\n"
+    "  vec2 px = v_uv * vec2(textureSize(u_tex, 0));\n"
+    "  const vec2 K[5] = vec2[5](vec2(0, 0), vec2(1, 0), vec2(-1, 0), vec2(0, 1), vec2(0, -1));\n"
+    "  float df = 0.0;\n"
+    "  for (int i = 0; i < 5; i++) {\n"
+    "    vec3 d = abs(F(u_tex, px + K[i] * st) - F(u_tex2, px + K[i] * st));\n"
+    "    df += (d.r + d.g + d.b) * (1.0 / 3.0);\n"
+    "  }\n"
+    "  float t = df * 0.2 / 0.03;\n"
+    "  float w = 0.4 * exp(-t * t);\n"
+    "  o = vec4(mix(F(u_tex, px), F(u_tex2, px), w), 1.0);\n"
+    "}\n";
+
+/* A movie's frame, third step: its edges steepened. The frame is a movie's picture stretched to the render scale,
+ * so each edge is a soft ramp several pixels wide. Where the luma changes fast, the pixel takes its colour from a
+ * point a little further from the edge's middle (the middle is where the change is fastest, found from the change
+ * of the gradient's size), which turns the ramp into a short one without a halo: the colour comes from the picture
+ * itself and is held between its neighbours' smallest and largest. A least-visible grain (one level in 255) hides
+ * the bands a movie's few colours leave in a smooth sky or wall. */
+static const char k_fs_vidw[] =
+    "float Y(vec3 c) { return dot(c, vec3(0.2126, 0.7152, 0.0722)); }\n"
+    "vec3 F(vec2 p) { return texelFetch(u_tex, clamp(ivec2(p), ivec2(0), textureSize(u_tex, 0) - 1), 0).rgb; }\n"
+    "float hash(vec2 p) { return fract(sin(dot(p, vec2(12.9898, 78.233))) * 43758.5453); }\n"
+    "void main() {\n"
+    "  vec2 sz = vec2(textureSize(u_tex, 0));\n"
+    "  float st = max(1.0, sz.x / 640.0);\n"
+    "  vec2 px = v_uv * sz;\n"
+    "  float L[25];\n"
+    "  for (int j = 0; j < 5; j++) {\n"
+    "    for (int i = 0; i < 5; i++) { L[j * 5 + i] = Y(F(px + vec2(float(i - 2), float(j - 2)) * st)); }\n"
+    "  }\n"
+    "  float M[9];\n"
+    "  for (int j = 0; j < 3; j++) {\n"
+    "    for (int i = 0; i < 3; i++) {\n"
+    "      int c = (j + 1) * 5 + (i + 1);\n"
+    "      float gx = L[c + 1] - L[c - 1], gy = L[c + 5] - L[c - 5];\n"
+    "      M[j * 3 + i] = sqrt(gx * gx + gy * gy);\n"
+    "    }\n"
+    "  }\n"
+    "  vec2 dm = vec2(M[5] - M[3], M[7] - M[1]);\n"
+    "  float gm = M[4], dl = length(dm);\n"
+    "  vec2 dir = -dm / (dl + 1e-4);\n"
+    "  float amt = smoothstep(0.08, 0.25, gm) * smoothstep(0.008, 0.04, dl);\n"
+    "  vec3 c0 = F(px);\n"
+    "  vec3 w = texture(u_tex, (px + dir * st * 0.5 * amt) / sz).rgb;\n"
+    "  vec3 mn = c0, mx = c0;\n"
+    "  for (int j = -1; j <= 1; j++) {\n"
+    "    for (int i = -1; i <= 1; i++) { vec3 n = F(px + vec2(float(i), float(j)) * st); mn = min(mn, n); mx = max(mx, n); }\n"
+    "  }\n"
+    "  w = clamp(w, mn, mx);\n"
+    "  float nz = (hash(px) + hash(px + 17.0) - 1.0) * (1.0 / 255.0);\n"
+    "  o = vec4(clamp(w + nz, 0.0, 1.0), 1.0);\n"
     "}\n";
 
 #include "hw/xbox/hle/vk/nis_coef.inc"
@@ -1086,7 +1154,10 @@ static bool init(void)
     g_ps.pipe[P_SHARP] = pipeline(g_ps.fs[P_SHARP], VK_FORMAT_R8G8B8A8_UNORM);
     g_ps.fs[P_VID] = module(HLE_SHADER_FRAGMENT, k_fs_head, k_fs_vid);
     g_ps.pipe[P_VID] = pipeline(g_ps.fs[P_VID], VK_FORMAT_R8G8B8A8_UNORM);
+    g_ps.fs[P_VID_W] = module(HLE_SHADER_FRAGMENT, k_fs_head, k_fs_vidw);
+    g_ps.pipe[P_VID_W] = pipeline(g_ps.fs[P_VID_W], VK_FORMAT_R8G8B8A8_UNORM);
     hle_log("hakuX-hle-back", "present: movie cleanup shader %s", g_ps.pipe[P_VID] != VK_NULL_HANDLE ? "ready" : "failed (off)");
+    hle_log("hakuX-hle-back", "present: movie edge shader %s", g_ps.pipe[P_VID_W] != VK_NULL_HANDLE ? "ready" : "failed (off)");
     hle_log("hakuX-hle-back", "present: ready (shaders: bilinear %d, averaging %d, FSR %d, FXAA %d, NIS %d)",
             g_ps.fs[P_BILINEAR] != VK_NULL_HANDLE, g_ps.fs[P_AREA] != VK_NULL_HANDLE,
             g_ps.fs[P_RCAS] != VK_NULL_HANDLE && g_ps.pipe[P_EASU] != VK_NULL_HANDLE,
@@ -1819,6 +1890,21 @@ static bool sm_ready(void)
                 g_ps.pipe[P_SM_EDGE] ? "ready" : "unavailable (shaders or layout failed): FXAA instead");
     }
     return g_ps.pipe[P_SM_EDGE] && g_ps.pipe[P_SM_WT] && g_ps.pipe[P_SM_BLEND];
+}
+
+/* The movie cleanup's blend with the frame before: its pipeline (of the extra-sampler layout), once. */
+static bool vid2_ready(void)
+{
+    if (!g_ps.vid2_tried) {
+        g_ps.vid2_tried = true;
+        if (x_init()) {
+            g_autofree char *b = g_strdup_printf("%s%s", k_fs_x, k_fs_vidt);
+            g_ps.fs[P_VID_T] = module(HLE_SHADER_FRAGMENT, k_fs_head, b);
+            g_ps.pipe[P_VID_T] = pipeline_l(g_ps.fs[P_VID_T], VK_FORMAT_R8G8B8A8_UNORM, g_ps.plx);
+        }
+        hle_log("hakuX-hle-back", "present: movie blend shader %s", g_ps.pipe[P_VID_T] ? "ready" : "failed (off)");
+    }
+    return g_ps.pipe[P_VID_T] != VK_NULL_HANDLE;
 }
 
 /* The interpolation's three pipelines, once. */
@@ -2727,17 +2813,42 @@ void hle_present_end(float sx, float sy, bool fxaa, int upscale, bool average, u
     }
     /* A movie's frame (draw.c, g_hle_video): cleaned up at its own size before anything scales or sharpens it */
     if (g_ps.have && g_hle_video && !g_crt && g_ps.pipe[P_VID]) {
-        if (img_target(&g_ps.vd, g_ps.f.w, g_ps.f.h, VK_FORMAT_R8G8B8A8_UNORM, "video cleanup")) {
-            if (g_ps.vd.serial != content + 1 || g_ps.vd.fxaa != aa_done) {
+        const uint32_t fw = g_ps.f.w, fh = g_ps.f.h;
+        const bool t_on = g_ps.pipe[P_VID_T] || vid2_ready();
+        const bool w_on = g_ps.pipe[P_VID_W] != VK_NULL_HANDLE;
+        if (img_target(&g_ps.vd, fw, fh, VK_FORMAT_R8G8B8A8_UNORM, "video cleanup") &&
+            (!t_on || (img_target(&g_ps.vt[0], fw, fh, VK_FORMAT_R8G8B8A8_UNORM, "video blend") &&
+                       img_target(&g_ps.vt[1], fw, fh, VK_FORMAT_R8G8B8A8_UNORM, "video blend"))) &&
+            (!w_on || img_target(&g_ps.vw, fw, fh, VK_FORMAT_R8G8B8A8_UNORM, "video edges"))) {
+            if (g_ps.vd.serial != content + 1 || g_ps.vd.fxaa != aa_done || (w_on && g_ps.vw.serial != content + 1)) {
                 const float k[4] = { 0.0f, 0.0f, 0.0f, 0.0f };
                 img_pass(cb, f, SET_VID, &g_ps.vd, g_ps.pipe[P_VID], src, k);
                 g_ps.vd.serial = content + 1;
                 g_ps.vd.fxaa = aa_done;
+                VkImageView last = g_ps.vd.view;
+                if (t_on) {
+                    PsImg *hist = &g_ps.vt[g_ps.vt_i], *dst = &g_ps.vt[g_ps.vt_i ^ 1u];
+                    /* no frame before it (the first of a movie): blended with itself, which changes nothing */
+                    VkImageView hv = hist->serial ? hist->view : g_ps.vd.view;
+                    x_pass(cb, f, SET_X8, dst, g_ps.pipe[P_VID_T], g_ps.vd.view, hv, g_ps.vd.view, k);
+                    dst->serial = content + 1;
+                    g_ps.vt_i ^= 1u;
+                    last = dst->view;
+                }
+                if (w_on) {
+                    img_pass(cb, f, SET_VID2, &g_ps.vw, g_ps.pipe[P_VID_W], last, k);
+                    g_ps.vw.serial = content + 1;
+                    last = g_ps.vw.view;
+                }
+                g_ps.vid_last = last;
             }
-            src = g_ps.vd.view;
+            src = g_ps.vid_last;
         } else {
             g_ps.pipe[P_VID] = VK_NULL_HANDLE;      /* no image for it: off */
         }
+    } else if (g_ps.vt[0].serial || g_ps.vt[1].serial) {
+        g_ps.vt[0].serial = g_ps.vt[1].serial = 0;  /* the movie is over: the next one starts without a frame before it */
+        g_ps.vd.serial = 0;
     }
     /* Sharpening when no upscaler does it (FSR and NIS sharpen their own; a CRT filter has its look): the frame
      * (anti-aliased, or the in-between one) sharpened at its own size, then placed as it would have been. */

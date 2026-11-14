@@ -1,13 +1,13 @@
-# xbased Modern GUI 1.0.76.43: From Russia with Love graphics fix, fast start-up, upscaling speed setting, game compatibility fixes, Autofix for stalled games, Linux AppImage
+# xbased Modern GUI 1.0.76.44: From Russia with Love graphics fix, fast start-up, upscaling speed setting, game compatibility fixes, Autofix for stalled games, Linux AppImage
 
 ```
 Changes since 1.0.76.2
 ----------------------
-New in 1.0.76.43
+New in 1.0.76.44
+- Movies (FMV) look much cleaner in every game: blocky compression noise is smoothed along edges, flicker is
+  calmed, and edges are made a little crisper before the picture is scaled up. Works with FSR, NIS and sharpen.
 - 007: From Russia with Love: the wedges and the lights through walls are both gone on a first play too
   (the whole glow effect is left out).
-- Movies (FMV) look cleaner in every game: the picture is smoothed along edges and sharpened a little
-  before it is scaled up.
 
 New in 1.0.76.42
 - 007: From Russia with Love: the glass-shard wedges and lights through walls are fixed (the glow passes that

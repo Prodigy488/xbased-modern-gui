@@ -1,12 +1,13 @@
 # xbased changelog
 
-## 1.0.76.43 (Modern GUI fork)
+## 1.0.76.44 (Modern GUI fork)
 
+- Movies (FMV) look much cleaner in every game. A movie is found by its pattern, then its picture goes through three
+  steps before it is scaled up: an edge-preserving smoothing that removes blocky compression noise, a light blend
+  with the previous frame that calms flicker, and a gentle edge-steepening with fine grain that keeps it from looking
+  plastic. Works with FSR, NIS and the sharpen setting. debug.hakux.vidfx=0 turns it off.
 - 007: From Russia with Love: the fix now removes the whole glow effect (modes 1 and 6 together, new F6 mode 8), so
   the wedges and the lights through walls are both gone on a first play as well as after a resume.
-- Movies (FMV) look cleaner: a movie is found by its pattern (one or two draws a frame and a new picture each frame)
-  and its picture is smoothed along edges and sharpened a little before it is scaled up. Any game; works with FSR,
-  NIS and the sharpen setting. debug.hakux.vidfx=0 turns it off.
 
 ## 1.0.76.42 (Modern GUI fork)
 
