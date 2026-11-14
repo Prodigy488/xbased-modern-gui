@@ -1,5 +1,17 @@
 # xbased changelog
 
+## 1.0.76.41 (Modern GUI fork)
+
+- Start-up: the dashboard took about a minute to appear on a copy with many texture dumps and upscaled pictures. The
+  clean-up of files left by an update walked the whole data folder, each folder twice. It now reads one folder at a
+  time and skips the folders that hold game data. First frame: 59.6 s before, 0.7 s after.
+- The texture-pack zips are looked for in the "texture packs" folder itself, not in every folder below it.
+- Upscaling while playing is gentler: the upscaler runs at a lower priority with fewer threads and does a smaller
+  batch each time (Half-Life 2 had 100 to 320 ms hitches from it).
+- New setting "Upscaling speed while playing" (Low, Medium, High; key texspeed). High shows sharp textures sooner and
+  may cost frames; Low is the gentlest.
+- The log records the start-up stages' times and the time of the first frame.
+
 ## 1.0.76.40 (Modern GUI fork)
 
 - "Not enough free blocks to save game data" (Soulcalibur II; any title that keeps only the low 32 bits of the free
