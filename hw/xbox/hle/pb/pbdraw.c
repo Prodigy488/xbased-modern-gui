@@ -4024,6 +4024,66 @@ static void pick_log(const HleCmdDraw *d, unsigned b, const uint8_t *src, uint32
         hle_log("hakuX-hle-pb", "pick: viewport scale %g %g %g %g offset %g %g %g %g (ndc below)", sc[0], sc[1], sc[2],
                 sc[3], of[0], of[1], of[2], of[3]);
     }
+    if (g_pd.prim == 5 && behind) {
+        /* triangles with a vertex behind the eye, clipped to w > 0 the way the rasterizer does, that reach the
+         * lower left of the screen (60,240 to 500,380): the ground holes' place */
+        unsigned hit = 0, tris = g_pd.nidx / 3;
+        float hx0 = 1e30f, hy0 = 1e30f, hx1 = -1e30f, hy1 = -1e30f;
+        for (unsigned t = 0; t < tris; t++) {
+            float q[4][4];
+            unsigned nq = 0;
+            float pv[3][4];
+            bool ok = true, any_behind = false;
+            for (unsigned c = 0; c < 3 && ok; c++) {
+                const uint32_t v = g_pd.idx[t * 3 + c] - lo;
+                if (v >= nv) {
+                    ok = false;
+                    break;
+                }
+                float p4[4] = { 0, 0, 0, 1 };
+                memcpy(p4, src + (size_t)v * st + po, 12);
+                for (unsigned r = 0; r < 4; r++) {
+                    pv[c][r] = p4[0] * f[r][0] + p4[1] * f[r][1] + p4[2] * f[r][2] + p4[3] * f[r][3];
+                }
+                any_behind |= !(pv[c][3] > 1e-3f);
+            }
+            if (!ok || !any_behind) {
+                continue;
+            }
+            for (unsigned c = 0; c < 3; c++) {
+                const float *a = pv[c], *b = pv[(c + 1) % 3];
+                const bool ia = a[3] > 1e-3f, ib = b[3] > 1e-3f;
+                if (ia && nq < 4) {
+                    memcpy(q[nq++], a, 16);
+                }
+                if (ia != ib && nq < 4) {
+                    const float k = (1e-3f - a[3]) / (b[3] - a[3]);
+                    for (unsigned r = 0; r < 4; r++) {
+                        q[nq][r] = a[r] + k * (b[r] - a[r]);
+                    }
+                    nq++;
+                }
+            }
+            if (nq < 3) {
+                continue;
+            }
+            float tx0 = 1e30f, ty0 = 1e30f, tx1 = -1e30f, ty1 = -1e30f;
+            for (unsigned c = 0; c < nq; c++) {
+                const float px = q[c][0] / q[c][3], py = q[c][1] / q[c][3];
+                tx0 = MIN(tx0, px); tx1 = MAX(tx1, px);
+                ty0 = MIN(ty0, py); ty1 = MAX(ty1, py);
+            }
+            if (tx1 >= 60 && tx0 <= 500 && ty1 >= 240 && ty0 <= 380) {
+                hit++;
+                hx0 = MIN(hx0, tx0); hx1 = MAX(hx1, tx1);
+                hy0 = MIN(hy0, ty0); hy1 = MAX(hy1, ty1);
+            }
+        }
+        if (hit) {
+            hle_log("hakuX-hle-pb", "pick: draw %llu clipped triangles in the lower left: %u of %u, reaching %.0f,%.0f to "
+                    "%.0f,%.0f", (unsigned long long)g_pd.draws, hit, tris, hx0, hy0, hx1, hy1);
+        }
+    }
     if ((x1 - x0 > 3000.0f || y1 - y0 > 3000.0f || behind) && g_pd.nidx <= 96) {
         /* a draw that reaches past the screen or behind the eye: each index with its position, its clip
          * coordinates and the pixel it lands on (Jedi Knight Academy's ground holes) */

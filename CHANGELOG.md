@@ -1,5 +1,10 @@
 # xbased changelog
 
+## 1.0.76.75 (Modern GUI fork, test build)
+
+- Diagnostics only: a capture also logs, per draw, the triangles that cross behind the eye and still reach the lower
+  left of the screen once clipped.
+
 ## 1.0.76.74 (Modern GUI fork, test build)
 
 - Diagnostics only: a capture (F9) also logs each index, position and clip coordinate of the first draws that reach
