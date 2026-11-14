@@ -1,5 +1,13 @@
 # xbased changelog
 
+## 1.0.76.51 (Modern GUI fork, test build)
+
+- Thrillville's stretched black polygons and black textures: a small render target's old image (a cleared black
+  160 x 120 one) could be written back over memory the game had since reused for vertex data, because the page
+  counts that say "the game wrote here" missed some stores. Small targets' bytes are now compared as well, so
+  memory the game changed is kept. Diagnostic lines (`vdiag:`) in the log report vertex data that is NaN, huge
+  or black when a draw reads it. Not confirmed on a PC yet.
+
 ## 1.0.76.46 (Modern GUI fork, test build)
 
 - Thrillville, Jedi Knight Academy and the "vertex explosions" they share with xemu (its issue #747): the vertex

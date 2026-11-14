@@ -109,6 +109,9 @@ typedef struct CohSnap {
     uint64_t sum, h0, hl;
     uint64_t bsum;                      /* by blocks (hle_mem_wseq_blocks): a coarse first look */
     uint32_t w0, wl;
+    uint64_t full;                      /* all its bytes hashed (small targets): what the page
+                                           counts miss, a write into a page they don't see */
+    bool hasfull;
     bool valid;
 } CohSnap;
 
@@ -4460,6 +4463,8 @@ static bool coh_managed(const PbObj *o, uint32_t *len)
     return coh_len(o, len) && !coh_display(o) && (!o->d.pitch || (*len > WRITEBACK_MAX && !o->cpu_used));
 }
 
+#define COH_FULL_MAX 262144u               /* bytes: a target this small is hashed whole */
+
 /* Any thread: [pa, pa + len) as it is now (CohSnap) */
 static void coh_snap_take(uint32_t pa, uint32_t len, CohSnap *s)
 {
@@ -4468,6 +4473,8 @@ static void coh_snap_take(uint32_t pa, uint32_t len, CohSnap *s)
     s->bsum = hle_mem_wseq_blocks(pa, len);
     s->h0 = (pa & 4095) || (p0 == pl && (end & 4095)) ? span_hash(pa, MIN(end, p0 + 4096) - pa) : 0;
     s->hl = pl != p0 && (end & 4095) ? span_hash(pl, end - pl) : 0;
+    s->hasfull = len <= COH_FULL_MAX;
+    s->full = s->hasfull ? span_hash(pa, len) : 0;
     s->valid = true;
 }
 
@@ -4531,6 +4538,14 @@ static bool coh_mem_newer(PbObj *o)
         return o->mn;
     }
     o->mn_epoch = ep;
+    /* its bytes against the snapshot's, before the write counts: the title
+     * wrote vertices into a dead target's memory (Thrillville's 160 x 120
+     * ones) in pages whose stores no count saw, and its old black image
+     * landed over them: stretched black polygons */
+    if (o->snap.hasfull && span_hash(o->d.pa, len) != o->snap.full) {
+        o->mn = true;
+        return true;
+    }
     const uint64_t bsum = hle_mem_wseq_blocks(o->d.pa, len);
     if (bsum == o->snap.bsum) {
         o->mn = false;
