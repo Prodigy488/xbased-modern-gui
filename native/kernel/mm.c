@@ -1170,7 +1170,18 @@ static uint64_t MmQueryStatistics(NcKernel *k, NcFrame *f, const uint32_t *a)
             }
         }
     }
-    const uint32_t s[9] = {0x24, total, total - used, committed, reserved, 0, k->pool_len / NC_PAGE, 0, image};
+    /* test (1.0.76.61): 2 MiB fewer pages reported free, to see whether a title
+     * that sizes its heap from this (Jedi Academy) then leaves room for the
+     * 640 x 480 textures it is refused later */
+    const uint32_t avail = total - used > 512 ? total - used - 512 : 0;
+    {
+        static unsigned said;
+        if (said++ < 12) {
+            nc_log("hakuX-native", "mm: MmQueryStatistics from %08x: %u KiB free, %u KiB reported", caller_of(k, f),
+                   (total - used) * 4, avail * 4);
+        }
+    }
+    const uint32_t s[9] = {0x24, total, avail, committed, reserved, 0, k->pool_len / NC_PAGE, 0, image};
     memcpy(nc_vm_host(k->vm, a[0]), s, sizeof(s));
     return NC_STATUS_SUCCESS;
 }

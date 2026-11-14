@@ -1,5 +1,10 @@
 # xbased changelog
 
+## 1.0.76.61 (Modern GUI fork, test build)
+
+- Test for Jedi Knight Academy: the kernel reports 2 MiB less free memory than there is, and logs each query, to
+  see whether the game then leaves room for the 640 x 480 textures it was refused. Not for release as it is.
+
 ## 1.0.76.60 (Modern GUI fork, test build)
 
 - Diagnostics only, for Jedi Knight Academy: a failed contiguous allocation names who asked for it, and a
