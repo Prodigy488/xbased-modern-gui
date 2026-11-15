@@ -1,5 +1,11 @@
 # xbased changelog
 
+## 1.0.76.49 (Modern GUI fork, test build)
+
+- Star Wars: Republic Commando's stutter: about a quarter of the visibility-test reads waited the whole 30 ms for a
+  report that was never written (the guest's CPU held meanwhile, so its vblank interrupt, and the flip, came 30 to 45 ms
+  late). A title whose reads mostly give up now waits 6 ms for a report instead (back to 30 ms when they stop).
+
 ## 1.0.76.48 (Modern GUI fork, test build)
 
 - Diagnostics only: the log names an interrupt handler that ran over 4 ms (`ISR line N (routine ...) ran X ms`), for
