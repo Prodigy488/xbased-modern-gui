@@ -115,6 +115,8 @@ static struct {
     uint32_t thread;
 } g_hold[NC_IRQ_LINES];
 static uint8_t g_isr_line = 0xFF;
+static uint64_t g_isr_t0, g_isr_cpu0;      /* the running ISR's start (wall, and the host CPU's own time) */
+static uint32_t g_isr_routine;
 
 uint8_t nc_intr_isr_line(void)
 {
@@ -203,6 +205,8 @@ bool nc_intr_dispatch(NcKernel *k, bool cpu_enabled)
         }
         hold_report(level);
         g_isr_line = (uint8_t)level;
+        g_isr_t0 = nc_irq_now_ns();
+        g_isr_routine = nc_vm_rd32(k->vm, obj + KI_ROUTINE);
         if (!k->isr_thread) {
             k->isr_thread = nc_ps_kernel_thread(k, ISR_STACK, ISR_PRIORITY);
             if (!k->isr_thread) {
@@ -234,6 +238,25 @@ bool nc_intr_dispatch(NcKernel *k, bool cpu_enabled)
 void nc_intr_return(NcKernel *k)
 {
     k->in_isr = false;
+    /* an ISR that took long (diagnostics, 1.0.76.48): which one and how long, from its start to its return; the
+     * other lines wait meanwhile (none nests) */
+    if (g_isr_line != 0xFF && g_isr_t0) {
+        const uint64_t dur = nc_irq_now_ns() - g_isr_t0;
+        static uint64_t window;
+        static unsigned logged;
+        if (dur > 4000000ull) {
+            const uint64_t now = nc_irq_now_ns();
+            if (now - window > 1000000000ull) {
+                window = now;
+                logged = 0;
+            }
+            if (logged++ < 8) {
+                nc_log("hakuX-native-irq", "ISR line %u (routine %08x, IRQL %u) ran %.1f ms before it returned; thread t%u was "
+                       "current at its start", g_isr_line, g_isr_routine, *irql(k), dur / 1e6,
+                       k->isr_interrupted ? k->isr_interrupted->id : 0);
+            }
+        }
+    }
     g_isr_line = 0xFF;
     *irql(k) = k->isr_saved_irql;
     hle_host_gpu_trace(HLE_GTR_ISR_RET, k->isr_saved_irql);

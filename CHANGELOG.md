@@ -1,5 +1,11 @@
 # xbased changelog
 
+## 1.0.76.48 (Modern GUI fork, test build)
+
+- Diagnostics only: the log names an interrupt handler that ran over 4 ms (`ISR line N (routine ...) ran X ms`), for
+  Star Wars: Republic Commando's late vblanks (the guest's flip waits 30 to 45 ms for its vblank interrupt, which
+  waits for another line's handler: none nests).
+
 ## 1.0.76.47 (Modern GUI fork)
 
 - The frame rate limit (Mods screen, Frame rate) now also holds back games that flip without waiting for a vblank.
