@@ -1,5 +1,11 @@
 # xbased changelog
 
+## 1.0.76.83 (Modern GUI fork, test build)
+
+- A repeated Begin continues the draw only if no register changed since the first Begin (Thrillville's coaster track
+  changes its vertex arrays between Begins: continuing mixed their indices into long streaks). The first 30 repeated
+  Begins are logged (continues / restarts).
+
 ## 1.0.76.82 (Modern GUI fork, test build)
 
 - The repeated-Begin continuation is limited to list primitives (points, lines, triangles, quads). Strips and fans
