@@ -1,5 +1,12 @@
 # xbased changelog
 
+## 1.0.76.50 (Modern GUI fork, test build)
+
+- A write to guest memory that faults on a page write tracking no longer holds protected is retried (another thread
+  may just have opened it) and then opened for writing, instead of taking the process down (Star Wars: Republic
+  Commando ended its run so, a host thread writing a render target's memory). Logged as "opened for writing".
+- The log says how the process ended: `exit: the process is ending normally`, or the signal (abort, terminate).
+
 ## 1.0.76.49 (Modern GUI fork, test build)
 
 - Star Wars: Republic Commando's stutter: about a quarter of the visibility-test reads waited the whole 30 ms for a

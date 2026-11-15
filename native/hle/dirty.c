@@ -475,7 +475,33 @@ bool nc_hle_dirty_fault(const siginfo_t *info, void *ucontext)
     if (!wp) {
         /* protected, but not by write tracking: someone else's (the JIT's
          * code pages), or tracking lost the page (a crash follows) */
-        static unsigned s_logged;
+        /* Two ways to come here that need no crash (Star Wars: Republic Commando ended its run in one, a host
+         * thread's write to a render target's memory): the page was made writable and its flag cleared by another
+         * thread while this fault was on its way (the access runs again, now through), or tracking let go of it
+         * and the host protection stayed (opened here: nothing tracks the page, so nothing is lost by it). */
+        static __thread uintptr_t s_last;
+        static __thread unsigned s_again;
+        static unsigned s_logged, s_recovered;
+        if (s_last == (uintptr_t)info->si_addr) {
+            s_again++;
+        } else {
+            s_last = (uintptr_t)info->si_addr;
+            s_again = 1;
+        }
+        if (s_again <= 40) {
+            const struct timespec ts = {0, 50000};
+            nanosleep(&ts, NULL);           /* a moment for the other thread's mprotect */
+            return true;
+        }
+        void *page = (void *)((uintptr_t)info->si_addr & ~(uintptr_t)(NC_PAGE - 1));
+        if (mprotect(page, NC_PAGE, PROT_READ | PROT_WRITE) == 0) {
+            s_again = 0;
+            if (s_recovered++ < 16) {
+                nc_log("hakuX-native-watch", "write fault at guest %08x (pa %08x), a page tracking doesn't hold "
+                       "protected: opened for writing (%u so far)", (uint32_t)guest, pa, s_recovered);
+            }
+            return true;
+        }
         if (s_logged++ < 8) {
             nc_log("hakuX-native-watch", "write fault at guest %08x (pa %08x), a page tracking "
                    "doesn't hold protected", (uint32_t)guest, pa);

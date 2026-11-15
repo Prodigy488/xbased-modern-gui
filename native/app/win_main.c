@@ -65,6 +65,7 @@
 #include <fcntl.h>
 #include <pthread.h>
 #include <stdlib.h>
+#include <signal.h>
 #include <string.h>
 #include <sys/stat.h>
 #include <sys/system_properties.h>
@@ -1728,6 +1729,21 @@ static void shader_cache_by_version(const char *base)
 #define NC_PLATFORM_NAME "Linux"
 #endif
 
+
+/* How the process ended, for a log that stops short (1.0.76.50): a normal exit, an abort, or a termination signal. */
+static void exit_note(void)
+{
+    nc_log("hakuX-app", "exit: the process is ending normally");
+}
+
+static void signal_note(int sig)
+{
+    nc_log("hakuX-app", "exit: signal %d (%s)", sig, sig == SIGABRT ? "abort" : sig == SIGSEGV ? "segmentation fault" :
+           sig == SIGILL ? "illegal instruction" : sig == SIGFPE ? "arithmetic error" : "terminate");
+    signal(sig, SIG_DFL);
+    raise(sig);
+}
+
 int main(int argc, char *argv[])
 {
 #ifdef _WIN32
@@ -1781,6 +1797,9 @@ int main(int argc, char *argv[])
     if (again) {
         nc_log("hakuX-app", "---- started again (%s)", opt_flag("relaunch") ? "the title's relaunch" : "a state loaded");
     }
+    atexit(exit_note);
+    signal(SIGABRT, signal_note);
+    signal(SIGTERM, signal_note);
     nc_log("hakuX-app", "xbased " XBASED_VERSION " (Modern GUI fork of xbased, an original Xbox emulator by crazyriddler, based on hakuX), " NC_PLATFORM_NAME);
     nc_win_mods_cleanup(g_exe_dir);     /* what an update took away (win_mods.h) */
 
