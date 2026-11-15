@@ -252,6 +252,20 @@ xbased doesn't include any copyrighted Xbox software.
 </tr>
 </table>
 
+## Reporting a problem
+
+Send `xbased.log` (it is in the folder next to `xbased.exe`) together with what you saw, and which game. It now says
+what a problem needs:
+
+- **Stutter:** each hitch with its cause (the game's own CPU, the GPU, shader compiles, a late flip), the frame
+  rate every 5 seconds, and the totals of the visibility-test waits ("report gate").
+- **Late interrupts:** a vblank or GPU interrupt that reached the game late, and any interrupt handler that ran
+  over 4 ms.
+- **A crash or a freeze:** the last thing the game did, a hang report with the game's code, and the last line:
+  `exit: the process is ending normally`, or the signal (abort, terminate) if the game was ended. A log that stops
+  with neither was killed from outside.
+- **Graphics:** a capture (F9) logs the draws, shaders and render targets of one frame.
+
 ## Screenshots
 
 <table>
