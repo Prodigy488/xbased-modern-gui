@@ -1,5 +1,11 @@
 # xbased changelog
 
+## 1.0.76.80 (Modern GUI fork, test build)
+
+- Jedi test bundle adds HAKUX_HLE_PB_LOCKSTEP: the guest waits for the decoder at every PUT write, so a vertex buffer
+  the guest refills has already been copied (the 1.0.76.79 log showed vertex ranges rewritten 2 ms apart with the
+  decoder hundreds of KB behind).
+
 ## 1.0.76.79 (Modern GUI fork, test build)
 
 - Jedi Knight Academy test bundle (only for that title; HAKUX_JEDI_TEST=0 turns it off): visibility tests always

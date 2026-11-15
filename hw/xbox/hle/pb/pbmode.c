@@ -1617,6 +1617,17 @@ void hle_pb_put(void)
         hle_hitch_thread(HLE_HT_VCPU);  /* the vCPU's CPU time for the monitor */
     }
     hle_pb_kick();
+    {   /* debug: HAKUX_HLE_PB_LOCKSTEP=1, the guest waits for the decoder at every PUT write, so a vertex buffer
+         * the guest refills is already copied (the decoder copies a draw's vertices when it decodes the draw) */
+        static int ls = -1;
+        if (ls < 0) {
+            const char *e = getenv("HAKUX_HLE_PB_LOCKSTEP");
+            ls = e && atoi(e) != 0;
+        }
+        if (ls) {
+            catch_up();
+        }
+    }
 }
 
 void hle_pb_start(void)
