@@ -1,5 +1,12 @@
 # xbased changelog
 
+## 1.0.76.81 (Modern GUI fork, test build)
+
+- A SET_BEGIN_END with the same primitive while a draw is open no longer restarts the draw (it threw away the indices
+  gathered so far; another primitive closes the draw first). Jedi Knight: Jedi Academy pushes Begin again in the
+  middle of its element index lists (xemu issue 2221, the same game's missing geometry).
+- The Jedi test bundle is now opt-in (HAKUX_JEDI_TEST=1).
+
 ## 1.0.76.80 (Modern GUI fork, test build)
 
 - Jedi test bundle adds HAKUX_HLE_PB_LOCKSTEP: the guest waits for the decoder at every PUT write, so a vertex buffer

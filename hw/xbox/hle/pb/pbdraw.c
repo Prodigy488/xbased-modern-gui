@@ -4947,6 +4947,15 @@ void hle_pbd_method(uint32_t m, uint32_t v)
         break;
     case NV097_SET_BEGIN_END:
         if (v) {
+            /* A Begin while a draw is open: the same primitive goes on (Jedi Knight: Jedi Academy pushes Begin
+             * again in the middle of its element index lists, and a restart threw away the indices before it:
+             * the missing triangles; xemu #2221); another primitive closes the draw first */
+            if (g_pd.in_draw && v == g_pd.prim) {
+                break;
+            }
+            if (g_pd.in_draw) {
+                draw();
+            }
             g_pd.in_draw = true;
             g_pd.prim = v;
             g_pd.nidx = g_pd.nimm = g_pd.ninl = 0;

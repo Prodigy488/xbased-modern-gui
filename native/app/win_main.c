@@ -1857,8 +1857,8 @@ int main(int argc, char *argv[])
         }
     }
     nc_io_set_hdd_root(hdd);
-    if (g_title_id == 0x4C41000Bu && !getenv("HAKUX_JEDI_TEST")) {
-        /* Jedi Knight Academy test bundle (set HAKUX_JEDI_TEST=0 to skip): visibility tests always pass, no
+    if (g_title_id == 0x4C41000Bu && getenv("HAKUX_JEDI_TEST") && atoi(getenv("HAKUX_JEDI_TEST"))) {
+        /* Jedi Knight Academy test bundle (only with HAKUX_JEDI_TEST=1): visibility tests always pass, no
          * report gate, submit at swaps only, no index batching, the guest waits for the decoder at every PUT write, and the vertex race logged */
         static const char *const k[][2] = { { "HAKUX_HLE_PB_NOVIS", "1" }, { "HAKUX_HLE_PB_VISGATE", "0" },
                                             { "HAKUX_HLE_PB_KICK_MS", "0" }, { "HAKUX_HLE_BATCH", "0" },
