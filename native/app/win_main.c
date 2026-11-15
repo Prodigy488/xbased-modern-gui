@@ -1857,6 +1857,17 @@ int main(int argc, char *argv[])
         }
     }
     nc_io_set_hdd_root(hdd);
+    if (g_title_id == 0x4C41000Bu && !getenv("HAKUX_JEDI_TEST")) {
+        /* Jedi Knight Academy test bundle (set HAKUX_JEDI_TEST=0 to skip): visibility tests always pass, no
+         * report gate, submit at swaps only, no index batching, and the vertex race logged */
+        static const char *const k[][2] = { { "HAKUX_HLE_PB_NOVIS", "1" }, { "HAKUX_HLE_PB_VISGATE", "0" },
+                                            { "HAKUX_HLE_PB_KICK_MS", "0" }, { "HAKUX_HLE_BATCH", "0" },
+                                            { "HAKUX_HLE_PB_VBRACE", "1" } };
+        for (unsigned i = 0; i < sizeof(k) / sizeof(k[0]); i++) {
+            setenv(k[i][0], k[i][1], 0);
+        }
+        nc_log("hakuX-app", "Jedi Knight Academy test bundle on (NOVIS, no VISGATE, KICK_MS 0, no BATCH, VBRACE)");
+    }
     setenv("HAKUX_HLE_MODE", "replace", 0);
     {
         char base[1100];
@@ -2192,16 +2203,20 @@ int main(int argc, char *argv[])
                     snprintf(msg, sizeof(msg), "Depth bias test %d (F7)", s_zb);
                     notice(msg, NULL);
                 } else if (ev.key.key == SDLK_F1) {
-                    /* the decoder's triangle clipping (debug.hakux.nclip): 0 near planes and a guard band around the
-                     * screen, 1 near planes only, 2 guard band only, 3 none */
-                    static int s_nc;
+                    /* visibility tests (debug.hakux.novis): 0 counted as the GPU would, 1 every test reports
+                     * its pixels passed (a game that culls by occlusion queries draws everything) */
+                    static int s_nv = -1;
                     char v[8];
-                    s_nc = (s_nc + 1) % 4;
-                    snprintf(v, sizeof(v), "%d", s_nc);
-                    nc_win_prop_set("debug.hakux.nclip", v);
-                    nc_log("hakuX-app", "triangle clip test %d (F1)", s_nc);
+                    if (s_nv < 0) {
+                        const char *e = getenv("HAKUX_HLE_PB_NOVIS");
+                        s_nv = e && atoi(e) != 0;
+                    }
+                    s_nv = !s_nv;
+                    snprintf(v, sizeof(v), "%d", s_nv);
+                    nc_win_prop_set("debug.hakux.novis", v);
+                    nc_log("hakuX-app", "visibility test %d (F1)", s_nv);
                     char msg[64];
-                    snprintf(msg, sizeof(msg), "Triangle clip test %d (F1)", s_nc);
+                    snprintf(msg, sizeof(msg), "Visibility tests %s (F1)", s_nv ? "always pass" : "counted");
                     notice(msg, NULL);
                 } else if (ev.key.key == SDLK_F12) {
                     /* which state hides geometry (debug.hakux.dbgf): 0 as drawn, 1 culling off, 2 alpha test off,

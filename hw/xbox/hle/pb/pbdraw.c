@@ -3007,10 +3007,19 @@ static void kick(void)
 bool hle_pbd_novis(void)
 {
     static int off = -1;
+    static unsigned polls;
     if (off < 0) {
         const char *e = getenv("HAKUX_HLE_PB_NOVIS");
         off = e && !strcmp(e, "1");
     }
+#if defined(__ANDROID__) || defined(_WIN32) || defined(NC_DESKTOP)
+    if ((polls++ & 255) == 0) {                 /* live: debug.hakux.novis (F1) */
+        char v[PROP_VALUE_MAX];
+        if (hle_prop_get("debug.hakux.novis", v) > 0 && v[0]) {
+            off = atoi(v) != 0;
+        }
+    }
+#endif
     return off;
 }
 
@@ -4208,7 +4217,7 @@ static unsigned clip_poly(ClipPv *p, unsigned n, const ClipPlane *pl)
 }
 
 /* debug.hakux.nclip (the front end's F1 cycles it): 0 both clips, 1 near planes only, 2 guard band only, 3 neither */
-static int g_nclip;
+static int g_nclip = 1;
 
 /* Rewrites g_pd.idx (triangles) when any triangle needs clipping; the number of new vertices, numbered after hi.
  * Two kinds: the near planes (depth 0 and w > 0), and a guard band around the screen: a triangle that reaches tens

@@ -1,5 +1,12 @@
 # xbased changelog
 
+## 1.0.76.79 (Modern GUI fork, test build)
+
+- Jedi Knight Academy test bundle (only for that title; HAKUX_JEDI_TEST=0 turns it off): visibility tests always
+  pass, no report gate, submits at swaps only, no index batching, and the vertex race logged (vbrace).
+- F1 now toggles the visibility tests live (counted / always pass). The triangle clip's guard band is off by default
+  (near plane only).
+
 ## 1.0.76.78 (Modern GUI fork, test build)
 
 - The decoder's triangle clip no longer clips against the depth plane (a flat screen quad at depth 0 could be
