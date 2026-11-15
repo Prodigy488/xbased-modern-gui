@@ -4236,7 +4236,7 @@ static unsigned near_clip(uint32_t lo, uint32_t hi)
     }
     const uint32_t fmt = R(NV097_SET_VERTEX_DATA_ARRAY_FORMAT), st = fmt >> 8;
     const unsigned size = (fmt >> 4) & 0xF;
-    if ((fmt & 0xF) != 2 || size < 3 || !st) {
+    if ((fmt & 0xF) != 2 || size != 3 || !st) {      /* (4: pre-transformed, screen space) */
         return 0;
     }
     const uint32_t nv = hi - lo + 1, pa = R(NV097_SET_VERTEX_DATA_ARRAY_OFFSET) & 0x7FFFFFFFu;
@@ -4249,14 +4249,11 @@ static unsigned near_clip(uint32_t lo, uint32_t hi)
     }
     float m[16];
     regs_f(m, 0x0680, 16);
-    const bool zclamp = ((R(0x1D78) >> 4) & 0xF) == 1;
     const double eps = 1e-3, XL = -2048.0, XH = 2688.0, YL = -2048.0, YH = 2528.0;
     ClipPlane pls[6];
     unsigned npl = 0;
     if (!(g_nclip & 1)) {
-        if (!zclamp) {
-            pls[npl++] = (ClipPlane){ { 1, 0, 0, 0 }, 0.0 };
-        }
+        /* (no depth plane: the host's own clip does it, and a flat screen quad at depth 0 would round below it) */
         pls[npl++] = (ClipPlane){ { 0, 1, 0, 0 }, eps };
     }
     if (!(g_nclip & 2)) {

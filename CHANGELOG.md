@@ -1,5 +1,10 @@
 # xbased changelog
 
+## 1.0.76.78 (Modern GUI fork, test build)
+
+- The decoder's triangle clip no longer clips against the depth plane (a flat screen quad at depth 0 could be
+  dropped) and leaves four-component (pre-transformed) positions alone.
+
 ## 1.0.76.77 (Modern GUI fork, test build)
 
 - Test for Jedi Knight Academy: the decoder also clips fixed-function triangles to a guard band around the screen (a
