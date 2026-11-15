@@ -1,5 +1,11 @@
 # xbased changelog
 
+## 1.0.76.47 (Modern GUI fork)
+
+- The frame rate limit (Mods screen, Frame rate) now also holds back games that flip without waiting for a vblank.
+  Star Wars: Republic Commando ran 170 to 300 frames a second with "Up to 30 fps" set, and stuttered; each presented
+  frame now waits until the limit's period has passed since the last one.
+
 ## 1.0.76.46 (Modern GUI fork)
 
 - The game's Frame rate setting (Mods screen) has more limits: Up to 30, 60, 90, 120, 144, 165 and 240 fps, besides

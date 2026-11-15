@@ -1525,9 +1525,54 @@ static uint32_t object_at(uint32_t pa);
 
 /* A frame presented: the frame rate in the log every 5 s (perf A/B from
  * logcat: hakuX-hle-fps). */
+/* The frame limit (Frame rate: Up to N fps, with Unlocked on): frames the
+ * title flips without waiting for a vblank (an immediate flip) came as fast
+ * as the guest drew them, 170 to 300 a second in Star Wars: Republic
+ * Commando, unevenly (stutter). The decoder holds each presented frame back
+ * until the limit's period has passed since the last one, which stalls the
+ * guest's push buffer in turn. Frames paced by the vblank already are later
+ * than that, and are not delayed. */
+static void frame_pace(void)
+{
+    static int on = -1, cap;
+    static unsigned polls;
+    static uint64_t last;
+    if (on < 0) {
+        const char *e = getenv("HAKUX_HLE_FPSCAP");
+        on = getenv("HAKUX_HLE_UNCAP") != NULL;
+        cap = e ? atoi(e) : 0;
+    }
+    if (polls++ % 32 == 0) {
+        char v[PROP_VALUE_MAX] = "";
+        if (hle_prop_get("debug.hakux.uncap", v) > 0) {
+            on = atoi(v) != 0;
+        }
+        if (hle_prop_get("debug.hakux.fpscap", v) > 0) {
+            cap = atoi(v);
+        }
+    }
+    if (!on || cap <= 0) {
+        return;
+    }
+    const uint64_t period = 1000000000ull / (uint64_t)cap;
+    uint64_t t = hle_now_ns();
+    if (last && t - last < period && t - last > 0) {
+        const uint64_t until = last + period;
+        while (t < until) {
+            const uint64_t left = until - t;
+            if (left > 1500000) {
+                g_usleep((gulong)((left - 1000000) / 1000));
+            }
+            t = hle_now_ns();
+        }
+    }
+    last = t > last + 2 * period ? t : (last ? last + period : t);
+}
+
 static void fps_log(void)
 {
     static int64_t s_t0;
+    frame_pace();
     static unsigned s_n, s_n0;
     const int64_t now = g_get_monotonic_time();
     s_n++;
