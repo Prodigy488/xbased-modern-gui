@@ -1,35 +1,19 @@
 # xbased changelog
 
-## 1.0.76.50 (Modern GUI fork, test build)
-
-- A write to guest memory that faults on a page write tracking no longer holds protected is retried (another thread
-  may just have opened it) and then opened for writing, instead of taking the process down (Star Wars: Republic
-  Commando ended its run so, a host thread writing a render target's memory). Logged as "opened for writing".
-- The log says how the process ended: `exit: the process is ending normally`, or the signal (abort, terminate).
-
-## 1.0.76.49 (Modern GUI fork, test build)
-
-- Star Wars: Republic Commando's stutter: about a quarter of the visibility-test reads waited the whole 30 ms for a
-  report that was never written (the guest's CPU held meanwhile, so its vblank interrupt, and the flip, came 30 to 45 ms
-  late). A title whose reads mostly give up now waits 6 ms for a report instead (back to 30 ms when they stop).
-
-## 1.0.76.48 (Modern GUI fork, test build)
-
-- Diagnostics only: the log names an interrupt handler that ran over 4 ms (`ISR line N (routine ...) ran X ms`), for
-  Star Wars: Republic Commando's late vblanks (the guest's flip waits 30 to 45 ms for its vblank interrupt, which
-  waits for another line's handler: none nests).
-
-## 1.0.76.47 (Modern GUI fork)
-
-- The frame rate limit (Mods screen, Frame rate) now also holds back games that flip without waiting for a vblank.
-  Star Wars: Republic Commando ran 170 to 300 frames a second with "Up to 30 fps" set, and stuttered; each presented
-  frame now waits until the limit's period has passed since the last one.
-
 ## 1.0.76.46 (Modern GUI fork)
 
-- The game's Frame rate setting (Mods screen) has more limits: Up to 30, 60, 90, 120, 144, 165 and 240 fps, besides
-  Original and Unlocked. For games that run far too fast and stutter when unlocked (Star Wars Republic Commando at
-  240 fps), pick a limit.
+- The frame rate setting (Mods screen, Frame rate) has more limits: Up to 30, 60, 90, 120, 144, 165 and 240 fps,
+  besides Original and Unlocked. The limit also holds back games that flip without waiting for a vblank (Star Wars:
+  Republic Commando ran 170 to 300 frames a second with "Up to 30" set): each presented frame waits until the
+  limit's period has passed since the last one.
+- Star Wars: Republic Commando's stutter: about a quarter of the visibility-test reads waited the whole 30 ms for a
+  report that was never written (the guest's CPU held meanwhile, so its vblank interrupt and flip came 30 to 45 ms
+  late). A title whose reads mostly give up now waits 6 ms instead (back to 30 ms when they stop).
+- Star Wars: Republic Commando's crash: a write to guest memory that faults on a page write tracking no longer
+  holds protected is retried (another thread may just have opened it) and then opened for writing, instead of
+  taking the process down. Logged as "opened for writing".
+- The log says how the process ended: `exit: the process is ending normally`, or the signal (abort, terminate), and
+  names an interrupt handler that ran over 4 ms.
 
 ## 1.0.76.45 (Modern GUI fork)
 

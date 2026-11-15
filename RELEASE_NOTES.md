@@ -1,8 +1,15 @@
-# xbased Modern GUI 1.0.76.45: Jedi Knight Academy and Thrillville graphics fixes, movie cleanup setting, verified updates
+# xbased Modern GUI 1.0.76.46: more frame rate limits, Republic Commando stutter and crash fixes
 
 ```
 Changes since 1.0.76.2
 ----------------------
+New in 1.0.76.46
+- Frame rate limits: Up to 30, 60, 90, 120, 144, 165 or 240 fps (Mods screen, Frame rate), and the limit now holds
+  back games that flip without waiting for a vblank, such as Star Wars: Republic Commando at 240 fps.
+- Star Wars: Republic Commando: far less stutter (its visibility-test waits no longer hold the game for 30 ms) and
+  a crash when memory tracking let go of a page is recovered from.
+- The log records how the game ended and any interrupt handler that ran long.
+
 New in 1.0.76.45
 - Jedi Knight: Jedi Academy: missing geometry and holes in the outdoor ground are fixed (a repeated Begin no longer
   drops the indices gathered so far; triangles crossing the near plane are clipped as the console does).

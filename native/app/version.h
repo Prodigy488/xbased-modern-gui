@@ -6,6 +6,6 @@
 #ifndef NC_APP_VERSION_H
 #define NC_APP_VERSION_H
 
-#define XBASED_VERSION "1.0.76.50"
+#define XBASED_VERSION "1.0.76.46"
 
 #endif
