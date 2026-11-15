@@ -1,5 +1,10 @@
 # xbased changelog
 
+## 1.0.76.82 (Modern GUI fork, test build)
+
+- The repeated-Begin continuation is limited to list primitives (points, lines, triangles, quads). Strips and fans
+  restart as before: continuing them joined Thrillville's separate coaster-track strips with long streaks.
+
 ## 1.0.76.81 (Modern GUI fork, test build)
 
 - A SET_BEGIN_END with the same primitive while a draw is open no longer restarts the draw (it threw away the indices
