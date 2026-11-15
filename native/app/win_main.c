@@ -2191,6 +2191,18 @@ int main(int argc, char *argv[])
                     char msg[64];
                     snprintf(msg, sizeof(msg), "Depth bias test %d (F7)", s_zb);
                     notice(msg, NULL);
+                } else if (ev.key.key == SDLK_F1) {
+                    /* the decoder's triangle clipping (debug.hakux.nclip): 0 near planes and a guard band around the
+                     * screen, 1 near planes only, 2 guard band only, 3 none */
+                    static int s_nc;
+                    char v[8];
+                    s_nc = (s_nc + 1) % 4;
+                    snprintf(v, sizeof(v), "%d", s_nc);
+                    nc_win_prop_set("debug.hakux.nclip", v);
+                    nc_log("hakuX-app", "triangle clip test %d (F1)", s_nc);
+                    char msg[64];
+                    snprintf(msg, sizeof(msg), "Triangle clip test %d (F1)", s_nc);
+                    notice(msg, NULL);
                 } else if (ev.key.key == SDLK_F12) {
                     /* which state hides geometry (debug.hakux.dbgf): 0 as drawn, 1 culling off, 2 alpha test off,
                      * 3 depth test off, 4 stencil test off, 5 all four off, 6 depth clamped, not clipped */

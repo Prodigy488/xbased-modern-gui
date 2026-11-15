@@ -4166,32 +4166,39 @@ static void vb_land(uint32_t from, uint32_t len)
  * triangles that reach behind the camera, and holes opened in it where they were left to the host rasterizer.
  * HAKUX_HLE_NOCLIP=1 leaves it off. */
 typedef struct { uint32_t v[3]; float b[3]; } ClipVtx;
-#define NC_MAX 8192
+#define NC_MAX 16384
 static ClipVtx g_nc[NC_MAX];
 static uint32_t *g_nc_idx;
 static unsigned g_nc_n;
 
-typedef struct { float b[3]; double d, w; int corner; } ClipPv;
+/* a vertex's four linear functions of its position: the composite's z row (depth), w, x and y (pixels times w) */
+typedef struct { float b[3]; double f[4]; int corner; } ClipPv;
+typedef struct { double c[4]; double th; } ClipPlane;
 
-/* the polygon p (n corners) cut to f >= th, f being its d (plane 0) or w (plane 1) */
-static unsigned clip_poly(ClipPv *p, unsigned n, unsigned plane, double th)
+/* the polygon p (n corners) cut to dot(c, f) >= th */
+static unsigned clip_poly(ClipPv *p, unsigned n, const ClipPlane *pl)
 {
-    ClipPv o[8];
+    ClipPv o[16];
     unsigned m = 0;
     for (unsigned i = 0; i < n; i++) {
         const ClipPv *a = &p[i], *b = &p[(i + 1) % n];
-        const double fa = (plane ? a->w : a->d) - th, fb = (plane ? b->w : b->d) - th;
-        if (fa >= 0 && m < 8) {
+        double fa = -pl->th, fb = -pl->th;
+        for (unsigned k = 0; k < 4; k++) {
+            fa += pl->c[k] * a->f[k];
+            fb += pl->c[k] * b->f[k];
+        }
+        if (fa >= 0 && m < 16) {
             o[m++] = *a;
         }
-        if ((fa >= 0) != (fb >= 0) && m < 8) {
+        if ((fa >= 0) != (fb >= 0) && m < 16) {
             const double t = fa / (fa - fb);
             ClipPv q;
             for (unsigned k = 0; k < 3; k++) {
                 q.b[k] = (float)(a->b[k] + t * (b->b[k] - a->b[k]));
             }
-            q.d = a->d + t * (b->d - a->d);
-            q.w = a->w + t * (b->w - a->w);
+            for (unsigned k = 0; k < 4; k++) {
+                q.f[k] = a->f[k] + t * (b->f[k] - a->f[k]);
+            }
             q.corner = -1;
             o[m++] = q;
         }
@@ -4200,15 +4207,30 @@ static unsigned clip_poly(ClipPv *p, unsigned n, unsigned plane, double th)
     return m;
 }
 
-/* Rewrites g_pd.idx (triangles) when any triangle needs clipping; the number of new vertices, numbered after hi. */
+/* debug.hakux.nclip (the front end's F1 cycles it): 0 both clips, 1 near planes only, 2 guard band only, 3 neither */
+static int g_nclip;
+
+/* Rewrites g_pd.idx (triangles) when any triangle needs clipping; the number of new vertices, numbered after hi.
+ * Two kinds: the near planes (depth 0 and w > 0), and a guard band around the screen: a triangle that reaches tens
+ * of thousands of pixels (a wall or the ground close to the camera) breaks the host rasterizer's fixed-point
+ * range at a high resolution scale (the Vulkan viewport bounds are +-32768 on most GPUs), and loses its pieces. */
 static unsigned near_clip(uint32_t lo, uint32_t hi)
 {
     static int off = -1;
+    static unsigned polls;
     if (off < 0) {
         off = getenv("HAKUX_HLE_NOCLIP") != NULL;
     }
+#if defined(__ANDROID__) || defined(_WIN32) || defined(NC_DESKTOP)
+    if ((polls++ & 255) == 0) {
+        char v[PROP_VALUE_MAX];
+        if (hle_prop_get("debug.hakux.nclip", v) > 0 && v[0]) {
+            g_nclip = atoi(v);
+        }
+    }
+#endif
     g_nc_n = 0;
-    if (off || g_pd.prim != 5 || g_pd.nidx < 3 || g_pd.nidx % 3 || hle_quirk(HLE_QUIRK_VB_ALIGN) ||
+    if (off || g_nclip == 3 || g_pd.prim != 5 || g_pd.nidx < 3 || g_pd.nidx % 3 || hle_quirk(HLE_QUIRK_VB_ALIGN) ||
         (R(NV097_SET_TRANSFORM_EXECUTION_MODE) & 3) == 2 || (R(0x0328) & 7)) {      /* programs and skinning: no */
         return 0;
     }
@@ -4228,12 +4250,29 @@ static unsigned near_clip(uint32_t lo, uint32_t hi)
     float m[16];
     regs_f(m, 0x0680, 16);
     const bool zclamp = ((R(0x1D78) >> 4) & 0xF) == 1;
-    const double eps = 1e-3;
+    const double eps = 1e-3, XL = -2048.0, XH = 2688.0, YL = -2048.0, YH = 2528.0;
+    ClipPlane pls[6];
+    unsigned npl = 0;
+    if (!(g_nclip & 1)) {
+        if (!zclamp) {
+            pls[npl++] = (ClipPlane){ { 1, 0, 0, 0 }, 0.0 };
+        }
+        pls[npl++] = (ClipPlane){ { 0, 1, 0, 0 }, eps };
+    }
+    if (!(g_nclip & 2)) {
+        pls[npl++] = (ClipPlane){ { 0, -XL, 1, 0 }, 0.0 };
+        pls[npl++] = (ClipPlane){ { 0, XH, -1, 0 }, 0.0 };
+        pls[npl++] = (ClipPlane){ { 0, -YL, 0, 1 }, 0.0 };
+        pls[npl++] = (ClipPlane){ { 0, YH, 0, -1 }, 0.0 };
+    }
+    if (!npl) {
+        return 0;
+    }
     const uint32_t nt = g_pd.nidx / 3;
-    uint32_t out = 0, clipped = 0;
+    uint32_t out = 0, clipped = 0, side = 0;
     for (uint32_t t = 0; t < nt; t++) {
         const uint32_t *ix = &g_pd.idx[3 * t];
-        double d[3], w[3];
+        double f[3][4];
         bool bad = false, in = true;
         for (unsigned c = 0; c < 3; c++) {
             const uint32_t v = ix[c] - lo;
@@ -4243,9 +4282,18 @@ static unsigned near_clip(uint32_t lo, uint32_t hi)
             }
             float p[3];
             memcpy(p, ps + (size_t)v * st, 12);
-            d[c] = (double)m[8] * p[0] + (double)m[9] * p[1] + (double)m[10] * p[2] + m[11];
-            w[c] = (double)m[12] * p[0] + (double)m[13] * p[1] + (double)m[14] * p[2] + m[15];
-            in &= w[c] > eps && (zclamp || d[c] >= 0);
+            for (unsigned k = 0; k < 4; k++) {
+                const unsigned r = k == 0 ? 2 : k == 1 ? 3 : k == 2 ? 0 : 1;      /* d, w, x, y rows */
+                f[c][k] = (double)m[4 * r] * p[0] + (double)m[4 * r + 1] * p[1] + (double)m[4 * r + 2] * p[2] +
+                          m[4 * r + 3];
+            }
+            for (unsigned q = 0; q < npl; q++) {
+                double e = -pls[q].th;
+                for (unsigned k = 0; k < 4; k++) {
+                    e += pls[q].c[k] * f[c][k];
+                }
+                in &= e >= 0;
+            }
         }
         if (bad || in) {
             if (out + 3 > MAX_INDICES) {
@@ -4255,26 +4303,25 @@ static unsigned near_clip(uint32_t lo, uint32_t hi)
             out += 3;
             continue;
         }
-        ClipPv poly[8];
+        ClipPv poly[16];
         unsigned n = 3;
         for (unsigned c = 0; c < 3; c++) {
             memset(&poly[c], 0, sizeof(poly[c]));
             poly[c].b[c] = 1.0f;
-            poly[c].d = d[c];
-            poly[c].w = w[c];
+            memcpy(poly[c].f, f[c], sizeof(poly[c].f));
             poly[c].corner = (int)c;
         }
-        if (!zclamp) {
-            n = clip_poly(poly, n, 0, 0.0);
-        }
-        if (n >= 3) {
-            n = clip_poly(poly, n, 1, eps);
+        for (unsigned q = 0; q < npl && n >= 3; q++) {
+            n = clip_poly(poly, n, &pls[q]);
         }
         clipped++;
         if (n < 3) {
             continue;
         }
-        uint32_t pi[8];
+        if (n > 3 || poly[0].corner < 0) {
+            side++;
+        }
+        uint32_t pi[16];
         for (unsigned c = 0; c < n; c++) {
             if (poly[c].corner >= 0) {
                 pi[c] = ix[poly[c].corner];
@@ -4303,10 +4350,11 @@ static unsigned near_clip(uint32_t lo, uint32_t hi)
         return 0;
     }
     static unsigned said;
-    if (said++ < 12) {
-        hle_log("hakuX-hle-pb", "near clip: draw %llu: %u of %u triangles clipped, %u new vertices, %u triangles out",
-                (unsigned long long)g_pd.draws, clipped, nt, g_nc_n, out / 3);
+    if (said++ < 40) {
+        hle_log("hakuX-hle-pb", "near clip: draw %llu mode %d: %u of %u triangles clipped, %u new vertices, %u "
+                "triangles out", (unsigned long long)g_pd.draws, g_nclip, clipped, nt, g_nc_n, out / 3);
     }
+    (void)side;
     memcpy(g_pd.idx, g_nc_idx, (size_t)out * 4);
     g_pd.nidx = out;
     return g_nc_n;

@@ -1,5 +1,11 @@
 # xbased changelog
 
+## 1.0.76.77 (Modern GUI fork, test build)
+
+- Test for Jedi Knight Academy: the decoder also clips fixed-function triangles to a guard band around the screen (a
+  triangle tens of thousands of pixels wide loses pieces in the host rasterizer at a high resolution scale). F1 cycles
+  the clipping: 0 both, 1 near planes only, 2 guard band only, 3 none, to A/B it.
+
 ## 1.0.76.76 (Modern GUI fork, test build)
 
 - Test for Jedi Knight Academy: fixed-function triangles that reach behind the eye or in front of the near plane are
