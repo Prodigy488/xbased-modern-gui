@@ -1,5 +1,11 @@
 # xbased changelog
 
+## 1.0.76.46 (Modern GUI fork)
+
+- The game's Frame rate setting (Mods screen) has more limits: Up to 30, 60, 90, 120, 144, 165 and 240 fps, besides
+  Original and Unlocked. For games that run far too fast and stutter when unlocked (Star Wars Republic Commando at
+  240 fps), pick a limit.
+
 ## 1.0.76.45 (Modern GUI fork)
 
 - Jedi Knight: Jedi Academy: the missing geometry is fixed. The game pushes Begin again in the middle of an index

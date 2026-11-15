@@ -892,30 +892,53 @@ void scr_mods(void)
     list_begin(&l, 74, 150, W - 148, H - 330, 58);
     const ModItem *shown = NULL;
     /* the frame rate, this game's choice: the console's pace (Original), or
-     * lifted ("uncap") up to 60 or 120 frames a second ("fpscap") or
+     * lifted ("uncap") up to 30 to 240 frames a second ("fpscap") or
      * without a limit */
     const char *help = NULL;
     {
-        static const enum UiStr k_names[4] = { S_FR_CAPPED, S_FR_60, S_FR_120, S_FR_UNCAPPED };
-        static const char *const k_caps[4] = { NULL, "60", "120", NULL };
+        /* 0: the console's pace; then the limits; the last: no limit */
+        static const int k_caps[] = { -1, 30, 60, 90, 120, 144, 165, 240, 0 };
+        enum { NCAP = sizeof(k_caps) / sizeof(k_caps[0]) };
         const char *cap = cfg_get(&D.game, "fpscap");
-        const int cur = !cfg_bool(&D.game, "uncap", false) ? 0
-                        : cap && atoi(cap) == 60 ? 1 : cap && atoi(cap) == 120 ? 2 : 3;
+        const int capv = cap ? atoi(cap) : 0;
+        int cur = 0;
+        if (cfg_bool(&D.game, "uncap", false)) {
+            cur = NCAP - 1;
+            for (int i = 1; i < NCAP - 1; i++) {
+                if (capv == k_caps[i]) {
+                    cur = i;
+                }
+            }
+        }
+        static char capname[40];
+        if (cur == 0) {
+            snprintf(capname, sizeof(capname), "%s", T(S_FR_CAPPED));
+        } else if (cur == NCAP - 1) {
+            snprintf(capname, sizeof(capname), "%s", T(S_FR_UNCAPPED));
+        } else if (k_caps[cur] == 60) {
+            snprintf(capname, sizeof(capname), "%s", T(S_FR_60));
+        } else if (k_caps[cur] == 120) {
+            snprintf(capname, sizeof(capname), "%s", T(S_FR_120));
+        } else {
+            snprintf(capname, sizeof(capname), "Up to %d fps", k_caps[cur]);
+        }
         int delta = 0;
-        if (list_row(&l, T(S_FRAMERATE), T(k_names[cur]), &delta)) {
+        if (list_row(&l, T(S_FRAMERATE), capname, &delta)) {
             delta = 1;
         } else if (D.in.repeat) {
             delta = 0;                      /* a step a press */
         }
         if (delta) {
-            const int to = (cur + (delta > 0 ? 1 : 3)) % 4;
+            const int to = (cur + (delta > 0 ? 1 : NCAP - 1)) % NCAP;
             if (to == 0) {
                 cfg_unset(&D.game, "uncap");
             } else {
                 cfg_set(&D.game, "uncap", "1");
             }
-            if (k_caps[to]) {
-                cfg_set(&D.game, "fpscap", k_caps[to]);
+            if (to > 0 && k_caps[to] > 0) {
+                char n[16];
+                snprintf(n, sizeof(n), "%d", k_caps[to]);
+                cfg_set(&D.game, "fpscap", n);
             } else {
                 cfg_unset(&D.game, "fpscap");
             }
