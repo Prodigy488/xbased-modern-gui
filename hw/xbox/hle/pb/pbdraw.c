@@ -3008,19 +3008,10 @@ static void kick(void)
 bool hle_pbd_novis(void)
 {
     static int off = -1;
-    static unsigned polls;
     if (off < 0) {
         const char *e = getenv("HAKUX_HLE_PB_NOVIS");
         off = e && !strcmp(e, "1");
     }
-#if defined(__ANDROID__) || defined(_WIN32) || defined(NC_DESKTOP)
-    if ((polls++ & 255) == 0) {                 /* live: debug.hakux.novis (F1) */
-        char v[PROP_VALUE_MAX];
-        if (hle_prop_get("debug.hakux.novis", v) > 0 && v[0]) {
-            off = atoi(v) != 0;
-        }
-    }
-#endif
     return off;
 }
 
@@ -3953,172 +3944,6 @@ static void vdiag_pos(const HleCmdDraw *d, unsigned b, const uint8_t *src, uint3
     }
 }
 
-/* Draw-log helper: where a draw's referenced positions land on the screen
- * through c0..c3 and the viewport constants (c58 scale, c59 offset), as a
- * bounding box with how many vertices sit behind the eye and the depth
- * range. Lined up with the draw log by draw number, it says which draws
- * cover a given spot of a capture (Jedi Knight Academy's holes). */
-static void pick_log(const HleCmdDraw *d, unsigned b, const uint8_t *src, uint32_t st, uint32_t lo, uint32_t hi)
-{
-    const uint32_t fmt = R(NV097_SET_VERTEX_DATA_ARRAY_FORMAT);
-    const unsigned size = (fmt >> 4) & 0xF;
-    if (g_dlog_left <= 0 || !size || (fmt & 0xF) != 2 || size < 3 || ((d->attr[0] >> 8) & 0xFF) != b || !st) {
-        return;
-    }
-    const uint32_t po = d->attr[0] >> 16, nv = hi - lo + 1;
-    float f[4][4];
-    float sc[4], of[4];
-    if (g_pd.ff) {      /* fixed function: the composite matrix (row vectors) */
-        float m[16];
-        regs_f(m, 0x0680, 16);
-        for (unsigned r = 0; r < 4; r++) {
-            for (unsigned c = 0; c < 4; c++) {
-                f[r][c] = m[r * 4 + c];     /* rows x, y, z, w: it holds the viewport, so x/w, y/w are pixels */
-            }
-        }
-    } else {
-        for (unsigned i = 0; i < 4; i++) {
-            for (unsigned c = 0; c < 4; c++) {
-                memcpy(&f[i][c], &g_pd.consts[i][c], 4);
-            }
-        }
-    }
-    regs_f(sc, NV097_SET_VIEWPORT_SCALE, 4);
-    regs_f(of, NV097_SET_VIEWPORT_OFFSET, 4);
-    float x0 = 1e30f, y0 = 1e30f, x1 = -1e30f, y1 = -1e30f, z0 = 1e30f, z1 = -1e30f;
-    unsigned used = 0, behind = 0;
-    for (uint32_t i = 0; i < g_pd.nidx; i++) {
-        const uint32_t v = g_pd.idx[i] - lo;
-        if (v >= nv) {
-            continue;
-        }
-        float p[4] = { 0, 0, 0, 1 };
-        memcpy(p, src + (size_t)v * st + po, 12);
-        float o[4];
-        for (unsigned r = 0; r < 4; r++) {
-            o[r] = p[0] * f[r][0] + p[1] * f[r][1] + p[2] * f[r][2] + p[3] * f[r][3];
-        }
-        if (!(o[3] > 1e-6f)) {
-            behind++;
-            continue;
-        }
-        const float x = o[0] / o[3], y = o[1] / o[3], z = o[2] / o[3];      /* pixels, depth */
-        x0 = MIN(x0, x); x1 = MAX(x1, x);
-        y0 = MIN(y0, y); y1 = MAX(y1, y);
-        z0 = MIN(z0, z); z1 = MAX(z1, z);
-        used++;
-    }
-    {
-        static unsigned raw;
-        if (raw++ < 12 && g_pd.nidx) {
-            float p0[3] = { 0, 0, 0 }, mc[16], mv[16], pj[16];
-            const uint32_t v0 = g_pd.idx[0] - lo;
-            if (v0 < nv) {
-                memcpy(p0, src + (size_t)v0 * st + po, 12);
-            }
-            regs_f(mc, 0x0680, 16);
-            regs_f(mv, 0x0480, 16);
-            regs_f(pj, 0x0640, 16);
-            hle_log("hakuX-hle-pb", "pick: raw draw %llu ff %d p0 %g %g %g stride %u po %u size %u composite "
-                    "%g %g %g %g | %g %g %g %g | %g %g %g %g | %g %g %g %g modelview %g %g %g %g | %g %g %g %g | "
-                    "%g %g %g %g | %g %g %g %g r640 %g %g %g %g | %g %g %g %g",
-                    (unsigned long long)g_pd.draws, (int)g_pd.ff, p0[0], p0[1], p0[2], st, po, size,
-                    mc[0], mc[1], mc[2], mc[3], mc[4], mc[5], mc[6], mc[7], mc[8], mc[9], mc[10], mc[11], mc[12],
-                    mc[13], mc[14], mc[15], mv[0], mv[1], mv[2], mv[3], mv[4], mv[5], mv[6], mv[7], mv[8], mv[9],
-                    mv[10], mv[11], mv[12], mv[13], mv[14], mv[15], pj[0], pj[1], pj[2], pj[3], pj[4], pj[5], pj[6],
-                    pj[7]);
-        }
-    }
-    static unsigned vps;
-    if (vps++ < 3) {
-        hle_log("hakuX-hle-pb", "pick: viewport scale %g %g %g %g offset %g %g %g %g (ndc below)", sc[0], sc[1], sc[2],
-                sc[3], of[0], of[1], of[2], of[3]);
-    }
-    if (g_pd.prim == 5 && behind) {
-        /* triangles with a vertex behind the eye, clipped to w > 0 the way the rasterizer does, that reach the
-         * lower left of the screen (60,240 to 500,380): the ground holes' place */
-        unsigned hit = 0, tris = g_pd.nidx / 3;
-        float hx0 = 1e30f, hy0 = 1e30f, hx1 = -1e30f, hy1 = -1e30f;
-        for (unsigned t = 0; t < tris; t++) {
-            float q[4][4];
-            unsigned nq = 0;
-            float pv[3][4];
-            bool ok = true, any_behind = false;
-            for (unsigned c = 0; c < 3 && ok; c++) {
-                const uint32_t v = g_pd.idx[t * 3 + c] - lo;
-                if (v >= nv) {
-                    ok = false;
-                    break;
-                }
-                float p4[4] = { 0, 0, 0, 1 };
-                memcpy(p4, src + (size_t)v * st + po, 12);
-                for (unsigned r = 0; r < 4; r++) {
-                    pv[c][r] = p4[0] * f[r][0] + p4[1] * f[r][1] + p4[2] * f[r][2] + p4[3] * f[r][3];
-                }
-                any_behind |= !(pv[c][3] > 1e-3f);
-            }
-            if (!ok || !any_behind) {
-                continue;
-            }
-            for (unsigned c = 0; c < 3; c++) {
-                const float *a = pv[c], *b = pv[(c + 1) % 3];
-                const bool ia = a[3] > 1e-3f, ib = b[3] > 1e-3f;
-                if (ia && nq < 4) {
-                    memcpy(q[nq++], a, 16);
-                }
-                if (ia != ib && nq < 4) {
-                    const float k = (1e-3f - a[3]) / (b[3] - a[3]);
-                    for (unsigned r = 0; r < 4; r++) {
-                        q[nq][r] = a[r] + k * (b[r] - a[r]);
-                    }
-                    nq++;
-                }
-            }
-            if (nq < 3) {
-                continue;
-            }
-            float tx0 = 1e30f, ty0 = 1e30f, tx1 = -1e30f, ty1 = -1e30f;
-            for (unsigned c = 0; c < nq; c++) {
-                const float px = q[c][0] / q[c][3], py = q[c][1] / q[c][3];
-                tx0 = MIN(tx0, px); tx1 = MAX(tx1, px);
-                ty0 = MIN(ty0, py); ty1 = MAX(ty1, py);
-            }
-            if (tx1 >= 60 && tx0 <= 500 && ty1 >= 240 && ty0 <= 380) {
-                hit++;
-                hx0 = MIN(hx0, tx0); hx1 = MAX(hx1, tx1);
-                hy0 = MIN(hy0, ty0); hy1 = MAX(hy1, ty1);
-            }
-        }
-        if (hit) {
-            hle_log("hakuX-hle-pb", "pick: draw %llu clipped triangles in the lower left: %u of %u, reaching %.0f,%.0f to "
-                    "%.0f,%.0f", (unsigned long long)g_pd.draws, hit, tris, hx0, hy0, hx1, hy1);
-        }
-    }
-    if ((x1 - x0 > 3000.0f || y1 - y0 > 3000.0f || behind) && g_pd.nidx <= 96) {
-        /* a draw that reaches past the screen or behind the eye: each index with its position, its clip
-         * coordinates and the pixel it lands on (Jedi Knight Academy's ground holes) */
-        static unsigned said;
-        if (said++ < 12) {
-            for (uint32_t i = 0; i < g_pd.nidx; i++) {
-                const uint32_t v = g_pd.idx[i] - lo;
-                if (v >= nv) {
-                    continue;
-                }
-                float p[4] = { 0, 0, 0, 1 }, o[4];
-                memcpy(p, src + (size_t)v * st + po, 12);
-                for (unsigned r = 0; r < 4; r++) {
-                    o[r] = p[0] * f[r][0] + p[1] * f[r][1] + p[2] * f[r][2] + p[3] * f[r][3];
-                }
-                hle_log("hakuX-hle-pb", "pick: draw %llu idx %u v %u pos %g %g %g clip %g %g %g w %g px %g %g",
-                        (unsigned long long)g_pd.draws, i, g_pd.idx[i], p[0], p[1], p[2], o[0], o[1], o[2], o[3],
-                        o[3] != 0.0f ? o[0] / o[3] : 0.0f, o[3] != 0.0f ? o[1] / o[3] : 0.0f);
-            }
-        }
-    }
-    hle_log("hakuX-hle-pb", "pick: draw %llu %s bbox %.0f,%.0f to %.0f,%.0f z %g to %g verts %u behind %u of %u prim %u",
-            (unsigned long long)g_pd.draws, g_pd.ff ? "ff" : "prog", x0, y0, x1, y1, z0, z1, used, behind, g_pd.nidx, g_pd.prim);
-}
-
 static void vdiag_consts(void)
 {
     static uint32_t last = UINT32_MAX;
@@ -4498,7 +4323,6 @@ static void draw_arrays(void)
         if (src) {
             vdiag_pos(&d, b, src, st, lo, hi_o, from, len);
             vdiag_zero(&d, b, src, st, lo, hi_o, from, len);
-            pick_log(&d, b, src, st, lo, hi_o);
         }
         if (src && hle_quirk(HLE_QUIRK_VB_ALIGN) && vb_misaligned(&d, b, base[b])) {
             if (!vb_realign(&d, b, src, from, len, st ? hi - lo + 1 : 1)) {

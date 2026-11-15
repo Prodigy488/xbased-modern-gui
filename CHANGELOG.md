@@ -1,169 +1,21 @@
 # xbased changelog
 
-## 1.0.76.83 (Modern GUI fork, test build)
+## 1.0.76.45 (Modern GUI fork)
 
-- A repeated Begin continues the draw only if no register changed since the first Begin (Thrillville's coaster track
-  changes its vertex arrays between Begins: continuing mixed their indices into long streaks). The first 30 repeated
-  Begins are logged (continues / restarts).
-
-## 1.0.76.82 (Modern GUI fork, test build)
-
-- The repeated-Begin continuation is limited to list primitives (points, lines, triangles, quads). Strips and fans
-  restart as before: continuing them joined Thrillville's separate coaster-track strips with long streaks.
-
-## 1.0.76.81 (Modern GUI fork, test build)
-
-- A SET_BEGIN_END with the same primitive while a draw is open no longer restarts the draw (it threw away the indices
-  gathered so far; another primitive closes the draw first). Jedi Knight: Jedi Academy pushes Begin again in the
-  middle of its element index lists (xemu issue 2221, the same game's missing geometry).
-- The Jedi test bundle is now opt-in (HAKUX_JEDI_TEST=1).
-
-## 1.0.76.80 (Modern GUI fork, test build)
-
-- Jedi test bundle adds HAKUX_HLE_PB_LOCKSTEP: the guest waits for the decoder at every PUT write, so a vertex buffer
-  the guest refills has already been copied (the 1.0.76.79 log showed vertex ranges rewritten 2 ms apart with the
-  decoder hundreds of KB behind).
-
-## 1.0.76.79 (Modern GUI fork, test build)
-
-- Jedi Knight Academy test bundle (only for that title; HAKUX_JEDI_TEST=0 turns it off): visibility tests always
-  pass, no report gate, submits at swaps only, no index batching, and the vertex race logged (vbrace).
-- F1 now toggles the visibility tests live (counted / always pass). The triangle clip's guard band is off by default
-  (near plane only).
-
-## 1.0.76.78 (Modern GUI fork, test build)
-
-- The decoder's triangle clip no longer clips against the depth plane (a flat screen quad at depth 0 could be
-  dropped) and leaves four-component (pre-transformed) positions alone.
-
-## 1.0.76.77 (Modern GUI fork, test build)
-
-- Test for Jedi Knight Academy: the decoder also clips fixed-function triangles to a guard band around the screen (a
-  triangle tens of thousands of pixels wide loses pieces in the host rasterizer at a high resolution scale). F1 cycles
-  the clipping: 0 both, 1 near planes only, 2 guard band only, 3 none, to A/B it.
-
-## 1.0.76.76 (Modern GUI fork, test build)
-
-- Test for Jedi Knight Academy: fixed-function triangles that reach behind the eye or in front of the near plane are
-  clipped by the decoder, as the NV2A does, before the GPU draws them (HAKUX_HLE_NOCLIP=1 turns it off). The ground
-  holes sit where such triangles are.
-
-## 1.0.76.75 (Modern GUI fork, test build)
-
-- Diagnostics only: a capture also logs, per draw, the triangles that cross behind the eye and still reach the lower
-  left of the screen once clipped.
-
-## 1.0.76.74 (Modern GUI fork, test build)
-
-- Diagnostics only: a capture (F9) also logs each index, position and clip coordinate of the first draws that reach
-  behind the eye or far off screen.
-
-## 1.0.76.73 (Modern GUI fork, test build)
-
-- Test for Jedi Knight Academy: F12 has a sixth step that clamps depth instead of clipping at the near and far
-  planes for every draw. The ground draw in a capture has vertices behind the camera plane, and the holes sit where
-  it should be.
-
-## 1.0.76.72 (Modern GUI fork, test build)
-
-- Diagnostics only, for Jedi Knight Academy: a graphics capture (F9) now also logs `pick:` lines, one per draw, with
-  the draw's screen-space bounding box, depth range and how many vertices are behind the eye, so the draws covering
-  the holes can be found.
-
-## 1.0.76.67 (Modern GUI fork, test build)
-
-- Test for Jedi Knight Academy: F12 cycles render-state overrides to see which one hides geometry: 1 culling off,
-  2 alpha test off, 3 depth test off, 4 stencil test off, 5 all four.
-
-## 1.0.76.66 (Modern GUI fork, test build)
-
-- Diagnostics only, for Jedi Knight Academy: a draw whose referenced vertex positions are a quarter or more exactly
-  0, 0, 0 (memory not filled yet) is logged as `vdiag: ... ZERO positions`.
-
-## 1.0.76.65 (Modern GUI fork, test build)
-
-- Test for Jedi Knight Academy: F4 reports every occlusion (z-pass) test as fully visible, and F4 again as counted,
-  to see whether the title culls geometry by our counts. (.64 put it on F8, which loads the state.)
-
-## 1.0.76.63 (Modern GUI fork, test build)
-
-- Diagnostics only, for Jedi Knight Academy: each upload of the CPU's writes into a render target's image is
-  logged (the first 60, then every 40th), with the draw it came before.
-
-## 1.0.76.62 (Modern GUI fork, test build)
-
-- Same as .60 (diagnostics for Jedi Knight Academy), plus the kernel logs each free-memory query. The 2 MiB
-  free-memory test of .61 is removed; it changed nothing.
-
-## 1.0.76.60 (Modern GUI fork, test build)
-
-- Diagnostics only, for Jedi Knight Academy: a failed contiguous allocation names who asked for it, and a
-  skipped indexed draw says why.
-
-## 1.0.76.59 (Modern GUI fork, test build)
-
-- Thrillville's remaining stretched polygons: a blit between two addresses that both had a render target was
-  copied between their images only, so data the game copied that way (into memory it had reused) never reached
-  memory. Such a blit is now a copy in memory when its rectangle runs past a target or the source's memory is
-  current. Not confirmed on a PC yet.
-
-## 1.0.76.58 (Modern GUI fork, test build)
-
-- Diagnostics only: the `vdiag:` lines say whether one of the emulator's own writes into the game's memory (an
-  image landing, a writeback, an image copy) covered the bad vertices, or none did.
-
-## 1.0.76.57 (Modern GUI fork, test build)
-
-- Thrillville's remaining stretched polygons: a few vertices hold a stray pixel (NaN) in a position float the game
-  leaves unset. Positions that are NaN, infinite or beyond 1e18 are mended when the vertices are copied for a draw
-  (z as 0, x and y as the previous vertex's), so a wedge to infinity becomes a degenerate triangle. Not confirmed
-  on a PC yet.
-
-## 1.0.76.56 (Modern GUI fork, test build)
-
-- Thrillville's black pillars, tracks and missing objects: a new render target made over part of an old small
-  one's memory no longer lands the old black image over the part that sticks out (where the game had put its
-  vertex data). Not confirmed on a PC yet.
-
-## 1.0.76.55 (Modern GUI fork, test build)
-
-- Diagnostics only: the log names what made each small render target's image land in memory (`landing target ...`),
-  and the `vdiag:` lines say which landing it was, to find what still blanks Thrillville's vertex data.
-
-## 1.0.76.54 (Modern GUI fork, test build)
-
-- Thrillville's missing objects and black pillars: a new render target made over an old small one's memory made
-  the old black image land first, over vertices the game had written beside it. The check that keeps memory the
-  game changed (1.0.76.51) was skipped when an earlier "unchanged" verdict was still cached for that moment; the
-  bytes are now compared each time. Not confirmed on a PC yet.
-
-## 1.0.76.53 (Modern GUI fork, test build)
-
-- Thrillville's missing objects: memory a small render target's old image covered (a dead 160 x 120 target the
-  game reused for vertex data) is now left to the game once a draw reads vertices from it, instead of the black
-  image landing over them later. (1.0.76.52 landed the image first, which brought the stretched polygons back.)
-  Not confirmed on a PC yet.
-
-## 1.0.76.51 (Modern GUI fork, test build)
-
-- Thrillville's stretched black polygons and black textures: a small render target's old image (a cleared black
-  160 x 120 one) could be written back over memory the game had since reused for vertex data, because the page
-  counts that say "the game wrote here" missed some stores. Small targets' bytes are now compared as well, so
-  memory the game changed is kept. Diagnostic lines (`vdiag:`) in the log report vertex data that is NaN, huge
-  or black when a draw reads it. Not confirmed on a PC yet.
-
-## 1.0.76.46 (Modern GUI fork, test build)
-
+- Jedi Knight: Jedi Academy: the missing geometry is fixed. The game pushes Begin again in the middle of an index
+  list; the decoder threw away the indices gathered so far. A repeated Begin of the same list primitive (points,
+  lines, triangles, quads) now continues the draw when no register changed in between (xemu issue 2221). A draw
+  whose vertex arrays change between Begins (Thrillville's coaster track) still restarts, as before.
+- Jedi Knight: Jedi Academy's holes in the outdoor ground: fixed-function triangles that reach behind the eye or
+  in front of the near plane are clipped by the decoder, as the NV2A does, before the GPU draws them
+  (HAKUX_HLE_NOCLIP=1 turns it off). Four-component (pre-transformed) positions are left alone.
 - Thrillville, Jedi Knight Academy and the "vertex explosions" they share with xemu (its issue #747): the vertex
-  shaders' dot products (DP3, DP4, DPH) and DST now give zero for a zero factor against an infinite or NaN value,
-  as MUL and MAD already did and as the console does. A bone-matrix row nobody set no longer turns a vertex into a
-  NaN that stretches across the screen. Not confirmed on a PC yet.
-
-## 1.0.76.45 (Modern GUI fork, test build)
-
+  shaders' DP3, DP4, DPH and DST give zero for a zero factor against an infinite or NaN value, as the console does.
+- Thrillville's black pillars, tracks, missing objects and stretched black polygons: memory the game reused for
+  vertex data is no longer overwritten by an old small render target's black image.
+- A graphics capture (F9) also logs `vdiag:` lines for vertex data that is NaN, huge or black, and landing targets.
 - Movie cleanup is a setting now (Settings > Video, "Movie cleanup"): Off, Low, Medium or High. Medium is what
-  1.0.76.44 did and is the default; Low keeps more of the movie's own grain and blends less with the frame before;
-  High smooths and steepens edges more. Also `vidfx=0` to `vidfx=3` in xbased.ini or on the command line, global or
+  1.0.76.44 did and is the default. Also `vidfx=0` to `vidfx=3` in xbased.ini or on the command line, global or
   per game.
 - Updates are checked against the SHA-256 that GitHub lists for the package: a download that does not match is
   thrown away and not installed. A release without a listed digest is let through, and the log says so.

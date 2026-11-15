@@ -1,8 +1,16 @@
-# xbased Modern GUI 1.0.76.44: From Russia with Love graphics fix, fast start-up, upscaling speed setting, game compatibility fixes, Autofix for stalled games, Linux AppImage
+# xbased Modern GUI 1.0.76.45: Jedi Knight Academy and Thrillville graphics fixes, movie cleanup setting, verified updates
 
 ```
 Changes since 1.0.76.2
 ----------------------
+New in 1.0.76.45
+- Jedi Knight: Jedi Academy: missing geometry and holes in the outdoor ground are fixed (a repeated Begin no longer
+  drops the indices gathered so far; triangles crossing the near plane are clipped as the console does).
+- Thrillville: black pillars, tracks, missing objects and streaks are fixed. Vertex shaders no longer turn a zero
+  times infinity into NaN, which stretched vertices across the screen in Thrillville and Jedi Academy.
+- Movie cleanup is a setting (Settings > Video): Off, Low, Medium (default, as in 1.0.76.44) or High.
+- Updates are checked against the SHA-256 GitHub lists for the package.
+
 New in 1.0.76.44
 - Movies (FMV) look much cleaner in every game: blocky compression noise is smoothed along edges, flicker is
   calmed, and edges are made a little crisper before the picture is scaled up. Works with FSR, NIS and sharpen.
